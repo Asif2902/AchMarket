@@ -11,7 +11,7 @@ export const NETWORK = {
   blockExplorer: '',
 } as const;
 
-export const FACTORY_ADDRESS = '0x97813464388f4cF0b9b78b6B1dbaA7fc59dbd15c';
+export const FACTORY_ADDRESS = '0x7B7D71141B5b9b2F42E6D7Bf1657ad9c2B140272';
 
 export const STAGE = {
   Active: 0,
