@@ -29,62 +29,76 @@ export default function MarketCard({ data }: Props) {
   const isResolved = data.stage === STAGE.Resolved;
 
   return (
-    <Link to={`/market/${makeMarketSlug(data.marketId, data.title)}`} className="block">
-      <div className="card-hover overflow-hidden group">
-        {/* Image */}
-        <div className="relative">
+    <Link to={`/market/${makeMarketSlug(data.marketId, data.title)}`} className="block group">
+      <div className="card-hover overflow-hidden h-full flex flex-col">
+        {/* Image with gradient overlay */}
+        <div className="relative overflow-hidden">
           <ImageWithFallback
             src={data.imageUri}
             alt={data.title}
-            className="h-40 w-full"
+            className="h-36 sm:h-40 w-full"
           />
-          <div className="absolute top-3 left-3">
-            <span className={`badge ${STAGE_COLORS[data.stage]}`}>
+          {/* Gradient overlay for readability */}
+          <div className="absolute inset-0 bg-gradient-to-t from-dark-900/60 via-transparent to-transparent" />
+
+          {/* Badges */}
+          <div className="absolute top-2.5 left-2.5">
+            <span className={`badge ${STAGE_COLORS[data.stage]} backdrop-blur-sm text-2xs`}>
               {STAGE_LABELS[data.stage]}
             </span>
           </div>
-          <div className="absolute top-3 right-3">
-            <span className="badge bg-dark-900/80 text-dark-200 border-dark-700/50 backdrop-blur-sm">
+          <div className="absolute top-2.5 right-2.5">
+            <span className="badge bg-dark-900/70 text-dark-200 border-white/[0.1] backdrop-blur-sm text-2xs">
               {data.category}
             </span>
+          </div>
+
+          {/* Volume overlay at bottom of image */}
+          <div className="absolute bottom-2.5 left-2.5 right-2.5 flex items-center justify-between">
+            <span className="text-2xs font-medium text-white/80 backdrop-blur-sm bg-dark-900/50 px-2 py-0.5 rounded-md flex items-center gap-1">
+              <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+              {formatUSDC(data.totalVolumeWei)} USDC
+            </span>
+            {isActive && (
+              <Countdown deadline={data.marketDeadline} compact className="text-2xs font-medium text-white/80 backdrop-blur-sm bg-dark-900/50 px-2 py-0.5 rounded-md" />
+            )}
           </div>
         </div>
 
         {/* Content */}
-        <div className="p-4 space-y-3">
-          <h3 className="font-semibold text-white text-sm leading-tight line-clamp-2 group-hover:text-primary-400 transition-colors">
+        <div className="p-4 flex-1 flex flex-col gap-3">
+          {/* Title */}
+          <h3 className="font-semibold text-white text-sm leading-snug line-clamp-2 group-hover:text-primary-400 transition-colors duration-200">
             {data.title}
           </h3>
 
-          {/* Probability bars */}
-          <ProbabilityBar
-            labels={data.outcomeLabels}
-            probabilities={data.impliedProbabilitiesWad}
-            winningOutcome={data.winningOutcome}
-            isResolved={isResolved}
-            compact
-          />
+          {/* Probability display — compact inline version for cards */}
+          <div className="flex-1">
+            <ProbabilityBar
+              labels={data.outcomeLabels}
+              probabilities={data.impliedProbabilitiesWad}
+              winningOutcome={data.winningOutcome}
+              isResolved={isResolved}
+              compact
+            />
+          </div>
 
-          {/* Footer stats */}
-          <div className="flex items-center justify-between pt-2 border-t border-dark-700/30">
-            <div className="flex items-center gap-3 text-xs text-dark-400">
-              <span className="flex items-center gap-1">
-                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
-                {formatUSDC(data.totalVolumeWei)} USDC
-              </span>
-              <span className="flex items-center gap-1">
-                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
-                </svg>
-                {data.participants}
-              </span>
+          {/* Footer */}
+          <div className="flex items-center justify-between pt-2 border-t border-white/[0.04]">
+            <div className="flex items-center gap-1.5 text-2xs text-dark-500">
+              <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" />
+              </svg>
+              <span>{data.participants} traders</span>
             </div>
-
-            {isActive && (
-              <Countdown deadline={data.marketDeadline} compact className="text-xs text-dark-300" />
-            )}
+            <span className="text-2xs text-dark-500 font-medium group-hover:text-primary-400 transition-colors flex items-center gap-0.5">
+              Trade
+              <svg className="w-3 h-3 group-hover:translate-x-0.5 transition-transform" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+              </svg>
+            </span>
           </div>
         </div>
       </div>

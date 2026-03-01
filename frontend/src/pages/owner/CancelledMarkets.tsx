@@ -11,26 +11,40 @@ export default function CancelledMarkets() {
   if (loading) return <PageLoader />;
 
   return (
-    <div className="p-6 lg:p-8 max-w-5xl mx-auto space-y-6">
+    <div className="p-4 sm:p-6 lg:p-8 max-w-5xl mx-auto space-y-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold text-white">Cancelled / Expired Markets</h1>
-        <span className="text-sm text-dark-400">{cancelled.length} market{cancelled.length !== 1 ? 's' : ''}</span>
+        <h1 className="text-xl sm:text-2xl font-bold text-white flex items-center gap-3">
+          <div className="w-10 h-10 rounded-xl bg-dark-700/80 border border-white/[0.08] flex items-center justify-center">
+            <svg className="w-5 h-5 text-dark-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" />
+            </svg>
+          </div>
+          Cancelled / Expired
+        </h1>
+        <span className="badge bg-dark-750/80 text-dark-300 border-white/[0.06]">{cancelled.length}</span>
       </div>
 
       {cancelled.length === 0 ? (
-        <EmptyState title="No cancelled or expired markets" description="No markets have been cancelled or expired." />
+        <EmptyState
+          title="No cancelled or expired markets"
+          description="No markets have been cancelled or expired."
+        />
       ) : (
         <div className="space-y-4">
-          {cancelled.map(m => (
-            <OwnerMarketCard
-              key={m.market}
-              market={m}
-              actions={
-                <span className="text-xs text-dark-400">
-                  Refundable volume: {formatUSDC(m.totalVolumeWei)} USDC
-                </span>
-              }
-            />
+          {cancelled.map((m, i) => (
+            <div key={m.market} className="animate-fade-in" style={{ animationDelay: `${i * 60}ms` }}>
+              <OwnerMarketCard
+                market={m}
+                actions={
+                  <div className="flex items-center gap-3 text-xs">
+                    <span className="flex items-center gap-1.5 text-dark-400">
+                      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6" /></svg>
+                      Refundable: <span className="text-white font-medium tabular-nums">{formatUSDC(m.totalVolumeWei)} USDC</span>
+                    </span>
+                  </div>
+                }
+              />
+            </div>
           ))}
         </div>
       )}
