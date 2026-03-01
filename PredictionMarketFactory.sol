@@ -288,6 +288,9 @@ contract PredictionMarketFactory is Ownable {
         // Analytics
         uint256   totalVolumeWei;
         uint256   participants;
+        // Resolution / Fee
+        uint256   resolvedPoolWei;      // pool after fee, set at resolution (0 if not resolved)
+        uint256   resolutionDeadline;    // marketDeadline + RESOLUTION_GRACE_PERIOD
     }
 
     /// @notice Full detail for a single market — use for the market detail page.
@@ -330,7 +333,9 @@ contract PredictionMarketFactory is Ownable {
             marketDeadline:           _deadline,
             bWad:                     pm.b(),
             totalVolumeWei:           _vol,
-            participants:             _part
+            participants:             _part,
+            resolvedPoolWei:          pm.resolvedPoolWei(),
+            resolutionDeadline:       pm.resolutionDeadline()
         });
     }
 

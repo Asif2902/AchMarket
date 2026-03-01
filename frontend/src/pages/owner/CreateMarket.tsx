@@ -5,7 +5,7 @@ import { FACTORY_ADDRESS } from '../../config/network';
 import { FACTORY_ABI } from '../../config/abis';
 import ImageWithFallback from '../../components/ImageWithFallback';
 import ProbabilityBar from '../../components/ProbabilityBar';
-import { parseContractError } from '../../utils/format';
+import { parseContractError, makeMarketSlug } from '../../utils/format';
 
 const CATEGORIES = ['Crypto', 'Sports', 'Politics', 'Entertainment', 'Science', 'Other'];
 const DURATION_PRESETS = [
@@ -344,7 +344,7 @@ export default function CreateMarket() {
               <p>{txResult.text}</p>
               {txResult.marketId && (
                 <a
-                  href={`/market/${txResult.marketId}`}
+                  href={`/market/${makeMarketSlug(Number(txResult.marketId), title)}`}
                   className="mt-2 inline-block text-primary-400 hover:text-primary-300 underline"
                 >
                   View Market

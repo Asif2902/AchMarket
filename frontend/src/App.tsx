@@ -28,7 +28,7 @@ function AppRoutes() {
           <Route path="fees" element={<FeeManagement />} />
         </Route>
         {/* Owner can also view market details */}
-        <Route path="/market/:id" element={<MarketDetail />} />
+        <Route path="/market/:slug" element={<MarketDetail />} />
         {/* Redirect root to owner panel */}
         <Route path="/" element={<Navigate to="/owner" replace />} />
         <Route path="*" element={<Navigate to="/owner" replace />} />
@@ -40,7 +40,7 @@ function AppRoutes() {
   return (
     <Routes>
       <Route path="/" element={<Home />} />
-      <Route path="/market/:address" element={<MarketDetail />} />
+      <Route path="/market/:slug" element={<MarketDetail />} />
       <Route path="/portfolio" element={<Portfolio />} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

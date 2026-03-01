@@ -7,10 +7,11 @@ import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol
 /// @title  PredictionMarket
 /// @notice Self-contained prediction market with:
 ///           • N outcomes (binary YES/NO or multi-outcome)
-///           • LMSR dynamic pricing (buy AND sell)
+///           • LMSR dynamic pricing (buy AND sell, any amount)
+///           • Hardcoded 0.25% platform fee on resolved markets (immutable)
 ///           • Admin resolution with mandatory proof attachment
-///           • Admin can resolve at any time before duration ends
-///           • Auto-expiry after duration → full refunds
+///           • 3-day grace period after deadline for admin to resolve/cancel
+///           • Auto-expiry after grace period → full refunds
 ///           • Admin cancellation → full refunds
 ///
 ///         Deployed by PredictionMarketFactory with ALL market data
@@ -27,8 +28,23 @@ contract PredictionMarket is ReentrancyGuard {
         Active,     // trading open
         Resolved,   // winning outcome set, winners can redeem
         Cancelled,  // admin cancelled, everyone refunded
-        Expired     // duration passed without resolution, everyone refunded
+        Expired     // grace period passed without resolution, everyone refunded
     }
+
+    /*//////////////////////////////////////////////////////////////
+                               CONSTANTS
+    //////////////////////////////////////////////////////////////*/
+
+    /// @notice Platform fee in basis points. 25 = 0.25%.
+    ///         Applied only when market is resolved — deducted from the
+    ///         pool before winners redeem. Cannot be changed.
+    uint256 public constant PLATFORM_FEE_BPS = 25;
+
+    /// @notice After the market deadline, the admin has this much time
+    ///         to resolve or cancel before the market auto-expires.
+    ///         During the grace period trading is closed but refunds
+    ///         are not yet available.
+    uint256 public constant RESOLUTION_GRACE_PERIOD = 3 days;
 
     /*//////////////////////////////////////////////////////////////
                                EVENTS
@@ -50,6 +66,7 @@ contract PredictionMarket is ReentrancyGuard {
     event MarketCancelled(string reason);
     event Redeemed(address indexed user, uint256 amountWei);
     event Refunded(address indexed user, uint256 amountWei);
+    event FeeCollected(address indexed recipient, uint256 amountWei);
 
     /*//////////////////////////////////////////////////////////////
                               STORAGE
@@ -82,8 +99,13 @@ contract PredictionMarket is ReentrancyGuard {
     // ── Lifecycle ─────────────────────────────────────────────────
     Stage   public stage;
     uint256 public winningOutcome;        // valid only when stage == Resolved
-    uint256 public marketDeadline;        // unix timestamp; market auto-expires after this
+    uint256 public marketDeadline;        // unix timestamp; trading closes here
     string  public proofUri;             // admin-attached resolution proof
+
+    // ── Fee / Redemption ─────────────────────────────────────────
+    /// @notice Pool balance snapshotted at resolution time (after fee).
+    ///         Used for fair pro-rata redemptions regardless of order.
+    uint256 public resolvedPoolWei;
 
     // ── Analytics ─────────────────────────────────────────────────
     uint256 public totalVolumeWei;        // cumulative buy volume
@@ -124,8 +146,9 @@ contract PredictionMarket is ReentrancyGuard {
     ///                        Pass ["Team A","Team B","Draw"] for 3 outcomes, etc.
     /// @param _bWad           LMSR liquidity parameter in WAD (e.g. 100e18).
     ///                        Rule of thumb: expected total volume / 10.
-    /// @param _durationSeconds  How long (in seconds) the market is open.
-    ///                          Admin can resolve before this; after it → auto-refund.
+    /// @param _durationSeconds  How long (in seconds) the market is open for trading.
+    ///                          After this, admin has RESOLUTION_GRACE_PERIOD (3 days)
+    ///                          to resolve or cancel before auto-expiry.
     constructor(
         address          _admin,
         string  memory   _title,
@@ -163,7 +186,8 @@ contract PredictionMarket is ReentrancyGuard {
                             BUYING SHARES
     //////////////////////////////////////////////////////////////*/
 
-    /// @notice Buy shares of any outcome.
+    /// @notice Buy shares of any outcome. Any amount is accepted —
+    ///         for very small amounts the cost may round to zero.
     ///
     /// @param  outcomeIdx  Index of the outcome to back (0-based).
     /// @param  sharesWad   Number of shares to purchase in WAD (1e18 = 1 share).
@@ -178,12 +202,13 @@ contract PredictionMarket is ReentrancyGuard {
         nonReentrant
         onlyActive
     {
+        require(block.timestamp <= marketDeadline, "PM: trading period ended");
         require(outcomeIdx < outcomeCount, "PM: invalid outcome");
         require(sharesWad  > 0,           "PM: zero shares");
 
         int256[] memory q = _getSharesArray();
         int256 rawCost = LMSRMath.tradeCost(q, outcomeIdx, int256(sharesWad), b);
-        require(rawCost > 0, "PM: unexpected non-positive buy cost");
+        require(rawCost >= 0, "PM: unexpected negative buy cost");
 
         uint256 costWei = uint256(rawCost);
         require(costWei <= maxCostWei,  "PM: slippage exceeded");
@@ -211,7 +236,8 @@ contract PredictionMarket is ReentrancyGuard {
     //////////////////////////////////////////////////////////////*/
 
     /// @notice Sell previously purchased shares back to the market.
-    ///         The LMSR guarantees a fair price; you always receive ETH back.
+    ///         Any amount is accepted — for very small amounts the
+    ///         proceeds may round to zero.
     ///
     /// @param  outcomeIdx     Index of the outcome to sell.
     /// @param  sharesWad      Number of shares to sell in WAD.
@@ -225,6 +251,7 @@ contract PredictionMarket is ReentrancyGuard {
         nonReentrant
         onlyActive
     {
+        require(block.timestamp <= marketDeadline, "PM: trading period ended");
         require(outcomeIdx < outcomeCount, "PM: invalid outcome");
         require(sharesWad  > 0,           "PM: zero shares");
         require(
@@ -235,25 +262,28 @@ contract PredictionMarket is ReentrancyGuard {
         // Selling = negative delta in LMSR → negative cost → user receives ETH
         int256[] memory q        = _getSharesArray();
         int256   rawCost         = LMSRMath.tradeCost(q, outcomeIdx, -int256(sharesWad), b);
-        require(rawCost < 0, "PM: unexpected non-negative sell cost");
+        require(rawCost <= 0, "PM: unexpected positive sell cost");
 
-        uint256 proceedsWei = uint256(-rawCost);
+        uint256 proceedsWei = rawCost < 0 ? uint256(-rawCost) : 0;
         require(proceedsWei >= minReceiveWei, "PM: slippage exceeded");
-        require(address(this).balance >= proceedsWei, "PM: insufficient liquidity");
 
         // Update state
         totalSharesWad[outcomeIdx]          -= int256(sharesWad);
         sharesOf[msg.sender][outcomeIdx]    -= sharesWad;
 
-        // Adjust net deposited (cap at zero to avoid underflow on profit)
-        if (netDepositedWei[msg.sender] >= proceedsWei) {
-            netDepositedWei[msg.sender] -= proceedsWei;
-        } else {
-            netDepositedWei[msg.sender] = 0;
-        }
+        if (proceedsWei > 0) {
+            require(address(this).balance >= proceedsWei, "PM: insufficient liquidity");
 
-        (bool ok,) = msg.sender.call{value: proceedsWei}("");
-        require(ok, "PM: sell transfer failed");
+            // Adjust net deposited (cap at zero to avoid underflow on profit)
+            if (netDepositedWei[msg.sender] >= proceedsWei) {
+                netDepositedWei[msg.sender] -= proceedsWei;
+            } else {
+                netDepositedWei[msg.sender] = 0;
+            }
+
+            (bool ok,) = msg.sender.call{value: proceedsWei}("");
+            require(ok, "PM: sell transfer failed");
+        }
 
         emit SharesSold(msg.sender, outcomeIdx, sharesWad, proceedsWei);
     }
@@ -262,9 +292,14 @@ contract PredictionMarket is ReentrancyGuard {
                            ADMIN: RESOLVE
     //////////////////////////////////////////////////////////////*/
 
-    /// @notice Admin resolves the market at any time while it is Active.
-    ///         Can be called before OR after the deadline — early resolution is fine.
+    /// @notice Admin resolves the market while it is Active.
+    ///         Can be called before the deadline (early resolution) or
+    ///         during the 3-day grace period after the deadline.
     ///         A proof URI is mandatory for transparency.
+    ///
+    ///         A 0.25% platform fee is deducted from the pool at this
+    ///         point and sent to the admin. The remaining balance is
+    ///         snapshotted for fair pro-rata winner redemptions.
     ///
     /// @param  _winningOutcome  Index of the winning outcome.
     /// @param  _proofUri        IPFS CID or HTTPS URL to resolution evidence.
@@ -272,17 +307,31 @@ contract PredictionMarket is ReentrancyGuard {
         external
         onlyAdmin
     {
-        // Allow resolution even if deadline passed (admin just beats the expiry call)
-        require(
-            stage == Stage.Active || stage == Stage.Expired,
-            "PM: already resolved or cancelled"
-        );
+        // Auto-expire if grace period has passed (prevents late resolution
+        // after users could already have refunded).
+        if (stage == Stage.Active && block.timestamp > marketDeadline + RESOLUTION_GRACE_PERIOD) {
+            stage = Stage.Expired;
+            emit MarketCancelled("Auto-expired after grace period");
+        }
+
+        require(stage == Stage.Active, "PM: market not active or grace period expired");
         require(_winningOutcome < outcomeCount, "PM: invalid outcome index");
         require(bytes(_proofUri).length > 0,    "PM: proof URI required");
 
         winningOutcome = _winningOutcome;
         proofUri       = _proofUri;
         stage          = Stage.Resolved;
+
+        // ── Platform fee (0.25%) ──────────────────────────────────
+        uint256 pool = address(this).balance;
+        uint256 fee  = (pool * PLATFORM_FEE_BPS) / 10000;
+        resolvedPoolWei = pool - fee;
+
+        if (fee > 0) {
+            (bool ok,) = admin.call{value: fee}("");
+            require(ok, "PM: fee transfer failed");
+            emit FeeCollected(admin, fee);
+        }
 
         emit MarketResolved(_winningOutcome, _proofUri);
     }
@@ -292,6 +341,8 @@ contract PredictionMarket is ReentrancyGuard {
     //////////////////////////////////////////////////////////////*/
 
     /// @notice Admin cancels the market; all deposited ETH becomes refundable.
+    ///         Can be called during the active trading period or during the
+    ///         3-day resolution grace period.
     function cancel(string calldata reason)
         external
         onlyAdmin
@@ -305,13 +356,17 @@ contract PredictionMarket is ReentrancyGuard {
                        EXPIRY (ANYONE CAN TRIGGER)
     //////////////////////////////////////////////////////////////*/
 
-    /// @notice Anyone may call this after `marketDeadline` if the market
-    ///         has not been resolved. Transitions to Expired → refunds open.
+    /// @notice Anyone may call this after the resolution grace period
+    ///         (marketDeadline + 3 days) if the market has not been
+    ///         resolved or cancelled. Transitions to Expired → refunds open.
     function triggerExpiry() external {
-        require(stage == Stage.Active,                  "PM: not active");
-        require(block.timestamp > marketDeadline,       "PM: deadline not passed");
+        require(stage == Stage.Active,    "PM: not active");
+        require(
+            block.timestamp > marketDeadline + RESOLUTION_GRACE_PERIOD,
+            "PM: resolution grace period not passed"
+        );
         stage = Stage.Expired;
-        emit MarketCancelled("Expired: not resolved within duration");
+        emit MarketCancelled("Expired: not resolved within grace period");
     }
 
     /*//////////////////////////////////////////////////////////////
@@ -319,8 +374,9 @@ contract PredictionMarket is ReentrancyGuard {
     //////////////////////////////////////////////////////////////*/
 
     /// @notice Winners redeem their shares for ETH after market is resolved.
-    ///         Payout = (user winning shares / total winning shares) * contract balance.
-    ///         This gives winners the full pot proportionally.
+    ///         Payout = (user winning shares / total winning shares) * resolvedPoolWei.
+    ///         The pool was snapshotted at resolution time (after fee), so
+    ///         every winner gets their fair share regardless of redemption order.
     function redeem() external nonReentrant {
         require(stage == Stage.Resolved, "PM: not resolved");
         require(!hasRedeemed[msg.sender], "PM: already redeemed");
@@ -333,7 +389,7 @@ contract PredictionMarket is ReentrancyGuard {
 
         hasRedeemed[msg.sender] = true;
 
-        uint256 payout = (userWinShares * address(this).balance) / totalWinShares;
+        uint256 payout = (userWinShares * resolvedPoolWei) / totalWinShares;
 
         (bool ok,) = msg.sender.call{value: payout}("");
         require(ok, "PM: payout failed");
@@ -443,23 +499,25 @@ contract PredictionMarket is ReentrancyGuard {
     }
 
     /// @notice Preview cost (wei) to buy `sharesWad` of `outcomeIdx`.
+    ///         Returns 0 for negligibly small amounts.
     function previewBuy(uint256 outcomeIdx, uint256 sharesWad)
         external view returns (uint256 costWei)
     {
         require(outcomeIdx < outcomeCount, "PM: invalid outcome");
         int256[] memory q = _getSharesArray();
         int256 raw = LMSRMath.tradeCost(q, outcomeIdx, int256(sharesWad), b);
-        costWei = uint256(raw);
+        costWei = raw > 0 ? uint256(raw) : 0;
     }
 
     /// @notice Preview proceeds (wei) from selling `sharesWad` of `outcomeIdx`.
+    ///         Returns 0 for negligibly small amounts.
     function previewSell(uint256 outcomeIdx, uint256 sharesWad)
         external view returns (uint256 proceedsWei)
     {
         require(outcomeIdx < outcomeCount, "PM: invalid outcome");
         int256[] memory q = _getSharesArray();
         int256 raw = LMSRMath.tradeCost(q, outcomeIdx, -int256(sharesWad), b);
-        proceedsWei = uint256(-raw);
+        proceedsWei = raw < 0 ? uint256(-raw) : 0;
     }
 
     /// @notice Per-user data for the portfolio / position panel.
@@ -492,6 +550,12 @@ contract PredictionMarket is ReentrancyGuard {
                         && netDepositedWei[user] > 0;
     }
 
+    /// @notice Deadline by which admin must resolve or cancel.
+    ///         After this timestamp, anyone can call triggerExpiry().
+    function resolutionDeadline() external view returns (uint256) {
+        return marketDeadline + RESOLUTION_GRACE_PERIOD;
+    }
+
     /*//////////////////////////////////////////////////////////////
                           INTERNAL HELPERS
     //////////////////////////////////////////////////////////////*/
@@ -505,11 +569,12 @@ contract PredictionMarket is ReentrancyGuard {
         }
     }
 
-    /// @dev Check market is Active; auto-transition to Expired if deadline passed.
+    /// @dev Check market is Active; auto-transition to Expired if
+    ///      the resolution grace period (deadline + 3 days) has passed.
     function _assertActive() internal {
-        if (stage == Stage.Active && block.timestamp > marketDeadline) {
+        if (stage == Stage.Active && block.timestamp > marketDeadline + RESOLUTION_GRACE_PERIOD) {
             stage = Stage.Expired;
-            emit MarketCancelled("Auto-expired");
+            emit MarketCancelled("Auto-expired after grace period");
         }
         require(stage == Stage.Active, "PM: market not active");
     }

@@ -6,7 +6,7 @@ import { FACTORY_ADDRESS, STAGE_LABELS, STAGE_COLORS } from '../../config/networ
 import { FACTORY_ABI, MARKET_ABI } from '../../config/abis';
 import { PageLoader } from '../../components/LoadingSpinner';
 import EmptyState from '../../components/EmptyState';
-import { formatUSDC, formatWad, parseContractError } from '../../utils/format';
+import { formatUSDC, formatWad, parseContractError, makeMarketSlug } from '../../utils/format';
 import { getOutcomeColor } from '../../components/ProbabilityBar';
 
 interface Position {
@@ -155,7 +155,7 @@ export default function Portfolio() {
             <div key={pos.market} className="card p-5 animate-fade-in">
               <div className="flex items-start justify-between mb-3">
                 <div>
-                  <Link to={`/market/${pos.marketId}`} className="font-semibold text-white hover:text-primary-400 transition-colors">
+                  <Link to={`/market/${makeMarketSlug(pos.marketId, pos.title)}`} className="font-semibold text-white hover:text-primary-400 transition-colors">
                     {pos.title}
                   </Link>
                   <div className="flex items-center gap-2 mt-1">

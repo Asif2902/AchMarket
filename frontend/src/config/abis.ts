@@ -14,8 +14,8 @@ export const FACTORY_ABI = [
   // Paginated market list
   "function getMarketSummaries(uint256 offset, uint256 limit) view returns (tuple(address market, uint256 marketId, string title, string category, string imageUri, string[] outcomeLabels, int256[] impliedProbabilitiesWad, uint8 stage, uint256 winningOutcome, uint256 marketDeadline, uint256 totalVolumeWei, uint256 participants)[])",
 
-  // Single market detail
-  "function getMarketDetail(address market) view returns (tuple(address market, string title, string description, string category, string imageUri, string proofUri, string[] outcomeLabels, int256[] totalSharesWad, int256[] impliedProbabilitiesWad, uint8 stage, uint256 winningOutcome, uint256 createdAt, uint256 marketDeadline, int256 bWad, uint256 totalVolumeWei, uint256 participants))",
+  // Single market detail (includes resolvedPoolWei + resolutionDeadline)
+  "function getMarketDetail(address market) view returns (tuple(address market, string title, string description, string category, string imageUri, string proofUri, string[] outcomeLabels, int256[] totalSharesWad, int256[] impliedProbabilitiesWad, uint8 stage, uint256 winningOutcome, uint256 createdAt, uint256 marketDeadline, int256 bWad, uint256 totalVolumeWei, uint256 participants, uint256 resolvedPoolWei, uint256 resolutionDeadline))",
 
   // User portfolio
   "function getUserPortfolio(address user) view returns (tuple(address market, string title, string category, string[] outcomeLabels, uint256[] sharesPerOutcome, uint256 netDepositedWei, bool canRedeem, bool canRefund, bool hasRedeemed, bool hasRefunded, uint8 stage)[])",
@@ -49,6 +49,10 @@ export const MARKET_ABI = [
   "function netDepositedWei(address) view returns (uint256)",
   "function hasRedeemed(address) view returns (bool)",
   "function hasRefunded(address) view returns (bool)",
+  "function resolvedPoolWei() view returns (uint256)",
+  "function resolutionDeadline() view returns (uint256)",
+  "function PLATFORM_FEE_BPS() view returns (uint256)",
+  "function RESOLUTION_GRACE_PERIOD() view returns (uint256)",
 
   // View functions
   "function getMarketInfo() view returns (string _title, string _description, string _category, string _imageUri, string _proofUri, string[] _outcomeLabels, uint8 _stage, uint256 _winningOutcome, uint256 _createdAt, uint256 _marketDeadline, uint256 _totalVolumeWei, uint256 _participantCount)",
@@ -74,4 +78,5 @@ export const MARKET_ABI = [
   "event MarketCancelled(string reason)",
   "event Redeemed(address indexed user, uint256 amountWei)",
   "event Refunded(address indexed user, uint256 amountWei)",
+  "event FeeCollected(address indexed recipient, uint256 amountWei)",
 ] as const;

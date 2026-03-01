@@ -152,6 +152,36 @@ export function applySellSlippage(proceedsWei: bigint, slippagePercent: number):
 }
 
 /**
+ * Convert a string to a URL-friendly slug.
+ */
+export function slugify(text: string): string {
+  return text
+    .toLowerCase()
+    .trim()
+    .replace(/[^\w\s-]/g, '')
+    .replace(/[\s_]+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 60);
+}
+
+/**
+ * Create a hybrid market slug: "1-will-bitcoin-reach-100k"
+ */
+export function makeMarketSlug(marketId: number, title: string): string {
+  return `${marketId}-${slugify(title)}`;
+}
+
+/**
+ * Extract the numeric market ID from a hybrid slug.
+ * "1-will-bitcoin-reach-100k" → 1
+ */
+export function parseMarketSlug(slug: string): number | null {
+  const match = slug.match(/^(\d+)/);
+  return match ? parseInt(match[1], 10) : null;
+}
+
+/**
  * Parse contract revert reason from error.
  */
 export function parseContractError(error: unknown): string {

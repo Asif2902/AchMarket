@@ -2,7 +2,7 @@ import { Link } from 'react-router-dom';
 import ImageWithFallback from './ImageWithFallback';
 import ProbabilityBar from './ProbabilityBar';
 import Countdown from './Countdown';
-import { formatUSDC } from '../utils/format';
+import { formatUSDC, makeMarketSlug } from '../utils/format';
 import { STAGE, STAGE_LABELS, STAGE_COLORS } from '../config/network';
 
 export interface MarketSummaryData {
@@ -29,7 +29,7 @@ export default function MarketCard({ data }: Props) {
   const isResolved = data.stage === STAGE.Resolved;
 
   return (
-    <Link to={`/market/${data.marketId}`} className="block">
+    <Link to={`/market/${makeMarketSlug(data.marketId, data.title)}`} className="block">
       <div className="card-hover overflow-hidden group">
         {/* Image */}
         <div className="relative">

@@ -11,7 +11,8 @@ import Countdown from '../../components/Countdown';
 import { PageLoader } from '../../components/LoadingSpinner';
 import {
   formatUSDC, formatWad, formatProbability, probToPercent, formatDate,
-  applyBuySlippage, applySellSlippage, parseContractError, resolveImageUri
+  applyBuySlippage, applySellSlippage, parseContractError, resolveImageUri,
+  parseMarketSlug
 } from '../../utils/format';
 
 interface MarketDetailData {
@@ -31,6 +32,8 @@ interface MarketDetailData {
   bWad: bigint;
   totalVolumeWei: bigint;
   participants: number;
+  resolvedPoolWei: bigint;
+  resolutionDeadline: number;
 }
 
 interface UserInfo {
@@ -48,7 +51,8 @@ interface ProbHistoryPoint {
 }
 
 export default function MarketDetail() {
-  const { id } = useParams<{ id: string }>();
+  const { slug } = useParams<{ slug: string }>();
+  const marketId = slug ? parseMarketSlug(slug) : null;
   const { address: userAddress, signer, readProvider, isConnected, isCorrectNetwork } = useWallet();
 
   const [marketAddress, setMarketAddress] = useState<string | null>(null);
@@ -70,13 +74,13 @@ export default function MarketDetail() {
 
   // Resolve ID → address → detail + user info in one shot
   const fetchAll = useCallback(async () => {
-    if (!id) return;
+    if (marketId === null) return;
     try {
       setLoading(true);
       const factory = new ethers.Contract(FACTORY_ADDRESS, FACTORY_ABI, readProvider);
 
       // 1. Resolve ID to address
-      const addr = await factory.markets(BigInt(id));
+      const addr = await factory.markets(BigInt(marketId));
       if (!addr || addr === ethers.ZeroAddress) {
         setError('Market not found');
         setLoading(false);
@@ -109,6 +113,8 @@ export default function MarketDetail() {
         bWad: d.bWad,
         totalVolumeWei: d.totalVolumeWei,
         participants: Number(d.participants),
+        resolvedPoolWei: d.resolvedPoolWei,
+        resolutionDeadline: Number(d.resolutionDeadline),
       };
       setDetail(parsed);
 
@@ -128,7 +134,7 @@ export default function MarketDetail() {
     } finally {
       setLoading(false);
     }
-  }, [id, userAddress, readProvider]);
+  }, [marketId, userAddress, readProvider]);
 
   // Refresh just detail + user info (after trades), reuse known address
   const refreshData = useCallback(async () => {
@@ -159,6 +165,8 @@ export default function MarketDetail() {
         bWad: d.bWad,
         totalVolumeWei: d.totalVolumeWei,
         participants: Number(d.participants),
+        resolvedPoolWei: d.resolvedPoolWei,
+        resolutionDeadline: Number(d.resolutionDeadline),
       });
 
       if (uInfo) {
@@ -368,6 +376,24 @@ export default function MarketDetail() {
     }
   };
 
+  const handleTriggerExpiry = async () => {
+    if (!signer || !marketAddress) return;
+    setTxPending(true);
+    setTxMessage(null);
+    try {
+      const market = new ethers.Contract(marketAddress, MARKET_ABI, signer);
+      const tx = await market.triggerExpiry();
+      setTxMessage({ type: 'success', text: 'Expiry transaction submitted...' });
+      await tx.wait();
+      setTxMessage({ type: 'success', text: 'Market expired! Refunds are now available.' });
+      refreshData();
+    } catch (err) {
+      setTxMessage({ type: 'error', text: parseContractError(err) });
+    } finally {
+      setTxPending(false);
+    }
+  };
+
   if (loading) return <PageLoader />;
   if (error || !detail) {
     return (
@@ -380,6 +406,9 @@ export default function MarketDetail() {
   const isActive = detail.stage === STAGE.Active;
   const isResolved = detail.stage === STAGE.Resolved;
   const isCancelledOrExpired = detail.stage === STAGE.Cancelled || detail.stage === STAGE.Expired;
+  const now = Math.floor(Date.now() / 1000);
+  const tradingEnded = now > detail.marketDeadline;
+  const inGracePeriod = isActive && tradingEnded && now <= detail.resolutionDeadline;
 
   // Estimate payout for buy preview
   let estimatedPayout: bigint | null = null;
@@ -460,6 +489,49 @@ export default function MarketDetail() {
                   >
                     View Resolution Proof
                   </a>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Resolved pool & fee info */}
+          {isResolved && detail.resolvedPoolWei > 0n && (
+            <div className="p-4 rounded-xl bg-dark-800/60 border border-dark-700/30">
+              <div className="flex flex-wrap gap-6 text-sm">
+                <div>
+                  <span className="text-dark-400">Prize Pool (after 0.25% fee)</span>
+                  <p className="font-semibold text-white">{formatUSDC(detail.resolvedPoolWei)} USDC</p>
+                </div>
+                <div>
+                  <span className="text-dark-400">Platform Fee (0.25%)</span>
+                  <p className="font-semibold text-dark-300">
+                    {formatUSDC((detail.totalVolumeWei * 25n) / 10000n)} USDC
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Grace period banner */}
+          {inGracePeriod && (
+            <div className="p-4 rounded-xl bg-yellow-500/10 border border-yellow-500/20">
+              <div className="flex items-start gap-3">
+                <svg className="w-5 h-5 text-yellow-400 mt-0.5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                <div>
+                  <p className="text-sm font-medium text-yellow-400 mb-1">
+                    Trading has ended — awaiting resolution
+                  </p>
+                  <p className="text-xs text-dark-400">
+                    The admin has a 3-day grace period to resolve this market.
+                    If not resolved by {formatDate(detail.resolutionDeadline)}, the market will auto-expire
+                    and all participants can claim full refunds.
+                  </p>
+                  <div className="mt-2">
+                    <span className="text-xs text-dark-400">Resolution deadline: </span>
+                    <Countdown deadline={detail.resolutionDeadline} />
+                  </div>
                 </div>
               </div>
             </div>
@@ -710,6 +782,37 @@ export default function MarketDetail() {
           {isActive && isConnected && !isCorrectNetwork && (
             <div className="card p-6 text-center">
               <p className="text-yellow-400 text-sm">Switch to ARC Testnet to trade</p>
+            </div>
+          )}
+
+          {/* Trigger Expiry — available when grace period has passed */}
+          {isActive && tradingEnded && !inGracePeriod && isConnected && isCorrectNetwork && (
+            <div className="card p-6">
+              <div className="text-center space-y-3">
+                <p className="text-sm text-red-400 font-medium">
+                  Grace period has expired without resolution
+                </p>
+                <p className="text-xs text-dark-400">
+                  This market was not resolved within the 3-day grace period.
+                  Trigger expiry to enable refunds for all participants.
+                </p>
+                <button
+                  onClick={handleTriggerExpiry}
+                  disabled={txPending}
+                  className="w-full btn-primary py-3 text-base font-semibold"
+                >
+                  {txPending ? 'Processing...' : 'Trigger Expiry'}
+                </button>
+                {txMessage && (
+                  <div className={`p-3 rounded-xl text-sm ${
+                    txMessage.type === 'success'
+                      ? 'bg-green-500/10 text-green-400 border border-green-500/20'
+                      : 'bg-red-500/10 text-red-400 border border-red-500/20'
+                  }`}>
+                    {txMessage.text}
+                  </div>
+                )}
+              </div>
             </div>
           )}
 
