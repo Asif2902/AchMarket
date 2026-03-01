@@ -87,13 +87,8 @@ export default function MarketDetail() {
       }
       setMarketAddress(addr);
 
-      const detailPromise = factory.getMarketDetail(addr);
-      const balancePromise = readProvider.getBalance(addr);
-      const userInfoPromise = userAddress
-        ? new ethers.Contract(addr, MARKET_ABI, readProvider).getUserInfo(userAddress)
-        : null;
-
-      const [d, bal, uInfo] = await Promise.all([detailPromise, balancePromise, userInfoPromise]);
+      // Core data — must succeed
+      const d = await factory.getMarketDetail(addr);
 
       const parsed: MarketDetailData = {
         market: d.market, title: d.title, description: d.description,
@@ -107,6 +102,15 @@ export default function MarketDetail() {
         resolutionDeadline: Number(d.resolutionDeadline),
       };
       setDetail(parsed);
+
+      // Auxiliary data — non-critical, fetch in parallel and handle failures individually
+      const [bal, uInfo] = await Promise.all([
+        readProvider.getBalance(addr).catch(() => parsed.totalVolumeWei),
+        userAddress
+          ? new ethers.Contract(addr, MARKET_ABI, readProvider).getUserInfo(userAddress).catch(() => null)
+          : Promise.resolve(null),
+      ]);
+
       setPoolBalance(bal);
 
       if (uInfo) {
@@ -128,15 +132,9 @@ export default function MarketDetail() {
     if (!marketAddress) return;
     try {
       const factory = new ethers.Contract(FACTORY_ADDRESS, FACTORY_ABI, readProvider);
-      const detailPromise = factory.getMarketDetail(marketAddress);
-      const balancePromise = readProvider.getBalance(marketAddress);
-      const userInfoPromise = userAddress
-        ? new ethers.Contract(marketAddress, MARKET_ABI, readProvider).getUserInfo(userAddress)
-        : null;
+      const d = await factory.getMarketDetail(marketAddress);
 
-      const [d, bal, uInfo] = await Promise.all([detailPromise, balancePromise, userInfoPromise]);
-
-      setDetail({
+      const parsed = {
         market: d.market, title: d.title, description: d.description,
         category: d.category, imageUri: d.imageUri, proofUri: d.proofUri,
         outcomeLabels: [...d.outcomeLabels], totalSharesWad: [...d.totalSharesWad],
@@ -146,7 +144,16 @@ export default function MarketDetail() {
         bWad: d.bWad, totalVolumeWei: d.totalVolumeWei,
         participants: Number(d.participants), resolvedPoolWei: d.resolvedPoolWei,
         resolutionDeadline: Number(d.resolutionDeadline),
-      });
+      };
+      setDetail(parsed);
+
+      const [bal, uInfo] = await Promise.all([
+        readProvider.getBalance(marketAddress).catch(() => parsed.totalVolumeWei),
+        userAddress
+          ? new ethers.Contract(marketAddress, MARKET_ABI, readProvider).getUserInfo(userAddress).catch(() => null)
+          : Promise.resolve(null),
+      ]);
+
       setPoolBalance(bal);
 
       if (uInfo) {
