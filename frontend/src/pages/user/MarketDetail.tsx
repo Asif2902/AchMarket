@@ -370,18 +370,28 @@ export default function MarketDetail() {
   const inGracePeriod = isActive && tradingEnded && now <= detail.resolutionDeadline;
 
   let estimatedPayout: bigint | null = null;
+  let totalPositionPayout: bigint | null = null;
   let multiplier = 0;
   let avgPrice = 0;
+  let profit = 0;
+  const hasExistingShares = userInfo?.shares[selectedOutcome] && userInfo.shares[selectedOutcome] > 0n;
   if (estimatedShares !== null && shareAmount && tradeTab === 'buy') {
     const usdcInput = parseFloat(shareAmount);
     const sharesWad = BigInt(Math.round(estimatedShares * 1e18));
     const totalWinShares = detail.totalSharesWad[selectedOutcome] + sharesWad;
-    const userWinShares = (userInfo?.shares[selectedOutcome] || 0n) + sharesWad;
     const costWei = ethers.parseEther(usdcInput.toString());
+    const poolAfterTrade = detail.totalVolumeWei + costWei;
     if (totalWinShares > 0n) {
-      estimatedPayout = (userWinShares * (detail.totalVolumeWei + costWei)) / totalWinShares;
-      multiplier = Number(estimatedPayout) / (usdcInput * 1e18);
+      // Payout for THIS trade's new shares only
+      estimatedPayout = (sharesWad * poolAfterTrade) / totalWinShares;
+      multiplier = Number(estimatedPayout) / Number(costWei);
       avgPrice = estimatedShares > 0 ? usdcInput / estimatedShares : 0;
+      profit = Number(estimatedPayout - costWei) / 1e18;
+      // Total position payout (existing + new shares) — shown separately if user has existing shares
+      if (hasExistingShares) {
+        const userWinShares = userInfo!.shares[selectedOutcome] + sharesWad;
+        totalPositionPayout = (userWinShares * poolAfterTrade) / totalWinShares;
+      }
     }
   }
 
@@ -714,7 +724,14 @@ export default function MarketDetail() {
                     {estimatedPayout !== null && (
                       <>
                         <PreviewRow label="Potential Payout" value={`${formatUSDC(estimatedPayout)} USDC`} accent="green" />
+                        <PreviewRow label="Profit" value={`${profit >= 0 ? '+' : ''}${profit.toFixed(4)} USDC`} accent="green" />
                         <PreviewRow label="Multiplier" value={`${multiplier.toFixed(2)}x`} accent="green" />
+                      </>
+                    )}
+                    {totalPositionPayout !== null && (
+                      <>
+                        <div className="divider" />
+                        <PreviewRow label="Total Position Payout" value={`${formatUSDC(totalPositionPayout)} USDC`} />
                       </>
                     )}
                     <div className="divider" />
