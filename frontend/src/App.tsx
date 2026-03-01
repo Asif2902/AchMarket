@@ -28,7 +28,7 @@ function AppRoutes() {
           <Route path="fees" element={<FeeManagement />} />
         </Route>
         {/* Owner can also view market details */}
-        <Route path="/market/:address" element={<MarketDetail />} />
+        <Route path="/market/:id" element={<MarketDetail />} />
         {/* Redirect root to owner panel */}
         <Route path="/" element={<Navigate to="/owner" replace />} />
         <Route path="*" element={<Navigate to="/owner" replace />} />

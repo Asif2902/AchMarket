@@ -48,9 +48,10 @@ interface ProbHistoryPoint {
 }
 
 export default function MarketDetail() {
-  const { address: marketAddress } = useParams<{ address: string }>();
+  const { id } = useParams<{ id: string }>();
   const { address: userAddress, signer, readProvider, isConnected, isCorrectNetwork } = useWallet();
 
+  const [marketAddress, setMarketAddress] = useState<string | null>(null);
   const [detail, setDetail] = useState<MarketDetailData | null>(null);
   const [userInfo, setUserInfo] = useState<UserInfo | null>(null);
   const [probHistory, setProbHistory] = useState<ProbHistoryPoint[]>([]);
@@ -66,6 +67,27 @@ export default function MarketDetail() {
   const [previewLoading, setPreviewLoading] = useState(false);
   const [txPending, setTxPending] = useState(false);
   const [txMessage, setTxMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+
+  // Resolve market ID to address
+  useEffect(() => {
+    if (!id) return;
+    const resolve = async () => {
+      try {
+        const factory = new ethers.Contract(FACTORY_ADDRESS, FACTORY_ABI, readProvider);
+        const addr = await factory.markets(BigInt(id));
+        if (!addr || addr === ethers.ZeroAddress) {
+          setError('Market not found');
+          setLoading(false);
+          return;
+        }
+        setMarketAddress(addr);
+      } catch {
+        setError('Invalid market ID');
+        setLoading(false);
+      }
+    };
+    resolve();
+  }, [id, readProvider]);
 
   const fetchDetail = useCallback(async () => {
     if (!marketAddress) return;

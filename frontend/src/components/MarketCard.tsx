@@ -29,7 +29,7 @@ export default function MarketCard({ data }: Props) {
   const isResolved = data.stage === STAGE.Resolved;
 
   return (
-    <Link to={`/market/${data.market}`} className="block">
+    <Link to={`/market/${data.marketId}`} className="block">
       <div className="card-hover overflow-hidden group">
         {/* Image */}
         <div className="relative">

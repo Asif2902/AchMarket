@@ -33,7 +33,7 @@ export default function CreateMarket() {
   const [showBTooltip, setShowBTooltip] = useState(false);
 
   const [submitting, setSubmitting] = useState(false);
-  const [txResult, setTxResult] = useState<{ type: 'success' | 'error'; text: string; market?: string } | null>(null);
+  const [txResult, setTxResult] = useState<{ type: 'success' | 'error'; text: string; market?: string; marketId?: string } | null>(null);
 
   const actualCategory = category === 'Other' ? customCategory : category;
   const durationSeconds = durationPreset > 0
@@ -87,11 +87,13 @@ export default function CreateMarket() {
 
       // Find MarketCreated event
       let marketAddr = '';
+      let marketId = '';
       for (const log of receipt.logs) {
         try {
           const parsed = factory.interface.parseLog({ topics: [...log.topics], data: log.data });
           if (parsed && parsed.name === 'MarketCreated') {
             marketAddr = parsed.args.market;
+            marketId = parsed.args.marketId.toString();
             break;
           }
         } catch { /* skip */ }
@@ -101,6 +103,7 @@ export default function CreateMarket() {
         type: 'success',
         text: 'Market created successfully!',
         market: marketAddr,
+        marketId,
       });
 
       // Reset form
@@ -339,9 +342,9 @@ export default function CreateMarket() {
                 : 'bg-red-500/10 text-red-400 border border-red-500/20'
             }`}>
               <p>{txResult.text}</p>
-              {txResult.market && (
+              {txResult.marketId && (
                 <a
-                  href={`/market/${txResult.market}`}
+                  href={`/market/${txResult.marketId}`}
                   className="mt-2 inline-block text-primary-400 hover:text-primary-300 underline"
                 >
                   View Market

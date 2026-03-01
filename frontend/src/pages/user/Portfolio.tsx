@@ -11,6 +11,7 @@ import { getOutcomeColor } from '../../components/ProbabilityBar';
 
 interface Position {
   market: string;
+  marketId: number;
   title: string;
   category: string;
   outcomeLabels: string[];
@@ -36,10 +37,25 @@ export default function Portfolio() {
       try {
         setLoading(true);
         const factory = new ethers.Contract(FACTORY_ADDRESS, FACTORY_ABI, readProvider);
-        const portfolio = await factory.getUserPortfolio(address);
+        const [portfolio, totalMarkets] = await Promise.all([
+          factory.getUserPortfolio(address),
+          factory.totalMarkets(),
+        ]);
+
+        // Build address -> marketId map
+        const total = Number(totalMarkets);
+        let summaries: Record<string, unknown>[] = [];
+        if (total > 0) {
+          summaries = await factory.getMarketSummaries(0, total);
+        }
+        const addrToId = new Map<string, number>();
+        for (const s of summaries) {
+          addrToId.set((s.market as string).toLowerCase(), Number(s.marketId));
+        }
 
         setPositions(portfolio.map((p: Record<string, unknown>) => ({
           market: p.market as string,
+          marketId: addrToId.get((p.market as string).toLowerCase()) ?? 0,
           title: p.title as string,
           category: p.category as string,
           outcomeLabels: [...(p.outcomeLabels as string[])],
@@ -71,9 +87,22 @@ export default function Portfolio() {
       setTxMsg({ type: 'success', text: `${action === 'redeem' ? 'Winnings' : 'Refund'} claimed!` });
       // Refresh
       const factory = new ethers.Contract(FACTORY_ADDRESS, FACTORY_ABI, readProvider);
-      const portfolio = await factory.getUserPortfolio(address!);
+      const [portfolio, totalMarkets2] = await Promise.all([
+        factory.getUserPortfolio(address!),
+        factory.totalMarkets(),
+      ]);
+      const total2 = Number(totalMarkets2);
+      let sums2: Record<string, unknown>[] = [];
+      if (total2 > 0) {
+        sums2 = await factory.getMarketSummaries(0, total2);
+      }
+      const addrToId2 = new Map<string, number>();
+      for (const s of sums2) {
+        addrToId2.set((s.market as string).toLowerCase(), Number(s.marketId));
+      }
       setPositions(portfolio.map((p: Record<string, unknown>) => ({
         market: p.market as string,
+        marketId: addrToId2.get((p.market as string).toLowerCase()) ?? 0,
         title: p.title as string,
         category: p.category as string,
         outcomeLabels: [...(p.outcomeLabels as string[])],
@@ -126,7 +155,7 @@ export default function Portfolio() {
             <div key={pos.market} className="card p-5 animate-fade-in">
               <div className="flex items-start justify-between mb-3">
                 <div>
-                  <Link to={`/market/${pos.market}`} className="font-semibold text-white hover:text-primary-400 transition-colors">
+                  <Link to={`/market/${pos.marketId}`} className="font-semibold text-white hover:text-primary-400 transition-colors">
                     {pos.title}
                   </Link>
                   <div className="flex items-center gap-2 mt-1">
