@@ -72,6 +72,7 @@ export default function MarketDetail() {
   const [previewLoading, setPreviewLoading] = useState(false);
   const [txPending, setTxPending] = useState(false);
   const [txMessage, setTxMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [poolBalance, setPoolBalance] = useState<bigint>(0n);
 
   const fetchAll = useCallback(async () => {
     if (marketId === null) return;
@@ -87,11 +88,12 @@ export default function MarketDetail() {
       setMarketAddress(addr);
 
       const detailPromise = factory.getMarketDetail(addr);
+      const balancePromise = readProvider.getBalance(addr);
       const userInfoPromise = userAddress
         ? new ethers.Contract(addr, MARKET_ABI, readProvider).getUserInfo(userAddress)
         : null;
 
-      const [d, uInfo] = await Promise.all([detailPromise, userInfoPromise]);
+      const [d, bal, uInfo] = await Promise.all([detailPromise, balancePromise, userInfoPromise]);
 
       const parsed: MarketDetailData = {
         market: d.market, title: d.title, description: d.description,
@@ -105,6 +107,7 @@ export default function MarketDetail() {
         resolutionDeadline: Number(d.resolutionDeadline),
       };
       setDetail(parsed);
+      setPoolBalance(bal);
 
       if (uInfo) {
         setUserInfo({
@@ -126,11 +129,12 @@ export default function MarketDetail() {
     try {
       const factory = new ethers.Contract(FACTORY_ADDRESS, FACTORY_ABI, readProvider);
       const detailPromise = factory.getMarketDetail(marketAddress);
+      const balancePromise = readProvider.getBalance(marketAddress);
       const userInfoPromise = userAddress
         ? new ethers.Contract(marketAddress, MARKET_ABI, readProvider).getUserInfo(userAddress)
         : null;
 
-      const [d, uInfo] = await Promise.all([detailPromise, userInfoPromise]);
+      const [d, bal, uInfo] = await Promise.all([detailPromise, balancePromise, userInfoPromise]);
 
       setDetail({
         market: d.market, title: d.title, description: d.description,
@@ -143,6 +147,7 @@ export default function MarketDetail() {
         participants: Number(d.participants), resolvedPoolWei: d.resolvedPoolWei,
         resolutionDeadline: Number(d.resolutionDeadline),
       });
+      setPoolBalance(bal);
 
       if (uInfo) {
         setUserInfo({
@@ -380,17 +385,20 @@ export default function MarketDetail() {
     const sharesWad = BigInt(Math.round(estimatedShares * 1e18));
     const totalWinShares = detail.totalSharesWad[selectedOutcome] + sharesWad;
     const costWei = ethers.parseEther(usdcInput.toString());
-    const poolAfterTrade = detail.totalVolumeWei + costWei;
+    // Use actual contract balance (more accurate than totalVolumeWei if sells occurred)
+    const poolAfterTrade = poolBalance + costWei;
+    // Apply 0.25% resolution fee (matches contract's resolve() logic)
+    const resolvedPool = poolAfterTrade * 9975n / 10000n;
     if (totalWinShares > 0n) {
       // Payout for THIS trade's new shares only
-      estimatedPayout = (sharesWad * poolAfterTrade) / totalWinShares;
+      estimatedPayout = (sharesWad * resolvedPool) / totalWinShares;
       multiplier = Number(estimatedPayout) / Number(costWei);
       avgPrice = estimatedShares > 0 ? usdcInput / estimatedShares : 0;
       profit = Number(estimatedPayout - costWei) / 1e18;
       // Total position payout (existing + new shares) — shown separately if user has existing shares
       if (hasExistingShares) {
         const userWinShares = userInfo!.shares[selectedOutcome] + sharesWad;
-        totalPositionPayout = (userWinShares * poolAfterTrade) / totalWinShares;
+        totalPositionPayout = (userWinShares * resolvedPool) / totalWinShares;
       }
     }
   }
@@ -654,7 +662,7 @@ export default function MarketDetail() {
                             <div className={`w-2 h-2 rounded-full ${color.bg} ${selectedOutcome === i ? 'ring-2 ring-offset-1 ring-offset-dark-900' : ''}`} style={selectedOutcome === i ? { boxShadow: `0 0 0 2px var(--tw-ring-offset-color), 0 0 0 4px currentColor`, color: 'rgba(99,102,241,0.3)' } : {}} />
                             <span className="font-medium text-white text-sm">{label}</span>
                           </div>
-                          <span className={`font-mono text-xs font-bold tabular-nums ${color.text}`}>{pct.toFixed(1)}%</span>
+                          <span className={`font-mono text-xs font-bold tabular-nums ${color.text}`}>{(pct / 100).toFixed(2)} USDC</span>
                         </div>
                         {tradeTab === 'sell' && userShares > 0n && (
                           <p className="text-2xs text-dark-500 mt-1 ml-4">Your shares: {formatWad(userShares)}</p>
@@ -723,9 +731,9 @@ export default function MarketDetail() {
                     <PreviewRow label="Avg Price" value={previewLoading ? '...' : `${avgPrice.toFixed(4)} USDC`} />
                     {estimatedPayout !== null && (
                       <>
-                        <PreviewRow label="Potential Payout" value={`${formatUSDC(estimatedPayout)} USDC`} accent="green" />
-                        <PreviewRow label="Profit" value={`${profit >= 0 ? '+' : ''}${profit.toFixed(4)} USDC`} accent="green" />
-                        <PreviewRow label="Multiplier" value={`${multiplier.toFixed(2)}x`} accent="green" />
+                        <PreviewRow label="Est. Payout if Wins" value={`${formatUSDC(estimatedPayout)} USDC`} accent={profit >= 0 ? 'green' : 'red'} />
+                        <PreviewRow label="Profit" value={`${profit >= 0 ? '+' : ''}${profit.toFixed(4)} USDC`} accent={profit >= 0 ? 'green' : 'red'} />
+                        <PreviewRow label="Return" value={`${multiplier.toFixed(2)}x`} accent={multiplier >= 1 ? 'green' : 'red'} />
                       </>
                     )}
                     {totalPositionPayout !== null && (
@@ -919,6 +927,7 @@ function PreviewRow({ label, value, accent, muted }: { label: string; value: str
       <span className="text-dark-500">{label}</span>
       <span className={`font-semibold tabular-nums ${
         accent === 'green' ? 'text-emerald-400' :
+        accent === 'red' ? 'text-red-400' :
         muted ? 'text-dark-400 font-mono text-2xs' :
         'text-white'
       }`}>
