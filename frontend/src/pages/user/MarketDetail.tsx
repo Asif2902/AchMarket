@@ -65,9 +65,10 @@ export default function MarketDetail() {
   // Trade state
   const [tradeTab, setTradeTab] = useState<'buy' | 'sell'>('buy');
   const [selectedOutcome, setSelectedOutcome] = useState(0);
-  const [shareAmount, setShareAmount] = useState('');
+  const [shareAmount, setShareAmount] = useState('');  // Buy: USDC amount; Sell: shares amount
   const [slippage, setSlippage] = useState(1);
-  const [previewCost, setPreviewCost] = useState<bigint | null>(null);
+  const [estimatedShares, setEstimatedShares] = useState<number | null>(null); // Buy mode: computed shares for USDC input
+  const [previewCost, setPreviewCost] = useState<bigint | null>(null);  // Sell mode: estimated proceeds
   const [previewLoading, setPreviewLoading] = useState(false);
   const [txPending, setTxPending] = useState(false);
   const [txMessage, setTxMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
@@ -268,48 +269,76 @@ export default function MarketDetail() {
     }
   }, [detail?.market]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Preview cost/proceeds
+  // Preview: buy mode = client-side LMSR binary search; sell mode = RPC previewSell
   useEffect(() => {
     const timer = setTimeout(async () => {
-      if (!marketAddress || !shareAmount || parseFloat(shareAmount) <= 0) {
+      if (!shareAmount || parseFloat(shareAmount) <= 0) {
         setPreviewCost(null);
+        setEstimatedShares(null);
         return;
       }
-      try {
-        setPreviewLoading(true);
-        const market = new ethers.Contract(marketAddress, MARKET_ABI, readProvider);
-        const sharesWad = ethers.parseEther(shareAmount);
 
-        if (tradeTab === 'buy') {
-          const cost = await market.previewBuy(selectedOutcome, sharesWad);
-          setPreviewCost(cost);
-        } else {
+      if (tradeTab === 'buy') {
+        // Buy mode: shareAmount is USDC input, compute shares client-side
+        if (!detail) {
+          setEstimatedShares(null);
+          return;
+        }
+        setPreviewLoading(true);
+        try {
+          const budgetUSDC = parseFloat(shareAmount);
+          const shares = findSharesForCost(
+            detail.totalSharesWad,
+            detail.bWad,
+            selectedOutcome,
+            budgetUSDC
+          );
+          setEstimatedShares(shares);
+          setPreviewCost(null); // Not used in buy mode anymore
+        } finally {
+          setPreviewLoading(false);
+        }
+      } else {
+        // Sell mode: shareAmount is shares count, use RPC previewSell
+        if (!marketAddress) {
+          setPreviewCost(null);
+          return;
+        }
+        try {
+          setPreviewLoading(true);
+          const market = new ethers.Contract(marketAddress, MARKET_ABI, readProvider);
+          const sharesWad = ethers.parseEther(shareAmount);
           const proceeds = await market.previewSell(selectedOutcome, sharesWad);
           setPreviewCost(proceeds);
+          setEstimatedShares(null);
+        } catch {
+          setPreviewCost(null);
+        } finally {
+          setPreviewLoading(false);
         }
-      } catch {
-        setPreviewCost(null);
-      } finally {
-        setPreviewLoading(false);
       }
     }, 300);
     return () => clearTimeout(timer);
-  }, [marketAddress, shareAmount, selectedOutcome, tradeTab, readProvider]);
+  }, [marketAddress, shareAmount, selectedOutcome, tradeTab, readProvider, detail]);
 
   const handleBuy = async () => {
-    if (!signer || !marketAddress || !previewCost || !shareAmount) return;
+    if (!signer || !marketAddress || estimatedShares === null || !shareAmount) return;
     setTxPending(true);
     setTxMessage(null);
     try {
       const market = new ethers.Contract(marketAddress, MARKET_ABI, signer);
-      const sharesWad = ethers.parseEther(shareAmount);
-      const maxCost = applyBuySlippage(previewCost, slippage);
+      // Convert estimated shares (float) to WAD (bigint)
+      const sharesWad = ethers.parseEther(estimatedShares.toFixed(18));
+      // User's USDC input + slippage = maxCostWei (what we send as msg.value)
+      const usdcInput = ethers.parseEther(shareAmount);
+      const maxCost = applyBuySlippage(usdcInput, slippage);
 
       const tx = await market.buy(selectedOutcome, sharesWad, maxCost, { value: maxCost });
       setTxMessage({ type: 'success', text: 'Transaction submitted. Waiting for confirmation...' });
       await tx.wait();
       setTxMessage({ type: 'success', text: 'Shares purchased successfully!' });
       setShareAmount('');
+      setEstimatedShares(null);
       refreshData();
     } catch (err) {
       setTxMessage({ type: 'error', text: parseContractError(err) });
@@ -413,16 +442,17 @@ export default function MarketDetail() {
   // Estimate payout for buy preview
   let estimatedPayout: bigint | null = null;
   let multiplier = 0;
-  if (previewCost && shareAmount && tradeTab === 'buy') {
-    const sharesWad = ethers.parseEther(shareAmount);
+  let avgPrice = 0;
+  if (estimatedShares !== null && shareAmount && tradeTab === 'buy') {
+    const usdcInput = parseFloat(shareAmount);
+    const sharesWad = BigInt(Math.round(estimatedShares * 1e18));
     const totalWinShares = detail.totalSharesWad[selectedOutcome] + sharesWad;
     const userWinShares = (userInfo?.shares[selectedOutcome] || 0n) + sharesWad;
-    // Approximate: total pool is current balance + cost
-    // Payout = userWinShares / totalWinShares * pool
-    // This is approximate since we don't know exact contract balance
+    const costWei = ethers.parseEther(usdcInput.toString());
     if (totalWinShares > 0n) {
-      estimatedPayout = (userWinShares * (detail.totalVolumeWei + previewCost)) / totalWinShares;
-      multiplier = Number(estimatedPayout) / Number(previewCost);
+      estimatedPayout = (userWinShares * (detail.totalVolumeWei + costWei)) / totalWinShares;
+      multiplier = Number(estimatedPayout) / (usdcInput * 1e18);
+      avgPrice = estimatedShares > 0 ? usdcInput / estimatedShares : 0;
     }
   }
 
@@ -616,7 +646,7 @@ export default function MarketDetail() {
             <div className="card p-6">
               <div className="flex rounded-xl bg-dark-900/60 p-1 mb-6">
                 <button
-                  onClick={() => { setTradeTab('buy'); setShareAmount(''); setPreviewCost(null); }}
+                  onClick={() => { setTradeTab('buy'); setShareAmount(''); setPreviewCost(null); setEstimatedShares(null); }}
                   className={`flex-1 py-2 rounded-lg text-sm font-medium transition-all ${
                     tradeTab === 'buy' ? 'bg-green-500/20 text-green-400' : 'text-dark-400 hover:text-white'
                   }`}
@@ -624,7 +654,7 @@ export default function MarketDetail() {
                   Buy
                 </button>
                 <button
-                  onClick={() => { setTradeTab('sell'); setShareAmount(''); setPreviewCost(null); }}
+                  onClick={() => { setTradeTab('sell'); setShareAmount(''); setPreviewCost(null); setEstimatedShares(null); }}
                   className={`flex-1 py-2 rounded-lg text-sm font-medium transition-all ${
                     tradeTab === 'sell' ? 'bg-red-500/20 text-red-400' : 'text-dark-400 hover:text-white'
                   }`}
@@ -665,19 +695,32 @@ export default function MarketDetail() {
                 })}
               </div>
 
-              {/* Share amount input */}
+              {/* Amount input */}
               <label className="label">
-                {tradeTab === 'buy' ? 'Shares to Buy' : 'Shares to Sell'}
+                {tradeTab === 'buy' ? 'Amount (USDC)' : 'Shares to Sell'}
               </label>
-              <input
-                type="number"
-                value={shareAmount}
-                onChange={(e) => setShareAmount(e.target.value)}
-                placeholder="e.g. 10"
-                min="0"
-                step="0.1"
-                className="input-field mb-4"
-              />
+              <div className="relative">
+                <input
+                  type="number"
+                  value={shareAmount}
+                  onChange={(e) => setShareAmount(e.target.value)}
+                  placeholder={tradeTab === 'buy' ? 'e.g. 5.00' : 'e.g. 10'}
+                  min="0"
+                  step={tradeTab === 'buy' ? '0.01' : '0.1'}
+                  className="input-field mb-4 w-full"
+                />
+                {tradeTab === 'sell' && userInfo && (userInfo.shares[selectedOutcome] || 0n) > 0n && (
+                  <button
+                    onClick={() => {
+                      const maxShares = Number(userInfo.shares[selectedOutcome]) / 1e18;
+                      setShareAmount(maxShares.toString());
+                    }}
+                    className="absolute right-2 top-2 px-2 py-1 rounded text-xs font-medium bg-red-500/20 text-red-400 hover:bg-red-500/30 transition-all"
+                  >
+                    Max
+                  </button>
+                )}
+              </div>
 
               {/* Slippage */}
               <div className="flex items-center justify-between mb-4">
@@ -699,18 +742,22 @@ export default function MarketDetail() {
                 </div>
               </div>
 
-              {/* Cost preview */}
-              {previewCost !== null && shareAmount && (
+              {/* Buy preview */}
+              {tradeTab === 'buy' && estimatedShares !== null && shareAmount && (
                 <div className="p-4 rounded-xl bg-dark-900/60 border border-dark-700/30 mb-4 space-y-2">
                   <div className="flex justify-between text-sm">
-                    <span className="text-dark-400">
-                      {tradeTab === 'buy' ? 'Estimated Cost' : 'Estimated Proceeds'}
-                    </span>
+                    <span className="text-dark-400">Estimated Shares</span>
                     <span className="font-semibold text-white">
-                      {previewLoading ? '...' : `${formatUSDC(previewCost)} USDC`}
+                      {previewLoading ? '...' : `${estimatedShares.toFixed(4)} shares`}
                     </span>
                   </div>
-                  {tradeTab === 'buy' && estimatedPayout !== null && (
+                  <div className="flex justify-between text-sm">
+                    <span className="text-dark-400">Avg Price per Share</span>
+                    <span className="font-semibold text-white">
+                      {previewLoading ? '...' : `${avgPrice.toFixed(4)} USDC`}
+                    </span>
+                  </div>
+                  {estimatedPayout !== null && (
                     <>
                       <div className="flex justify-between text-sm">
                         <span className="text-dark-400">Potential Payout (if wins)</span>
@@ -723,14 +770,27 @@ export default function MarketDetail() {
                     </>
                   )}
                   <div className="flex justify-between text-sm">
-                    <span className="text-dark-400">
-                      {tradeTab === 'buy' ? 'Max Cost (with slippage)' : 'Min Receive (with slippage)'}
-                    </span>
+                    <span className="text-dark-400">Max Cost (with {slippage}% slippage)</span>
                     <span className="text-dark-300 font-mono text-xs">
-                      {tradeTab === 'buy'
-                        ? formatUSDC(applyBuySlippage(previewCost, slippage))
-                        : formatUSDC(applySellSlippage(previewCost, slippage))
-                      } USDC
+                      {formatUSDC(applyBuySlippage(ethers.parseEther(shareAmount), slippage))} USDC
+                    </span>
+                  </div>
+                </div>
+              )}
+
+              {/* Sell preview */}
+              {tradeTab === 'sell' && previewCost !== null && shareAmount && (
+                <div className="p-4 rounded-xl bg-dark-900/60 border border-dark-700/30 mb-4 space-y-2">
+                  <div className="flex justify-between text-sm">
+                    <span className="text-dark-400">Estimated Proceeds</span>
+                    <span className="font-semibold text-white">
+                      {previewLoading ? '...' : `${formatUSDC(previewCost)} USDC`}
+                    </span>
+                  </div>
+                  <div className="flex justify-between text-sm">
+                    <span className="text-dark-400">Min Receive (with {slippage}% slippage)</span>
+                    <span className="text-dark-300 font-mono text-xs">
+                      {formatUSDC(applySellSlippage(previewCost, slippage))} USDC
                     </span>
                   </div>
                 </div>
@@ -739,7 +799,7 @@ export default function MarketDetail() {
               {/* Submit */}
               <button
                 onClick={tradeTab === 'buy' ? handleBuy : handleSell}
-                disabled={txPending || !shareAmount || !previewCost || parseFloat(shareAmount) <= 0}
+                disabled={txPending || !shareAmount || parseFloat(shareAmount) <= 0 || (tradeTab === 'buy' ? estimatedShares === null : previewCost === null)}
                 className={`w-full py-3 rounded-xl font-semibold transition-all ${
                   tradeTab === 'buy'
                     ? 'bg-green-600 hover:bg-green-500 text-white disabled:bg-green-600/30 disabled:text-green-400/50'
@@ -752,7 +812,7 @@ export default function MarketDetail() {
                     Processing...
                   </span>
                 ) : tradeTab === 'buy' ? (
-                  `Buy ${detail.outcomeLabels[selectedOutcome]} Shares`
+                  `Buy ${detail.outcomeLabels[selectedOutcome]} for ${shareAmount || '0'} USDC`
                 ) : (
                   `Sell ${detail.outcomeLabels[selectedOutcome]} Shares`
                 )}
@@ -896,4 +956,97 @@ function computeProbabilities(sharesWad: bigint[], bWad: bigint): number[] {
   const sumExp = exps.reduce((a, b) => a + b, 0);
   if (sumExp === 0) return sharesWad.map(() => 1 / sharesWad.length);
   return exps.map(e => e / sumExp);
+}
+
+/**
+ * Compute LMSR cost function: C(q) = b * ln(sum(exp(q_i / b)))
+ * Uses log-sum-exp trick for numerical stability.
+ * All share values in WAD (bigint), b in WAD (bigint).
+ * Returns cost as a floating-point number in ETH units (not wei).
+ */
+function computeLMSRCostValue(sharesWad: bigint[], bWad: bigint): number {
+  const b = Number(bWad) / 1e18;
+  if (b === 0) return 0;
+
+  const qNums = sharesWad.map(q => Number(q) / 1e18);
+  const scaled = qNums.map(q => q / b);
+  const maxScaled = Math.max(...scaled);
+
+  // log-sum-exp: C = b * (maxScaled + ln(sum(exp(scaled_i - maxScaled))))
+  const sumExp = scaled.reduce((acc, s) => acc + Math.exp(s - maxScaled), 0);
+  return b * (maxScaled + Math.log(sumExp));
+}
+
+/**
+ * Compute the cost of buying `deltaShares` of outcome `outcomeIdx`.
+ * tradeCost = C(q_after) - C(q_before)
+ * deltaShares is in plain number (e.g. 10.0 for 10 shares).
+ * Returns cost in ETH units (floating-point).
+ */
+function computeLMSRTradeCost(
+  sharesWad: bigint[],
+  bWad: bigint,
+  outcomeIdx: number,
+  deltaShares: number
+): number {
+  const costBefore = computeLMSRCostValue(sharesWad, bWad);
+
+  // Build q_after: add deltaShares (in WAD) to the selected outcome
+  const deltaWad = BigInt(Math.round(deltaShares * 1e18));
+  const sharesAfter = sharesWad.map((q, i) =>
+    i === outcomeIdx ? q + deltaWad : q
+  );
+
+  const costAfter = computeLMSRCostValue(sharesAfter, bWad);
+  return costAfter - costBefore;
+}
+
+/**
+ * Binary search: find how many shares you receive for a given USDC budget.
+ * budgetUSDC is in plain number (e.g. 5.0 for 5 USDC).
+ * Returns shares in plain number, or null if budget is too small.
+ * Applies a 0.5% safety margin (reduces result by 0.5%) to account for
+ * JS floating-point vs on-chain fixed-point differences.
+ */
+function findSharesForCost(
+  sharesWad: bigint[],
+  bWad: bigint,
+  outcomeIdx: number,
+  budgetUSDC: number,
+  safetyMarginPct: number = 0.5
+): number | null {
+  if (budgetUSDC <= 0) return null;
+
+  // Upper bound: in LMSR, cost of N shares is at most N (when probability = 1).
+  // But in practice, at low probabilities you get more shares per USDC.
+  // Use a generous upper bound.
+  let lo = 0;
+  let hi = budgetUSDC * 100; // Very generous upper bound
+  const epsilon = 1e-6; // Precision: ~0.000001 shares
+
+  // First check: is even the smallest amount too expensive?
+  const minCost = computeLMSRTradeCost(sharesWad, bWad, outcomeIdx, epsilon);
+  if (minCost > budgetUSDC) return null;
+
+  // Binary search: find max shares where cost <= budget
+  for (let iter = 0; iter < 100; iter++) {
+    const mid = (lo + hi) / 2;
+    const cost = computeLMSRTradeCost(sharesWad, bWad, outcomeIdx, mid);
+
+    if (Math.abs(cost - budgetUSDC) < epsilon * budgetUSDC) {
+      // Close enough
+      lo = mid;
+      break;
+    }
+
+    if (cost < budgetUSDC) {
+      lo = mid;
+    } else {
+      hi = mid;
+    }
+  }
+
+  // Apply safety margin: reduce by safetyMarginPct% to avoid overshoot on-chain
+  const result = lo * (1 - safetyMarginPct / 100);
+  return result > epsilon ? result : null;
 }
