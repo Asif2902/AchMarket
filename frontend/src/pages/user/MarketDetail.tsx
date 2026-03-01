@@ -68,33 +68,29 @@ export default function MarketDetail() {
   const [txPending, setTxPending] = useState(false);
   const [txMessage, setTxMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
-  // Resolve market ID to address
-  useEffect(() => {
+  // Resolve ID → address → detail + user info in one shot
+  const fetchAll = useCallback(async () => {
     if (!id) return;
-    const resolve = async () => {
-      try {
-        const factory = new ethers.Contract(FACTORY_ADDRESS, FACTORY_ABI, readProvider);
-        const addr = await factory.markets(BigInt(id));
-        if (!addr || addr === ethers.ZeroAddress) {
-          setError('Market not found');
-          setLoading(false);
-          return;
-        }
-        setMarketAddress(addr);
-      } catch {
-        setError('Invalid market ID');
-        setLoading(false);
-      }
-    };
-    resolve();
-  }, [id, readProvider]);
-
-  const fetchDetail = useCallback(async () => {
-    if (!marketAddress) return;
     try {
       setLoading(true);
       const factory = new ethers.Contract(FACTORY_ADDRESS, FACTORY_ABI, readProvider);
-      const d = await factory.getMarketDetail(marketAddress);
+
+      // 1. Resolve ID to address
+      const addr = await factory.markets(BigInt(id));
+      if (!addr || addr === ethers.ZeroAddress) {
+        setError('Market not found');
+        setLoading(false);
+        return;
+      }
+      setMarketAddress(addr);
+
+      // 2. Fetch detail and user info in parallel
+      const detailPromise = factory.getMarketDetail(addr);
+      const userInfoPromise = userAddress
+        ? new ethers.Contract(addr, MARKET_ABI, readProvider).getUserInfo(userAddress)
+        : null;
+
+      const [d, uInfo] = await Promise.all([detailPromise, userInfoPromise]);
 
       const parsed: MarketDetailData = {
         market: d.market,
@@ -115,38 +111,76 @@ export default function MarketDetail() {
         participants: Number(d.participants),
       };
       setDetail(parsed);
+
+      if (uInfo) {
+        setUserInfo({
+          shares: [...uInfo._shares],
+          netDeposited: uInfo._netDeposited,
+          redeemed: uInfo._redeemed,
+          refunded: uInfo._refunded,
+          canRedeem: uInfo._canRedeem,
+          canRefund: uInfo._canRefund,
+        });
+      }
     } catch (err) {
-      console.error('Failed to fetch market detail:', err);
+      console.error('Failed to fetch market:', err);
       setError('Failed to load market details');
     } finally {
       setLoading(false);
     }
-  }, [marketAddress, readProvider]);
+  }, [id, userAddress, readProvider]);
 
-  const fetchUserInfo = useCallback(async () => {
-    if (!marketAddress || !userAddress) return;
+  // Refresh just detail + user info (after trades), reuse known address
+  const refreshData = useCallback(async () => {
+    if (!marketAddress) return;
     try {
-      const market = new ethers.Contract(marketAddress, MARKET_ABI, readProvider);
-      const info = await market.getUserInfo(userAddress);
-      setUserInfo({
-        shares: [...info._shares],
-        netDeposited: info._netDeposited,
-        redeemed: info._redeemed,
-        refunded: info._refunded,
-        canRedeem: info._canRedeem,
-        canRefund: info._canRefund,
+      const factory = new ethers.Contract(FACTORY_ADDRESS, FACTORY_ABI, readProvider);
+      const detailPromise = factory.getMarketDetail(marketAddress);
+      const userInfoPromise = userAddress
+        ? new ethers.Contract(marketAddress, MARKET_ABI, readProvider).getUserInfo(userAddress)
+        : null;
+
+      const [d, uInfo] = await Promise.all([detailPromise, userInfoPromise]);
+
+      setDetail({
+        market: d.market,
+        title: d.title,
+        description: d.description,
+        category: d.category,
+        imageUri: d.imageUri,
+        proofUri: d.proofUri,
+        outcomeLabels: [...d.outcomeLabels],
+        totalSharesWad: [...d.totalSharesWad],
+        impliedProbabilitiesWad: [...d.impliedProbabilitiesWad],
+        stage: Number(d.stage),
+        winningOutcome: Number(d.winningOutcome),
+        createdAt: Number(d.createdAt),
+        marketDeadline: Number(d.marketDeadline),
+        bWad: d.bWad,
+        totalVolumeWei: d.totalVolumeWei,
+        participants: Number(d.participants),
       });
+
+      if (uInfo) {
+        setUserInfo({
+          shares: [...uInfo._shares],
+          netDeposited: uInfo._netDeposited,
+          redeemed: uInfo._redeemed,
+          refunded: uInfo._refunded,
+          canRedeem: uInfo._canRedeem,
+          canRefund: uInfo._canRefund,
+        });
+      }
     } catch (err) {
-      console.error('Failed to fetch user info:', err);
+      console.error('Failed to refresh market data:', err);
     }
   }, [marketAddress, userAddress, readProvider]);
 
-  const fetchProbHistory = useCallback(async () => {
-    if (!marketAddress || !detail) return;
+  const fetchProbHistory = useCallback(async (addr: string, detailData: MarketDetailData) => {
     try {
-      const market = new ethers.Contract(marketAddress, MARKET_ABI, readProvider);
+      const market = new ethers.Contract(addr, MARKET_ABI, readProvider);
 
-      // Fetch buy and sell events
+      // Fetch buy and sell events in parallel
       const buyFilter = market.filters.SharesBought();
       const sellFilter = market.filters.SharesSold();
       const [buyEvents, sellEvents] = await Promise.all([
@@ -163,17 +197,25 @@ export default function MarketDetail() {
 
       if (allEvents.length === 0) return;
 
-      // Build history by fetching probabilities at trade points
-      // We'll simulate by accumulating shares and computing probabilities locally
-      const outcomeCount = detail.outcomeLabels.length;
-      const bWad = detail.bWad;
+      // Batch-fetch unique block timestamps in parallel
+      const uniqueBlocks = [...new Set(allEvents.map(e => e.blockNumber))];
+      const blockTimestamps = new Map<number, number>();
+      const blockResults = await Promise.all(
+        uniqueBlocks.map(bn => readProvider.getBlock(bn).catch(() => null))
+      );
+      uniqueBlocks.forEach((bn, i) => {
+        blockTimestamps.set(bn, blockResults[i]?.timestamp ?? detailData.createdAt);
+      });
+
+      const outcomeCount = detailData.outcomeLabels.length;
+      const bWad = detailData.bWad;
       const shares = new Array(outcomeCount).fill(0n);
       const history: ProbHistoryPoint[] = [];
 
       // Initial uniform state
       const uniformProb = 100 / outcomeCount;
-      const initialPoint: ProbHistoryPoint = { time: detail.createdAt };
-      detail.outcomeLabels.forEach((label, i) => {
+      const initialPoint: ProbHistoryPoint = { time: detailData.createdAt };
+      detailData.outcomeLabels.forEach((label) => {
         initialPoint[label] = Number(uniformProb.toFixed(1));
       });
       history.push(initialPoint);
@@ -192,21 +234,11 @@ export default function MarketDetail() {
           shares[outcomeIdx] = shares[outcomeIdx] - sharesWad;
         }
 
-        // Get block timestamp
-        let timestamp: number;
-        try {
-          const block = await readProvider.getBlock(event.blockNumber);
-          timestamp = block ? block.timestamp : detail.createdAt;
-        } catch {
-          timestamp = detail.createdAt;
-        }
-
-        // Compute probabilities using the LMSR formula
-        // p_i = exp(q_i/b) / sum(exp(q_j/b))
+        const timestamp = blockTimestamps.get(event.blockNumber) ?? detailData.createdAt;
         const probs = computeProbabilities(shares, bWad);
 
         const point: ProbHistoryPoint = { time: timestamp };
-        detail.outcomeLabels.forEach((label, i) => {
+        detailData.outcomeLabels.forEach((label, i) => {
           point[label] = Number((probs[i] * 100).toFixed(1));
         });
         history.push(point);
@@ -216,13 +248,17 @@ export default function MarketDetail() {
     } catch (err) {
       console.error('Failed to fetch prob history:', err);
     }
-  }, [marketAddress, detail, readProvider]);
+  }, [readProvider]);
 
-  useEffect(() => { fetchDetail(); }, [fetchDetail]);
-  useEffect(() => { fetchUserInfo(); }, [fetchUserInfo]);
+  // Single effect: load everything on mount / ID change
+  useEffect(() => { fetchAll(); }, [fetchAll]);
+
+  // Fetch prob history once detail is loaded (non-blocking, runs in background)
   useEffect(() => {
-    if (detail) fetchProbHistory();
-  }, [detail?.market]); // Only run once when detail first loads
+    if (detail && marketAddress) {
+      fetchProbHistory(marketAddress, detail);
+    }
+  }, [detail?.market]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Preview cost/proceeds
   useEffect(() => {
@@ -266,8 +302,7 @@ export default function MarketDetail() {
       await tx.wait();
       setTxMessage({ type: 'success', text: 'Shares purchased successfully!' });
       setShareAmount('');
-      fetchDetail();
-      fetchUserInfo();
+      refreshData();
     } catch (err) {
       setTxMessage({ type: 'error', text: parseContractError(err) });
     } finally {
@@ -289,8 +324,7 @@ export default function MarketDetail() {
       await tx.wait();
       setTxMessage({ type: 'success', text: 'Shares sold successfully!' });
       setShareAmount('');
-      fetchDetail();
-      fetchUserInfo();
+      refreshData();
     } catch (err) {
       setTxMessage({ type: 'error', text: parseContractError(err) });
     } finally {
@@ -308,7 +342,7 @@ export default function MarketDetail() {
       setTxMessage({ type: 'success', text: 'Redeem transaction submitted...' });
       await tx.wait();
       setTxMessage({ type: 'success', text: 'Winnings claimed successfully!' });
-      fetchUserInfo();
+      refreshData();
     } catch (err) {
       setTxMessage({ type: 'error', text: parseContractError(err) });
     } finally {
@@ -326,7 +360,7 @@ export default function MarketDetail() {
       setTxMessage({ type: 'success', text: 'Refund transaction submitted...' });
       await tx.wait();
       setTxMessage({ type: 'success', text: 'Refund claimed successfully!' });
-      fetchUserInfo();
+      refreshData();
     } catch (err) {
       setTxMessage({ type: 'error', text: parseContractError(err) });
     } finally {
