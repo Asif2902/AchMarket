@@ -1,0 +1,174 @@
+import { ethers } from 'ethers';
+
+/**
+ * Format a wei amount to human-readable USDC with appropriate decimals.
+ */
+export function formatUSDC(weiValue: bigint | string, decimals = 4): string {
+  const formatted = ethers.formatEther(weiValue);
+  const num = parseFloat(formatted);
+  if (num === 0) return '0';
+  if (num < 0.0001) return '< 0.0001';
+  return num.toLocaleString('en-US', {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: decimals,
+  });
+}
+
+/**
+ * Format a WAD value (1e18 = 1.0) to a human-readable number.
+ */
+export function formatWad(wadValue: bigint | string, decimals = 2): string {
+  const formatted = ethers.formatEther(wadValue);
+  const num = parseFloat(formatted);
+  if (num === 0) return '0';
+  return num.toLocaleString('en-US', {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: decimals,
+  });
+}
+
+/**
+ * Format a WAD probability (0-1e18) to a percentage string.
+ */
+export function formatProbability(wadProb: bigint | string): string {
+  const num = Number(wadProb) / 1e18;
+  return (num * 100).toFixed(1) + '%';
+}
+
+/**
+ * Get probability as a number 0-100.
+ */
+export function probToPercent(wadProb: bigint | string): number {
+  return Number(wadProb) / 1e16;
+}
+
+/**
+ * Parse USDC amount string to wei bigint.
+ */
+export function parseUSDCToWei(amount: string): bigint {
+  return ethers.parseEther(amount);
+}
+
+/**
+ * Format a timestamp to a readable date string.
+ */
+export function formatDate(timestamp: number): string {
+  return new Date(timestamp * 1000).toLocaleDateString('en-US', {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
+/**
+ * Get time remaining from now until a deadline.
+ */
+export function getTimeRemaining(deadline: number): {
+  total: number;
+  days: number;
+  hours: number;
+  minutes: number;
+  seconds: number;
+  expired: boolean;
+} {
+  const total = deadline * 1000 - Date.now();
+  if (total <= 0) {
+    return { total: 0, days: 0, hours: 0, minutes: 0, seconds: 0, expired: true };
+  }
+  return {
+    total,
+    days: Math.floor(total / (1000 * 60 * 60 * 24)),
+    hours: Math.floor((total / (1000 * 60 * 60)) % 24),
+    minutes: Math.floor((total / (1000 * 60)) % 60),
+    seconds: Math.floor((total / 1000) % 60),
+    expired: false,
+  };
+}
+
+/**
+ * Format time remaining as a compact string.
+ */
+export function formatTimeRemaining(deadline: number): string {
+  const { days, hours, minutes, expired } = getTimeRemaining(deadline);
+  if (expired) return 'Expired';
+  if (days > 0) return `${days}d ${hours}h`;
+  if (hours > 0) return `${hours}h ${minutes}m`;
+  return `${minutes}m`;
+}
+
+/**
+ * Format time ago from a timestamp.
+ */
+export function formatTimeAgo(timestamp: number): string {
+  const diff = Date.now() - timestamp * 1000;
+  const minutes = Math.floor(diff / (1000 * 60));
+  const hours = Math.floor(diff / (1000 * 60 * 60));
+  const days = Math.floor(diff / (1000 * 60 * 60 * 24));
+
+  if (minutes < 1) return 'just now';
+  if (minutes < 60) return `${minutes}m ago`;
+  if (hours < 24) return `${hours}h ago`;
+  return `${days}d ago`;
+}
+
+/**
+ * Truncate an address for display.
+ */
+export function truncateAddress(address: string): string {
+  return `${address.slice(0, 6)}...${address.slice(-4)}`;
+}
+
+/**
+ * Convert IPFS URI to a gateway URL.
+ */
+export function resolveImageUri(uri: string): string {
+  if (!uri) return '';
+  if (uri.startsWith('ipfs://')) {
+    const hash = uri.replace('ipfs://', '');
+    return `https://gateway.pinata.cloud/ipfs/${hash}`;
+  }
+  if (uri.startsWith('Qm') || uri.startsWith('bafy')) {
+    return `https://gateway.pinata.cloud/ipfs/${uri}`;
+  }
+  return uri;
+}
+
+/**
+ * Compute slippage-adjusted max cost for buying.
+ */
+export function applyBuySlippage(costWei: bigint, slippagePercent: number): bigint {
+  const basis = BigInt(Math.floor(slippagePercent * 100));
+  return costWei + (costWei * basis) / 10000n;
+}
+
+/**
+ * Compute slippage-adjusted min proceeds for selling.
+ */
+export function applySellSlippage(proceedsWei: bigint, slippagePercent: number): bigint {
+  const basis = BigInt(Math.floor(slippagePercent * 100));
+  return proceedsWei - (proceedsWei * basis) / 10000n;
+}
+
+/**
+ * Parse contract revert reason from error.
+ */
+export function parseContractError(error: unknown): string {
+  if (error && typeof error === 'object') {
+    const e = error as Record<string, unknown>;
+    // ethers v6 error shapes
+    if (e.reason && typeof e.reason === 'string') return e.reason;
+    if (e.shortMessage && typeof e.shortMessage === 'string') return e.shortMessage;
+    if (e.message && typeof e.message === 'string') {
+      const match = (e.message as string).match(/reason="([^"]+)"/);
+      if (match) return match[1];
+      const revertMatch = (e.message as string).match(/reverted with reason string '([^']+)'/);
+      if (revertMatch) return revertMatch[1];
+      if ((e.message as string).includes('user rejected')) return 'Transaction rejected by user';
+      if ((e.message as string).includes('insufficient funds')) return 'Insufficient USDC balance';
+      return e.message as string;
+    }
+  }
+  return 'An unexpected error occurred';
+}
