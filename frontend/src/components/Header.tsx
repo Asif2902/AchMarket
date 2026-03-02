@@ -46,12 +46,17 @@ export default function Header() {
           <div className="flex items-center justify-between h-16">
             {/* Logo */}
             <Link to="/" className="flex items-center gap-2.5 group shrink-0">
-              <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-primary-500 to-primary-700 flex items-center justify-center font-bold text-white text-sm shadow-lg shadow-primary-500/25 group-hover:shadow-primary-500/40 transition-shadow duration-300">
-                A
+              <img
+                src="/img/logos/achswap-logo.png"
+                alt="Achswap"
+                className="h-8 w-8 rounded-lg object-cover shadow-lg shadow-primary-500/25 group-hover:shadow-primary-500/40 transition-shadow duration-300"
+              />
+              <div className="flex flex-col leading-tight">
+                <span className="text-lg font-bold text-white tracking-tight leading-none">
+                  <span className="text-gradient">Ach</span>Market
+                </span>
+                <span className="text-2xs text-dark-500 leading-none mt-0.5">by Achswap</span>
               </div>
-              <span className="text-lg font-bold text-white tracking-tight">
-                Ach<span className="text-gradient">Market</span>
-              </span>
             </Link>
 
             {/* Desktop Nav Links (User mode) */}
@@ -166,7 +171,19 @@ export default function Header() {
           >
             {/* Drawer Header */}
             <div className="flex items-center justify-between p-4 border-b border-white/[0.06]">
-              <span className="text-sm font-semibold text-white">Menu</span>
+              <div className="flex items-center gap-2.5">
+                <img
+                  src="/img/logos/achswap-logo.png"
+                  alt="Achswap"
+                  className="h-7 w-7 rounded-lg object-cover"
+                />
+                <div className="flex flex-col leading-tight">
+                  <span className="text-sm font-bold text-white leading-none">
+                    <span className="text-gradient">Ach</span>Market
+                  </span>
+                  <span className="text-2xs text-dark-500 leading-none mt-0.5">by Achswap</span>
+                </div>
+              </div>
               <button
                 onClick={() => setMobileMenuOpen(false)}
                 className="w-8 h-8 rounded-lg bg-dark-800/60 flex items-center justify-center text-dark-400 hover:text-white transition-colors"
