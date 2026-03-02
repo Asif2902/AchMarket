@@ -21,7 +21,7 @@ export default function CancelledMarkets() {
           </div>
           Cancelled / Expired
         </h1>
-        <span className="badge bg-dark-750/80 text-dark-300 border-white/[0.06]">{cancelled.length}</span>
+        <span className="badge bg-dark-750/80 text-dark-300 border-white/[0.08]">{cancelled.length}</span>
       </div>
 
       {cancelled.length === 0 ? (

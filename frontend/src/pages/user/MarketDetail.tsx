@@ -574,7 +574,7 @@ export default function MarketDetail() {
                       <XAxis
                         dataKey="time"
                         tickFormatter={(t) => new Date(t * 1000).toLocaleDateString()}
-                        stroke="#334155"
+                        stroke="#2a3650"
                         tick={{ fontSize: 10, fill: '#64748b' }}
                         axisLine={false}
                         tickLine={false}
@@ -582,7 +582,7 @@ export default function MarketDetail() {
                       <YAxis
                         domain={[0, 100]}
                         tickFormatter={(v) => `${v}%`}
-                        stroke="#334155"
+                        stroke="#2a3650"
                         tick={{ fontSize: 10, fill: '#64748b' }}
                         axisLine={false}
                         tickLine={false}
@@ -630,7 +630,7 @@ export default function MarketDetail() {
                 <h3 className="text-sm font-semibold text-dark-300 uppercase tracking-wider mb-4">Trade</h3>
 
                 {/* Buy/Sell tabs */}
-                <div className="flex rounded-xl bg-dark-900/60 p-0.5 mb-5 border border-white/[0.04]">
+                <div className="flex rounded-xl bg-dark-900/60 p-0.5 mb-5 border border-white/[0.06]">
                   <button
                     onClick={() => { setTradeTab('buy'); setShareAmount(''); setPreviewCost(null); setEstimatedShares(null); }}
                     className={`flex-1 py-2 rounded-[10px] text-sm font-semibold transition-all ${
@@ -662,7 +662,7 @@ export default function MarketDetail() {
                         className={`w-full p-3 rounded-xl text-left text-sm transition-all border ${
                           selectedOutcome === i
                             ? 'border-primary-500/30 bg-primary-500/8'
-                            : 'border-white/[0.04] bg-dark-900/30 hover:border-white/[0.08]'
+                            : 'border-white/[0.06] bg-dark-900/30 hover:border-white/[0.08]'
                         }`}
                       >
                         <div className="flex justify-between items-center">
@@ -735,7 +735,7 @@ export default function MarketDetail() {
 
                 {/* Buy preview */}
                 {tradeTab === 'buy' && estimatedShares !== null && shareAmount && (
-                  <div className="p-3 rounded-xl bg-dark-900/40 border border-white/[0.04] mb-4 space-y-2">
+                  <div className="p-3 rounded-xl bg-dark-900/40 border border-white/[0.06] mb-4 space-y-2">
                     <PreviewRow label="Est. Shares" value={previewLoading ? '...' : `${estimatedShares.toFixed(4)}`} />
                     <PreviewRow label="Avg Price" value={previewLoading ? '...' : `${avgPrice.toFixed(4)} USDC`} />
                     {estimatedPayout !== null && (
@@ -762,7 +762,7 @@ export default function MarketDetail() {
 
                 {/* Sell preview */}
                 {tradeTab === 'sell' && previewCost !== null && shareAmount && (
-                  <div className="p-3 rounded-xl bg-dark-900/40 border border-white/[0.04] mb-4 space-y-2">
+                  <div className="p-3 rounded-xl bg-dark-900/40 border border-white/[0.06] mb-4 space-y-2">
                     <PreviewRow label="Est. Proceeds" value={previewLoading ? '...' : `${formatUSDC(previewCost)} USDC`} />
                     <div className="divider" />
                     <PreviewRow
@@ -861,7 +861,7 @@ export default function MarketDetail() {
                     const color = getOutcomeColor(i);
                     const isWinner = isResolved && detail.winningOutcome === i;
                     return (
-                      <div key={i} className={`p-3 rounded-xl ${isWinner ? 'bg-emerald-500/10 border border-emerald-500/20' : 'bg-dark-900/30 border border-white/[0.04]'}`}>
+                      <div key={i} className={`p-3 rounded-xl ${isWinner ? 'bg-emerald-500/10 border border-emerald-500/20' : 'bg-dark-900/30 border border-white/[0.06]'}`}>
                         <div className="flex justify-between items-center">
                           <span className={`text-sm font-medium ${isWinner ? 'text-emerald-400' : 'text-dark-200'}`}>
                             {isWinner && (
@@ -878,7 +878,7 @@ export default function MarketDetail() {
                   })}
                 </div>
 
-                <div className="p-3 rounded-xl bg-dark-900/30 border border-white/[0.04] mb-4">
+                <div className="p-3 rounded-xl bg-dark-900/30 border border-white/[0.06] mb-4">
                   <div className="flex justify-between text-sm">
                     <span className="text-dark-500 font-medium">Net Deposited</span>
                     <span className="font-bold text-white tabular-nums flex items-center gap-1"><UsdcIcon size={14} />{formatUSDC(userInfo.netDeposited)} USDC</span>

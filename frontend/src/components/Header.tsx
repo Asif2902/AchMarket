@@ -41,7 +41,7 @@ export default function Header() {
 
   return (
     <>
-      <header className="sticky top-0 z-40 glass border-b border-white/[0.06]">
+      <header className="sticky top-0 z-50 w-full border-b border-white/[0.08] bg-dark-950/80 backdrop-blur-xl supports-[backdrop-filter]:bg-dark-950/60 shadow-lg">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex items-center justify-between h-16">
             {/* Logo */}
@@ -77,7 +77,7 @@ export default function Header() {
               )}
 
               {isConnected && isCorrectNetwork && (
-                <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-dark-800/40 border border-white/[0.06]">
+                <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-dark-800/50 border border-primary-500/30 hover:border-primary-500/60 hover:bg-dark-800/70 transition-all duration-300">
                   <div className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
                   <span className="text-2xs text-dark-400 font-medium">{NETWORK.name}</span>
                 </div>
@@ -91,7 +91,7 @@ export default function Header() {
 
               {isConnected ? (
                 <div className="flex items-center">
-                  <div className="flex items-center gap-2 pl-3 pr-1.5 py-1 rounded-xl bg-dark-800/60 border border-white/[0.06]">
+                  <div className="flex items-center gap-2 pl-3 pr-1.5 py-1 rounded-xl bg-dark-800/50 border border-white/[0.10]">
                     <div className="w-5 h-5 rounded-full bg-gradient-to-br from-primary-400 to-accent-cyan flex items-center justify-center">
                       <span className="text-[8px] font-bold text-white">{address?.[2]?.toUpperCase()}</span>
                     </div>
@@ -147,7 +147,7 @@ export default function Header() {
                   )}
                   <button
                     onClick={() => setMobileMenuOpen(true)}
-                    className="w-9 h-9 rounded-xl bg-dark-800/60 border border-white/[0.06] flex items-center justify-center text-dark-300 hover:text-white transition-colors"
+                    className="w-9 h-9 rounded-lg bg-dark-800/50 border border-white/[0.08] flex items-center justify-center text-dark-300 hover:bg-dark-800/70 hover:text-white transition-all duration-200"
                     aria-label="Open menu"
                   >
                     <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -170,7 +170,7 @@ export default function Header() {
             onClick={(e) => e.stopPropagation()}
           >
             {/* Drawer Header */}
-            <div className="flex items-center justify-between p-4 border-b border-white/[0.06]">
+            <div className="flex items-center justify-between p-4 border-b border-white/[0.08]">
               <div className="flex items-center gap-2.5">
                 <img
                   src="/img/logos/achswap-logo.png"
@@ -195,7 +195,7 @@ export default function Header() {
             </div>
 
             {/* Wallet Info */}
-            <div className="p-4 border-b border-white/[0.06]">
+            <div className="p-4 border-b border-white/[0.08]">
               <div className="flex items-center gap-3 mb-3">
                 <div className="w-9 h-9 rounded-full bg-gradient-to-br from-primary-400 to-accent-cyan flex items-center justify-center">
                   <span className="text-xs font-bold text-white">{address?.[2]?.toUpperCase()}</span>
@@ -233,7 +233,7 @@ export default function Header() {
 
             {/* Navigation */}
             {showUserNav && (
-              <nav className="p-3 space-y-1 border-b border-white/[0.06]">
+              <nav className="p-3 space-y-1 border-b border-white/[0.08]">
                 <MobileNavLink to="/" current={location.pathname === '/'} icon={
                   <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6A2.25 2.25 0 016 3.75h2.25A2.25 2.25 0 0110.5 6v2.25a2.25 2.25 0 01-2.25 2.25H6a2.25 2.25 0 01-2.25-2.25V6zM3.75 15.75A2.25 2.25 0 016 13.5h2.25a2.25 2.25 0 012.25 2.25V18a2.25 2.25 0 01-2.25 2.25H6A2.25 2.25 0 013.75 18v-2.25zM13.5 6a2.25 2.25 0 012.25-2.25H18A2.25 2.25 0 0120.25 6v2.25A2.25 2.25 0 0118 10.5h-2.25a2.25 2.25 0 01-2.25-2.25V6zM13.5 15.75a2.25 2.25 0 012.25-2.25H18a2.25 2.25 0 012.25 2.25V18A2.25 2.25 0 0118 20.25h-2.25A2.25 2.25 0 0113.5 18v-2.25z" />
@@ -275,10 +275,10 @@ function NavLink({ to, current, children }: { to: string; current: boolean; chil
   return (
     <Link
       to={to}
-      className={`px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200 ${
+      className={`px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200 border ${
         current
-          ? 'bg-primary-500/15 text-primary-400 shadow-glow-sm'
-          : 'text-dark-400 hover:text-white hover:bg-white/[0.04]'
+          ? 'bg-primary-500/15 text-white border-primary-500/20'
+          : 'text-dark-400 border-transparent hover:text-white hover:bg-white/[0.06]'
       }`}
     >
       {children}
@@ -291,10 +291,10 @@ function MobileNavLink({ to, current, children, icon }: { to: string; current: b
   return (
     <Link
       to={to}
-      className={`flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all duration-200 ${
+      className={`flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all duration-200 border ${
         current
-          ? 'bg-primary-500/15 text-primary-400'
-          : 'text-dark-300 hover:text-white hover:bg-white/[0.04]'
+          ? 'bg-primary-500/15 text-white border-primary-500/20'
+          : 'text-dark-300 border-transparent hover:text-white hover:bg-white/[0.06]'
       }`}
     >
       {icon}

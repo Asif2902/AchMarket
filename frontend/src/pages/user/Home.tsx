@@ -125,7 +125,7 @@ export default function Home() {
   return (
     <div className="min-h-screen">
       {/* Hero Section */}
-      <div className="relative overflow-hidden border-b border-white/[0.04]">
+      <div className="relative overflow-hidden border-b border-white/[0.06]">
         {/* Background decorations */}
         <div className="absolute inset-0 bg-hero-gradient" />
         <div className="absolute top-0 left-1/4 w-96 h-96 bg-primary-500/5 rounded-full blur-3xl" />

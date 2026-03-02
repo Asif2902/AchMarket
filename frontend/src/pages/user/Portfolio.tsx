@@ -231,7 +231,7 @@ export default function Portfolio() {
               </div>
 
               {/* Actions */}
-              <div className="flex flex-wrap items-center gap-2 pt-3 border-t border-white/[0.04]">
+              <div className="flex flex-wrap items-center gap-2 pt-3 border-t border-white/[0.06]">
                 {pos.canRedeem && (
                   <button
                     onClick={() => handleAction(pos.market, 'redeem')}

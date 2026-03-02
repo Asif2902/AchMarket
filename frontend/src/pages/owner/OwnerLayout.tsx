@@ -13,7 +13,7 @@ export default function OwnerLayout() {
   return (
     <div className="flex min-h-[calc(100vh-64px)]">
       {/* Desktop Sidebar */}
-      <aside className="w-60 border-r border-white/[0.06] bg-dark-900/30 flex-shrink-0 hidden lg:block">
+      <aside className="w-60 border-r border-white/[0.08] bg-dark-900/30 flex-shrink-0 hidden lg:block">
         <div className="p-4 sticky top-16">
           <div className="flex items-center gap-2 px-3 mb-5">
             <div className="w-6 h-6 rounded-lg bg-primary-500/15 flex items-center justify-center">
@@ -49,7 +49,7 @@ export default function OwnerLayout() {
       </aside>
 
       {/* Mobile bottom nav */}
-      <div className="lg:hidden fixed bottom-0 left-0 right-0 z-50 glass border-t border-white/[0.06] safe-area-bottom">
+      <div className="lg:hidden fixed bottom-0 left-0 right-0 z-50 bg-dark-950/80 backdrop-blur-xl border-t border-white/[0.08] safe-area-bottom">
         <div className="flex overflow-x-auto scrollbar-hide px-1.5 py-1.5 gap-0.5">
           {NAV_ITEMS.map((item) => (
             <NavLink

@@ -11,7 +11,7 @@
 
   * {
     scrollbar-width: thin;
-    scrollbar-color: #334155 transparent;
+    scrollbar-color: #222f43 transparent;
   }
   *::-webkit-scrollbar {
     width: 5px;
@@ -21,11 +21,11 @@
     background: transparent;
   }
   *::-webkit-scrollbar-thumb {
-    background: #283548;
+    background: #222f43;
     border-radius: 10px;
   }
   *::-webkit-scrollbar-thumb:hover {
-    background: #3b4f6b;
+    background: #2a3650;
   }
 
   html {
@@ -37,9 +37,30 @@
     @apply bg-dark-950 text-white antialiased;
     min-height: 100vh;
     background-image:
-      radial-gradient(ellipse 80% 50% at 50% -20%, rgba(59, 130, 246, 0.08), transparent),
-      radial-gradient(ellipse 60% 40% at 80% 60%, rgba(34, 211, 238, 0.03), transparent);
-    background-attachment: fixed;
+      linear-gradient(to bottom right, #0f1219, #0f1219, rgba(59, 130, 246, 0.05));
+  }
+
+  /* Achswap-style rotating radial gradient behind all content */
+  body::before {
+    content: '';
+    position: fixed;
+    top: -50%;
+    left: -50%;
+    width: 200%;
+    height: 200%;
+    background: radial-gradient(
+      circle at 50% 50%,
+      rgba(59, 130, 246, 0.08) 0%,
+      transparent 50%
+    );
+    animation: rotate-bg 20s linear infinite;
+    z-index: -1;
+    pointer-events: none;
+  }
+
+  @keyframes rotate-bg {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
   }
 
   input[type="number"]::-webkit-outer-spin-button,
@@ -55,58 +76,70 @@
     background: rgba(59, 130, 246, 0.3);
     color: white;
   }
+
+  /* Respect reduced motion */
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
 }
 
 @layer components {
   /* ═══════════════════════════════════════
-     CARDS
+     CARDS — matches Achswap card system
      ═══════════════════════════════════════ */
   .card {
-    @apply bg-dark-800/50 backdrop-blur-sm border border-white/[0.06] rounded-2xl shadow-card;
+    @apply bg-dark-900/60 backdrop-blur-sm border border-white/[0.08] rounded-xl shadow-card;
     background-image: linear-gradient(135deg, rgba(255, 255, 255, 0.03) 0%, rgba(255, 255, 255, 0) 100%);
   }
   .card-hover {
-    @apply card transition-all duration-250 cursor-pointer;
+    @apply card transition-all duration-300 cursor-pointer;
   }
   .card-hover:hover {
     @apply border-primary-500/20 shadow-card-hover;
-    transform: translateY(-2px);
+    transform: translateY(-4px);
     background-image: linear-gradient(135deg, rgba(59, 130, 246, 0.04) 0%, rgba(255, 255, 255, 0.01) 100%);
   }
 
   /* ═══════════════════════════════════════
-     GLASS PANELS
+     GLASS PANELS — matches Achswap glass
      ═══════════════════════════════════════ */
   .glass {
-    @apply bg-dark-900/70 backdrop-blur-xl border border-white/[0.06];
-    background-image: linear-gradient(135deg, rgba(255, 255, 255, 0.02) 0%, rgba(255, 255, 255, 0) 100%);
+    background: rgba(255, 255, 255, 0.05);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    border: 1px solid rgba(255, 255, 255, 0.1);
   }
   .glass-subtle {
-    @apply bg-dark-800/30 backdrop-blur-md border border-white/[0.04];
+    @apply bg-dark-800/30 backdrop-blur-md border border-white/[0.06];
   }
 
   /* ═══════════════════════════════════════
-     BUTTONS
+     BUTTONS — matches Achswap button system
      ═══════════════════════════════════════ */
   .btn-primary {
-    @apply relative px-5 py-2.5 bg-primary-600 text-white font-semibold rounded-xl
+    @apply relative px-5 py-2.5 bg-primary-500 text-white font-semibold rounded-xl
            transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed
-           active:scale-[0.97] shadow-glow-sm;
-    background-image: linear-gradient(180deg, rgba(255,255,255,0.1) 0%, transparent 40%);
+           active:scale-[0.98] shadow-glow-sm border border-primary-400/20;
+    background-image: linear-gradient(135deg, #3b82f6, #2563eb);
   }
   .btn-primary:hover:not(:disabled) {
-    @apply bg-primary-500 shadow-glow;
+    @apply shadow-glow;
+    background-image: linear-gradient(135deg, #2563eb, #1d4ed8);
     transform: translateY(-1px);
   }
   .btn-primary:active:not(:disabled) {
-    transform: translateY(0px) scale(0.97);
+    transform: translateY(0px) scale(0.98);
   }
 
   .btn-secondary {
-    @apply px-5 py-2.5 bg-dark-750 text-dark-200 font-medium rounded-xl
-           border border-white/[0.08] transition-all duration-200
+    @apply px-5 py-2.5 bg-dark-800 text-dark-200 font-medium rounded-xl
+           border border-white/[0.10] transition-all duration-200
            disabled:opacity-50 disabled:cursor-not-allowed hover:bg-dark-700
-           hover:text-white hover:border-white/[0.12];
+           hover:text-white hover:border-white/[0.15];
   }
 
   .btn-danger {
@@ -125,6 +158,7 @@
 
   .btn-ghost {
     @apply px-4 py-2 text-dark-300 font-medium rounded-xl
+           border border-transparent
            transition-all duration-200 hover:text-white hover:bg-white/[0.06];
   }
 
@@ -132,29 +166,29 @@
     @apply px-5 py-2.5 bg-yes-muted text-yes-light font-semibold rounded-xl
            border border-yes-border transition-all duration-200
            hover:bg-green-500/25 hover:shadow-glow-yes
-           disabled:opacity-50 disabled:cursor-not-allowed active:scale-[0.97];
+           disabled:opacity-50 disabled:cursor-not-allowed active:scale-[0.98];
   }
 
   .btn-no {
     @apply px-5 py-2.5 bg-no-muted text-no-light font-semibold rounded-xl
            border border-no-border transition-all duration-200
            hover:bg-red-500/25 hover:shadow-glow-no
-           disabled:opacity-50 disabled:cursor-not-allowed active:scale-[0.97];
+           disabled:opacity-50 disabled:cursor-not-allowed active:scale-[0.98];
   }
 
   /* ═══════════════════════════════════════
-     FORM INPUTS
+     FORM INPUTS — matches Achswap input system
      ═══════════════════════════════════════ */
   .input-field {
-    @apply w-full px-4 py-3 bg-dark-900/60 border border-white/[0.08] rounded-xl
+    @apply w-full px-4 py-3 bg-white/[0.04] border border-white/[0.08] rounded-xl
            text-white placeholder-dark-500 transition-all duration-200
-           focus:outline-none focus:border-primary-500/40 focus:ring-2 focus:ring-primary-500/10
-           focus:bg-dark-900/80;
+           focus:outline-none focus:border-primary-500/50 focus:ring-2 focus:ring-primary-500/10
+           focus:bg-white/[0.06];
   }
   .select-field {
-    @apply w-full px-4 py-3 bg-dark-900/60 border border-white/[0.08] rounded-xl
+    @apply w-full px-4 py-3 bg-white/[0.04] border border-white/[0.08] rounded-xl
            text-white transition-all duration-200 appearance-none cursor-pointer
-           focus:outline-none focus:border-primary-500/40 focus:ring-2 focus:ring-primary-500/10;
+           focus:outline-none focus:border-primary-500/50 focus:ring-2 focus:ring-primary-500/10;
   }
   .label {
     @apply block text-sm font-medium text-dark-300 mb-1.5;
@@ -193,7 +227,7 @@
   }
 
   /* ═══════════════════════════════════════
-     ANIMATIONS (kept as CSS for non-Tailwind usage)
+     ANIMATIONS
      ═══════════════════════════════════════ */
   @keyframes shimmer {
     0% { background-position: -200% 0; }
@@ -201,35 +235,57 @@
   }
 
   @keyframes pulse-glow {
-    0%, 100% { box-shadow: 0 0 0 0 rgba(59, 130, 246, 0); }
-    50% { box-shadow: 0 0 20px 4px rgba(59, 130, 246, 0.12); }
+    0%, 100% { box-shadow: 0 0 20px rgba(59, 130, 246, 0.4); }
+    50% { box-shadow: 0 0 40px rgba(59, 130, 246, 0.8); }
   }
   .pulse-glow {
-    animation: pulse-glow 2.5s ease-in-out infinite;
+    animation: pulse-glow 2s ease-in-out infinite;
   }
 
   /* ═══════════════════════════════════════
      UTILITY CLASSES
      ═══════════════════════════════════════ */
   .text-gradient {
-    @apply bg-clip-text text-transparent bg-gradient-to-r from-primary-400 to-accent-cyan;
+    @apply bg-clip-text text-transparent bg-gradient-to-r from-primary-400 via-blue-500 to-blue-600;
   }
   .text-gradient-warm {
     @apply bg-clip-text text-transparent bg-gradient-to-r from-accent-amber to-accent-rose;
   }
 
   .divider {
-    @apply border-t border-white/[0.06];
+    @apply border-t border-white/[0.08];
   }
 
   .chip {
     @apply inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium
-           bg-dark-800/60 border border-white/[0.06] text-dark-300
+           bg-dark-800/60 border border-white/[0.08] text-dark-300
            transition-all duration-200 cursor-pointer select-none
-           hover:border-white/[0.12] hover:text-white;
+           hover:border-white/[0.15] hover:text-white;
   }
   .chip-active {
     @apply bg-primary-600/20 border-primary-500/30 text-primary-400;
+  }
+
+  /* Hover elevate — matches Achswap hover-elevate system */
+  .hover-elevate {
+    @apply transition-all duration-300;
+  }
+  .hover-elevate:hover {
+    transform: scale(1.02);
+    @apply shadow-lg;
+  }
+  .hover-elevate::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    background: rgba(59, 130, 246, 0.08);
+    opacity: 0;
+    transition: opacity 0.3s;
+    pointer-events: none;
+  }
+  .hover-elevate:hover::after {
+    opacity: 1;
   }
 
   /* Mobile-friendly touch targets */
@@ -246,12 +302,13 @@
      MOBILE OVERLAY / DRAWER
      ═══════════════════════════════════════ */
   .mobile-overlay {
-    @apply fixed inset-0 z-50 bg-black/60 backdrop-blur-sm;
+    @apply fixed inset-0 z-50 bg-black/70 backdrop-blur-sm;
     animation: fadeIn 0.2s ease-out;
   }
   .mobile-drawer {
-    @apply fixed top-0 right-0 bottom-0 z-50 w-72 bg-dark-900 border-l border-white/[0.06]
+    @apply fixed top-0 right-0 bottom-0 z-50 w-72 border-l border-white/[0.08]
            shadow-elevated overflow-y-auto;
+    background: linear-gradient(145deg, #141820 0%, #0f1219 100%);
     animation: slideInRight 0.3s ease-out;
   }
   @keyframes slideInRight {

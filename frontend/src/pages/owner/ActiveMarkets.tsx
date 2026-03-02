@@ -25,7 +25,7 @@ export default function ActiveMarkets() {
           </div>
           Active Markets
         </h1>
-        <span className="badge bg-dark-750/80 text-dark-300 border-white/[0.06]">{active.length}</span>
+        <span className="badge bg-dark-750/80 text-dark-300 border-white/[0.08]">{active.length}</span>
       </div>
 
       {active.length === 0 ? (

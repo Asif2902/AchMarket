@@ -142,7 +142,7 @@ export default function FeeManagement() {
         </h2>
         {feeEvents.length === 0 ? (
           <div className="text-center py-8">
-            <div className="w-12 h-12 rounded-2xl bg-dark-800/80 border border-white/[0.06] flex items-center justify-center mx-auto mb-3">
+            <div className="w-12 h-12 rounded-2xl bg-dark-800/80 border border-white/[0.08] flex items-center justify-center mx-auto mb-3">
               <svg className="w-5 h-5 text-dark-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4" /></svg>
             </div>
             <p className="text-sm text-dark-400">No fees collected yet.</p>
@@ -152,7 +152,7 @@ export default function FeeManagement() {
           <div className="overflow-x-auto -mx-5 sm:-mx-6 px-5 sm:px-6">
             <table className="w-full text-sm">
               <thead>
-                <tr className="border-b border-white/[0.06] text-dark-400 text-left">
+                <tr className="border-b border-white/[0.08] text-dark-400 text-left">
                   <th className="pb-3 pr-4 font-medium text-xs uppercase tracking-wider">Market</th>
                   <th className="pb-3 pr-4 font-medium text-xs uppercase tracking-wider text-right">Fee Amount</th>
                   <th className="pb-3 font-medium text-xs uppercase tracking-wider text-right">Block</th>
