@@ -8,7 +8,8 @@ export const NETWORK = {
     symbol: 'USDC',
     decimals: 18,
   },
-  blockExplorer: '',
+  blockExplorer: 'https://testnet.arcscan.app',
+  blockscoutApi: 'https://testnet.arcscan.app/api',
 } as const;
 
 export const FACTORY_ADDRESS = '0x7B7D71141B5b9b2F42E6D7Bf1657ad9c2B140272';

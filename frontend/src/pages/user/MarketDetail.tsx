@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { ethers } from 'ethers';
-import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend, CartesianGrid } from 'recharts';
+import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
 import { useWallet } from '../../context/WalletContext';
 import { FACTORY_ADDRESS, STAGE, STAGE_LABELS, STAGE_COLORS } from '../../config/network';
 import { FACTORY_ABI, MARKET_ABI } from '../../config/abis';
@@ -10,6 +10,7 @@ import ProbabilityBar, { getOutcomeColor } from '../../components/ProbabilityBar
 import Countdown from '../../components/Countdown';
 import { PageLoader } from '../../components/LoadingSpinner';
 import UsdcIcon from '../../components/UsdcIcon';
+import { fetchTradeEvents } from '../../services/blockscout';
 import {
   formatUSDC, formatWad, formatProbability, probToPercent, formatDate,
   applyBuySlippage, applySellSlippage, parseContractError, resolveImageUri,
@@ -171,36 +172,12 @@ export default function MarketDetail() {
 
   const fetchProbHistory = useCallback(async (addr: string, detailData: MarketDetailData) => {
     try {
-      const market = new ethers.Contract(addr, MARKET_ABI, readProvider);
-      const buyFilter = market.filters.SharesBought();
-      const sellFilter = market.filters.SharesSold();
-      const [buyEvents, sellEvents] = await Promise.all([
-        market.queryFilter(buyFilter, 0),
-        market.queryFilter(sellFilter, 0),
-      ]);
-
-      type TradeEvent = { blockNumber: number; type: string; log: ethers.EventLog };
-      const allEvents: TradeEvent[] = [
-        ...buyEvents.map(e => ({ blockNumber: e.blockNumber, type: 'buy', log: e as ethers.EventLog })),
-        ...sellEvents.map(e => ({ blockNumber: e.blockNumber, type: 'sell', log: e as ethers.EventLog })),
-      ].sort((a, b) => a.blockNumber - b.blockNumber);
-
-      if (allEvents.length === 0) return;
-
-      const uniqueBlocks = [...new Set(allEvents.map(e => e.blockNumber))];
-      const blockTimestamps = new Map<number, number>();
-      const blockResults = await Promise.all(
-        uniqueBlocks.map(bn => readProvider.getBlock(bn).catch(() => null))
-      );
-      uniqueBlocks.forEach((bn, i) => {
-        blockTimestamps.set(bn, blockResults[i]?.timestamp ?? detailData.createdAt);
-      });
-
       const outcomeCount = detailData.outcomeLabels.length;
       const bWad = detailData.bWad;
       const shares = new Array(outcomeCount).fill(0n);
       const history: ProbHistoryPoint[] = [];
 
+      // Initial point at market creation — uniform probabilities
       const uniformProb = 100 / outcomeCount;
       const initialPoint: ProbHistoryPoint = { time: detailData.createdAt };
       detailData.outcomeLabels.forEach((label) => {
@@ -208,29 +185,55 @@ export default function MarketDetail() {
       });
       history.push(initialPoint);
 
-      for (const event of allEvents) {
-        const log = event.log;
-        if (!log.args) continue;
-        const outcomeIdx = Number(log.args[1]);
-        const sharesWad = log.args[2] as bigint;
+      // Fetch trade events from BlockScout API (reliable, includes timestamps)
+      const events = await fetchTradeEvents(addr);
+
+      for (const event of events) {
         if (event.type === 'buy') {
-          shares[outcomeIdx] = shares[outcomeIdx] + sharesWad;
+          shares[event.outcomeIndex] = shares[event.outcomeIndex] + event.sharesWad;
         } else {
-          shares[outcomeIdx] = shares[outcomeIdx] - sharesWad;
+          shares[event.outcomeIndex] = shares[event.outcomeIndex] - event.sharesWad;
         }
-        const timestamp = blockTimestamps.get(event.blockNumber) ?? detailData.createdAt;
         const probs = computeProbabilities(shares, bWad);
-        const point: ProbHistoryPoint = { time: timestamp };
+        const point: ProbHistoryPoint = { time: event.timestamp };
         detailData.outcomeLabels.forEach((label, i) => {
           point[label] = Number((probs[i] * 100).toFixed(1));
         });
         history.push(point);
       }
+
+      // Add a "now" point with current probabilities so the chart extends to present
+      const nowTs = Math.floor(Date.now() / 1000);
+      const currentProbs = computeProbabilities(detailData.totalSharesWad, bWad);
+      const nowPoint: ProbHistoryPoint = { time: nowTs };
+      detailData.outcomeLabels.forEach((label, i) => {
+        nowPoint[label] = Number((currentProbs[i] * 100).toFixed(1));
+      });
+      // Only add if it's after the last event
+      if (history.length === 0 || nowTs > history[history.length - 1].time) {
+        history.push(nowPoint);
+      }
+
       setProbHistory(history);
     } catch (err) {
-      console.error('Failed to fetch prob history:', err);
+      console.error('Failed to fetch prob history from BlockScout:', err);
+      // Fallback: show current state as a single-point chart
+      const currentProbs = computeProbabilities(detailData.totalSharesWad, detailData.bWad);
+      const fallback: ProbHistoryPoint[] = [
+        (() => {
+          const p: ProbHistoryPoint = { time: detailData.createdAt };
+          detailData.outcomeLabels.forEach((l, i) => { p[l] = Number((currentProbs[i] * 100).toFixed(1)); });
+          return p;
+        })(),
+        (() => {
+          const p: ProbHistoryPoint = { time: Math.floor(Date.now() / 1000) };
+          detailData.outcomeLabels.forEach((l, i) => { p[l] = Number((currentProbs[i] * 100).toFixed(1)); });
+          return p;
+        })(),
+      ];
+      setProbHistory(fallback);
     }
-  }, [readProvider]);
+  }, []);
 
   useEffect(() => { fetchAll(); }, [fetchAll]);
 
@@ -538,6 +541,15 @@ export default function MarketDetail() {
               </div>
             )}
 
+            {/* Probability history chart — Polymarket-style */}
+            {probHistory.length > 0 && (
+              <ProbabilityChart
+                history={probHistory}
+                outcomeLabels={detail.outcomeLabels}
+                createdAt={detail.createdAt}
+              />
+            )}
+
             {/* Outcome Probabilities */}
             <div className="card p-5">
               <h2 className="text-sm font-semibold text-dark-300 uppercase tracking-wider mb-4">Outcome Probabilities</h2>
@@ -563,15 +575,6 @@ export default function MarketDetail() {
                 })}
               </div>
             </div>
-
-            {/* Probability history chart */}
-            {probHistory.length > 1 && (
-              <ProbabilityChart
-                history={probHistory}
-                outcomeLabels={detail.outcomeLabels}
-                createdAt={detail.createdAt}
-              />
-            )}
           </div>
 
           {/* Right column — sticky on desktop */}
@@ -868,11 +871,13 @@ export default function MarketDetail() {
   );
 }
 
-/* ─── Probability Chart ─── */
+/* ─── Probability Chart (Polymarket-style) ─── */
 
 const CHART_COLORS = ['#22c55e', '#ef4444', '#3b82f6', '#a855f7', '#f97316', '#06b6d4'];
 
 const TIME_RANGES = [
+  { key: '1H', label: '1H', seconds: 3600 },
+  { key: '6H', label: '6H', seconds: 21600 },
   { key: '1D', label: '1D', seconds: 86400 },
   { key: '1W', label: '1W', seconds: 604800 },
   { key: '1M', label: '1M', seconds: 2592000 },
@@ -890,6 +895,7 @@ function ProbabilityChart({
 }) {
   const [timeRange, setTimeRange] = useState<string>('ALL');
   const [hoveredData, setHoveredData] = useState<ProbHistoryPoint | null>(null);
+  const [activeOutcome, setActiveOutcome] = useState<string | null>(null);
 
   const filteredHistory = (() => {
     if (timeRange === 'ALL' || history.length === 0) return history;
@@ -907,20 +913,29 @@ function ProbabilityChart({
 
   // Current values (last point or hovered)
   const displayData = hoveredData ?? (filteredHistory.length > 0 ? filteredHistory[filteredHistory.length - 1] : null);
+  const latestData = filteredHistory.length > 0 ? filteredHistory[filteredHistory.length - 1] : null;
+
+  // Compute change from first visible point
+  const firstData = filteredHistory.length > 0 ? filteredHistory[0] : null;
 
   return (
     <div className="card overflow-hidden">
-      {/* Header with current values */}
+      {/* Header */}
       <div className="p-5 pb-0">
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-sm font-semibold text-dark-300 uppercase tracking-wider">Price Chart</h2>
+        <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center gap-2">
+            <svg className="w-4 h-4 text-dark-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 013 19.875v-6.75zM9.75 8.625c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V8.625zM16.5 4.125c0-.621.504-1.125 1.125-1.125h2.25C20.496 3 21 3.504 21 4.125v15.75c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V4.125z" />
+            </svg>
+            <h2 className="text-sm font-semibold text-dark-300 uppercase tracking-wider">Price History</h2>
+          </div>
           {/* Time range selector */}
           <div className="flex items-center rounded-lg bg-dark-900/60 p-0.5 border border-white/[0.06]">
             {TIME_RANGES.map(range => (
               <button
                 key={range.key}
                 onClick={() => setTimeRange(range.key)}
-                className={`px-2.5 py-1 rounded-md text-2xs font-semibold transition-all ${
+                className={`px-2 py-1 rounded-md text-2xs font-semibold transition-all ${
                   timeRange === range.key
                     ? 'bg-primary-600/20 text-primary-400'
                     : 'text-dark-500 hover:text-dark-300'
@@ -932,41 +947,65 @@ function ProbabilityChart({
           </div>
         </div>
 
-        {/* Current / hovered probability values */}
+        {/* Outcome legend / price display — Polymarket style */}
         {displayData && (
-          <div className="flex flex-wrap items-center gap-x-5 gap-y-1.5 mb-3">
+          <div className="space-y-2 mb-4">
             {outcomeLabels.map((label, i) => {
               const value = displayData[label] as number | undefined;
+              const firstValue = firstData ? (firstData[label] as number | undefined) : undefined;
+              const change = value != null && firstValue != null ? value - firstValue : null;
+              const isActive = activeOutcome === null || activeOutcome === label;
               return (
-                <div key={label} className="flex items-center gap-1.5">
-                  <div
-                    className="w-2 h-2 rounded-full"
-                    style={{ backgroundColor: CHART_COLORS[i % CHART_COLORS.length] }}
-                  />
-                  <span className="text-xs text-dark-400">{label}</span>
-                  <span
-                    className="text-sm font-bold tabular-nums"
-                    style={{ color: CHART_COLORS[i % CHART_COLORS.length] }}
-                  >
-                    {value != null ? `${value.toFixed(1)}%` : '--'}
-                  </span>
-                </div>
+                <button
+                  key={label}
+                  onClick={() => setActiveOutcome(prev => prev === label ? null : label)}
+                  className={`w-full flex items-center justify-between p-2.5 rounded-xl transition-all border ${
+                    isActive
+                      ? 'border-white/[0.08] bg-dark-900/40'
+                      : 'border-transparent bg-dark-900/20 opacity-40'
+                  }`}
+                >
+                  <div className="flex items-center gap-2.5">
+                    <div
+                      className="w-3 h-3 rounded-full shrink-0"
+                      style={{ backgroundColor: CHART_COLORS[i % CHART_COLORS.length] }}
+                    />
+                    <span className="text-sm font-medium text-white">{label}</span>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    {change !== null && change !== 0 && (
+                      <span className={`text-2xs font-semibold tabular-nums ${change > 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                        {change > 0 ? '+' : ''}{change.toFixed(1)}%
+                      </span>
+                    )}
+                    <span
+                      className="text-lg font-bold tabular-nums"
+                      style={{ color: CHART_COLORS[i % CHART_COLORS.length] }}
+                    >
+                      {value != null ? `${value.toFixed(1)}` : '--'}
+                      <span className="text-xs opacity-60">¢</span>
+                    </span>
+                  </div>
+                </button>
               );
             })}
             {hoveredData && (
-              <span className="text-2xs text-dark-600 ml-auto">
-                {formatDate(hoveredData.time)}
-              </span>
+              <div className="text-center">
+                <span className="text-2xs text-dark-600">
+                  {formatDate(hoveredData.time)}
+                </span>
+              </div>
             )}
           </div>
         )}
       </div>
 
       {/* Chart */}
-      <div className="h-72 sm:h-80 px-2">
+      <div className="h-64 sm:h-72 px-2 pb-3">
         <ResponsiveContainer width="100%" height="100%">
           <AreaChart
             data={filteredHistory}
+            margin={{ top: 4, right: 8, bottom: 0, left: 0 }}
             onMouseMove={(state: { activePayload?: Array<{ payload: ProbHistoryPoint }> }) => {
               if (state?.activePayload?.[0]) {
                 setHoveredData(state.activePayload[0].payload);
@@ -976,79 +1015,98 @@ function ProbabilityChart({
           >
             <defs>
               {outcomeLabels.map((_, i) => (
-                <linearGradient key={i} id={`gradient-${i}`} x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stopColor={CHART_COLORS[i % CHART_COLORS.length]} stopOpacity={0.3} />
-                  <stop offset="95%" stopColor={CHART_COLORS[i % CHART_COLORS.length]} stopOpacity={0} />
+                <linearGradient key={i} id={`prob-gradient-${i}`} x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor={CHART_COLORS[i % CHART_COLORS.length]} stopOpacity={0.15} />
+                  <stop offset="100%" stopColor={CHART_COLORS[i % CHART_COLORS.length]} stopOpacity={0} />
                 </linearGradient>
               ))}
             </defs>
             <CartesianGrid
               strokeDasharray="3 3"
-              stroke="rgba(255,255,255,0.04)"
+              stroke="rgba(255,255,255,0.03)"
               vertical={false}
             />
             <XAxis
               dataKey="time"
               tickFormatter={(t) => {
                 const d = new Date(t * 1000);
-                if (timeRange === '1D') return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                if (timeRange === '1H' || timeRange === '6H' || timeRange === '1D') {
+                  return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                }
                 return d.toLocaleDateString([], { month: 'short', day: 'numeric' });
               }}
               stroke="transparent"
-              tick={{ fontSize: 10, fill: '#475569' }}
+              tick={{ fontSize: 10, fill: '#3b4252' }}
               axisLine={false}
               tickLine={false}
-              minTickGap={40}
+              minTickGap={50}
             />
             <YAxis
               domain={[0, 100]}
-              tickFormatter={(v) => `${v}%`}
+              tickFormatter={(v) => `${v}¢`}
               stroke="transparent"
-              tick={{ fontSize: 10, fill: '#475569' }}
+              tick={{ fontSize: 10, fill: '#3b4252' }}
               axisLine={false}
               tickLine={false}
-              width={35}
+              width={32}
+              ticks={[0, 25, 50, 75, 100]}
             />
             <Tooltip
               cursor={{
-                stroke: 'rgba(255,255,255,0.1)',
+                stroke: 'rgba(255,255,255,0.15)',
                 strokeWidth: 1,
-                strokeDasharray: '4 4',
               }}
               contentStyle={{
-                backgroundColor: 'rgba(15, 23, 42, 0.95)',
-                border: '1px solid rgba(255,255,255,0.08)',
-                borderRadius: '12px',
-                backdropFilter: 'blur(12px)',
+                backgroundColor: 'rgba(10, 15, 25, 0.95)',
+                border: '1px solid rgba(255,255,255,0.1)',
+                borderRadius: '10px',
+                backdropFilter: 'blur(16px)',
                 padding: '10px 14px',
                 fontSize: '12px',
-                boxShadow: '0 8px 32px rgba(0,0,0,0.4)',
+                boxShadow: '0 12px 40px rgba(0,0,0,0.5)',
               }}
               labelFormatter={(t) => formatDate(t as number)}
               formatter={(value: number, name: string) => {
-                return [`${value.toFixed(1)}%`, name];
+                const idx = outcomeLabels.indexOf(name);
+                const color = CHART_COLORS[idx % CHART_COLORS.length] || '#fff';
+                return [`${value.toFixed(1)}¢`, name];
               }}
+              itemStyle={{ fontSize: '11px', padding: '1px 0' }}
             />
-            {outcomeLabels.map((label, i) => (
-              <Area
-                key={label}
-                type="monotone"
-                dataKey={label}
-                stroke={CHART_COLORS[i % CHART_COLORS.length]}
-                strokeWidth={2}
-                fill={`url(#gradient-${i})`}
-                fillOpacity={1}
-                dot={false}
-                activeDot={{
-                  r: 5,
-                  strokeWidth: 2,
-                  stroke: CHART_COLORS[i % CHART_COLORS.length],
-                  fill: '#0f1219',
-                }}
-              />
-            ))}
+            {outcomeLabels.map((label, i) => {
+              const isVisible = activeOutcome === null || activeOutcome === label;
+              return (
+                <Area
+                  key={label}
+                  type="stepAfter"
+                  dataKey={label}
+                  stroke={isVisible ? CHART_COLORS[i % CHART_COLORS.length] : 'transparent'}
+                  strokeWidth={isVisible ? 2.5 : 0}
+                  fill={isVisible ? `url(#prob-gradient-${i})` : 'transparent'}
+                  fillOpacity={1}
+                  dot={false}
+                  activeDot={isVisible ? {
+                    r: 4,
+                    strokeWidth: 2,
+                    stroke: CHART_COLORS[i % CHART_COLORS.length],
+                    fill: '#0a0f19',
+                  } : false}
+                  animationDuration={500}
+                />
+              );
+            })}
           </AreaChart>
         </ResponsiveContainer>
+      </div>
+
+      {/* Trade count indicator */}
+      <div className="px-5 pb-3 flex items-center justify-between">
+        <span className="text-2xs text-dark-600">
+          {history.length - 1} trade{history.length - 1 !== 1 ? 's' : ''} recorded
+        </span>
+        <span className="text-2xs text-dark-600">
+          Powered by BlockScout
+        </span>
       </div>
     </div>
   );
