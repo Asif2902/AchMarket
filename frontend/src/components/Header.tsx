@@ -1,11 +1,10 @@
 import { useState, useEffect, useRef } from 'react';
 import { Link, useLocation } from 'react-router-dom';
+import { ConnectButton } from '@rainbow-me/rainbowkit';
 import { useWallet } from '../context/WalletContext';
-import { truncateAddress } from '../utils/format';
-import { NETWORK } from '../config/network';
 
 export default function Header() {
-  const { address, isConnected, isOwner, isCorrectNetwork, isConnecting, connect, disconnect, switchNetwork } = useWallet();
+  const { isConnected, isOwner } = useWallet();
   const location = useLocation();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -69,100 +68,39 @@ export default function Header() {
 
             {/* Desktop right side */}
             <div className="hidden sm:flex items-center gap-2.5">
-              {isConnected && !isCorrectNetwork && (
-                <button onClick={switchNetwork} className="btn-danger text-xs px-3 py-1.5 flex items-center gap-1.5">
-                  <span className="w-2 h-2 rounded-full bg-red-400 animate-pulse" />
-                  Switch to {NETWORK.name}
-                </button>
-              )}
-
-              {isConnected && isCorrectNetwork && (
-                <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-dark-800/50 border border-primary-500/30 hover:border-primary-500/60 hover:bg-dark-800/70 transition-all duration-300">
-                  <div className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
-                  <span className="text-2xs text-dark-400 font-medium">{NETWORK.name}</span>
-                </div>
-              )}
-
               {isConnected && isOwner && (
                 <span className="badge bg-primary-500/15 text-primary-400 border-primary-500/25 text-2xs">
                   Owner
                 </span>
               )}
-
-              {isConnected ? (
-                <div className="flex items-center">
-                  <div className="flex items-center gap-2 pl-3 pr-1.5 py-1 rounded-xl bg-dark-800/50 border border-white/[0.10]">
-                    <div className="w-5 h-5 rounded-full bg-gradient-to-br from-primary-400 to-accent-cyan flex items-center justify-center">
-                      <span className="text-[8px] font-bold text-white">{address?.[2]?.toUpperCase()}</span>
-                    </div>
-                    <span className="text-sm font-mono text-dark-200 tracking-tight">
-                      {truncateAddress(address!)}
-                    </span>
-                    <button
-                      onClick={disconnect}
-                      className="p-1.5 rounded-lg hover:bg-white/[0.06] text-dark-500 hover:text-red-400 transition-colors"
-                      title="Disconnect"
-                    >
-                      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
-                      </svg>
-                    </button>
-                  </div>
-                </div>
-              ) : (
-                <button onClick={connect} disabled={isConnecting} className="btn-primary text-sm px-5 py-2">
-                  {isConnecting ? (
-                    <span className="flex items-center gap-2">
-                      <div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                      Connecting...
-                    </span>
-                  ) : (
-                    <span className="flex items-center gap-2">
-                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
-                      </svg>
-                      Connect Wallet
-                    </span>
-                  )}
-                </button>
-              )}
+              <ConnectButton showBalance={false} />
             </div>
 
-            {/* Mobile: right side — connect button or hamburger */}
+            {/* Mobile: right side */}
             <div className="flex sm:hidden items-center gap-2">
-              {!isConnected ? (
-                <button onClick={connect} disabled={isConnecting} className="btn-primary text-xs px-3.5 py-2">
-                  {isConnecting ? (
-                    <div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                  ) : (
-                    'Connect'
-                  )}
+              <ConnectButton
+                showBalance={false}
+                accountStatus="avatar"
+                chainStatus="icon"
+              />
+              {showUserNav && (
+                <button
+                  onClick={() => setMobileMenuOpen(true)}
+                  className="w-9 h-9 rounded-lg bg-dark-800/50 border border-white/[0.08] flex items-center justify-center text-dark-300 hover:bg-dark-800/70 hover:text-white transition-all duration-200"
+                  aria-label="Open menu"
+                >
+                  <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16M4 18h16" />
+                  </svg>
                 </button>
-              ) : (
-                <>
-                  {!isCorrectNetwork && (
-                    <button onClick={switchNetwork} className="w-8 h-8 rounded-lg bg-red-500/15 border border-red-500/25 flex items-center justify-center">
-                      <span className="w-2 h-2 rounded-full bg-red-400 animate-pulse" />
-                    </button>
-                  )}
-                  <button
-                    onClick={() => setMobileMenuOpen(true)}
-                    className="w-9 h-9 rounded-lg bg-dark-800/50 border border-white/[0.08] flex items-center justify-center text-dark-300 hover:bg-dark-800/70 hover:text-white transition-all duration-200"
-                    aria-label="Open menu"
-                  >
-                    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16M4 18h16" />
-                    </svg>
-                  </button>
-                </>
               )}
             </div>
           </div>
         </div>
       </header>
 
-      {/* Mobile Drawer */}
-      {mobileMenuOpen && (
+      {/* Mobile Drawer — navigation links only */}
+      {mobileMenuOpen && showUserNav && (
         <div className="mobile-overlay sm:hidden" onClick={() => setMobileMenuOpen(false)}>
           <div
             ref={menuRef}
@@ -194,75 +132,23 @@ export default function Header() {
               </button>
             </div>
 
-            {/* Wallet Info */}
-            <div className="p-4 border-b border-white/[0.08]">
-              <div className="flex items-center gap-3 mb-3">
-                <div className="w-9 h-9 rounded-full bg-gradient-to-br from-primary-400 to-accent-cyan flex items-center justify-center">
-                  <span className="text-xs font-bold text-white">{address?.[2]?.toUpperCase()}</span>
-                </div>
-                <div>
-                  <p className="text-sm font-mono text-white">{truncateAddress(address!)}</p>
-                  <div className="flex items-center gap-1.5 mt-0.5">
-                    {isCorrectNetwork ? (
-                      <>
-                        <div className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
-                        <span className="text-2xs text-dark-400">{NETWORK.name}</span>
-                      </>
-                    ) : (
-                      <>
-                        <div className="w-1.5 h-1.5 rounded-full bg-red-400 animate-pulse" />
-                        <span className="text-2xs text-red-400">Wrong Network</span>
-                      </>
-                    )}
-                  </div>
-                </div>
-              </div>
-
-              {isOwner && (
-                <span className="badge bg-primary-500/15 text-primary-400 border-primary-500/25 text-2xs">
-                  Owner
-                </span>
-              )}
-
-              {!isCorrectNetwork && (
-                <button onClick={switchNetwork} className="w-full btn-danger text-xs mt-3">
-                  Switch to {NETWORK.name}
-                </button>
-              )}
-            </div>
-
             {/* Navigation */}
-            {showUserNav && (
-              <nav className="p-3 space-y-1 border-b border-white/[0.08]">
-                <MobileNavLink to="/" current={location.pathname === '/'} icon={
-                  <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6A2.25 2.25 0 016 3.75h2.25A2.25 2.25 0 0110.5 6v2.25a2.25 2.25 0 01-2.25 2.25H6a2.25 2.25 0 01-2.25-2.25V6zM3.75 15.75A2.25 2.25 0 016 13.5h2.25a2.25 2.25 0 012.25 2.25V18a2.25 2.25 0 01-2.25 2.25H6A2.25 2.25 0 013.75 18v-2.25zM13.5 6a2.25 2.25 0 012.25-2.25H18A2.25 2.25 0 0120.25 6v2.25A2.25 2.25 0 0118 10.5h-2.25a2.25 2.25 0 01-2.25-2.25V6zM13.5 15.75a2.25 2.25 0 012.25-2.25H18a2.25 2.25 0 012.25 2.25V18A2.25 2.25 0 0118 20.25h-2.25A2.25 2.25 0 0113.5 18v-2.25z" />
-                  </svg>
-                }>
-                  Markets
-                </MobileNavLink>
-                <MobileNavLink to="/portfolio" current={location.pathname === '/portfolio'} icon={
-                  <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M21 12a2.25 2.25 0 00-2.25-2.25H15a3 3 0 11-6 0H5.25A2.25 2.25 0 003 12m18 0v6a2.25 2.25 0 01-2.25 2.25H5.25A2.25 2.25 0 013 18v-6m18 0V9M3 12V9m18 0a2.25 2.25 0 00-2.25-2.25H5.25A2.25 2.25 0 003 9m18 0V6a2.25 2.25 0 00-2.25-2.25H5.25A2.25 2.25 0 003 6v3" />
-                  </svg>
-                }>
-                  Portfolio
-                </MobileNavLink>
-              </nav>
-            )}
-
-            {/* Disconnect */}
-            <div className="p-3">
-              <button
-                onClick={disconnect}
-                className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm text-red-400 hover:bg-red-500/10 transition-colors"
-              >
+            <nav className="p-3 space-y-1">
+              <MobileNavLink to="/" current={location.pathname === '/'} icon={
                 <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6A2.25 2.25 0 016 3.75h2.25A2.25 2.25 0 0110.5 6v2.25a2.25 2.25 0 01-2.25 2.25H6a2.25 2.25 0 01-2.25-2.25V6zM3.75 15.75A2.25 2.25 0 016 13.5h2.25a2.25 2.25 0 012.25 2.25V18a2.25 2.25 0 01-2.25 2.25H6A2.25 2.25 0 013.75 18v-2.25zM13.5 6a2.25 2.25 0 012.25-2.25H18A2.25 2.25 0 0120.25 6v2.25A2.25 2.25 0 0118 10.5h-2.25a2.25 2.25 0 01-2.25-2.25V6zM13.5 15.75a2.25 2.25 0 012.25-2.25H18a2.25 2.25 0 012.25 2.25V18A2.25 2.25 0 0118 20.25h-2.25A2.25 2.25 0 0113.5 18v-2.25z" />
                 </svg>
-                Disconnect Wallet
-              </button>
-            </div>
+              }>
+                Markets
+              </MobileNavLink>
+              <MobileNavLink to="/portfolio" current={location.pathname === '/portfolio'} icon={
+                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M21 12a2.25 2.25 0 00-2.25-2.25H15a3 3 0 11-6 0H5.25A2.25 2.25 0 003 12m18 0v6a2.25 2.25 0 01-2.25 2.25H5.25A2.25 2.25 0 013 18v-6m18 0V9M3 12V9m18 0a2.25 2.25 0 00-2.25-2.25H5.25A2.25 2.25 0 003 9m18 0V6a2.25 2.25 0 00-2.25-2.25H5.25A2.25 2.25 0 003 6v3" />
+                </svg>
+              }>
+                Portfolio
+              </MobileNavLink>
+            </nav>
           </div>
         </div>
       )}

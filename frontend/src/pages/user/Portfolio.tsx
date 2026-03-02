@@ -147,12 +147,12 @@ export default function Portfolio() {
   return (
     <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8 space-y-6 animate-fade-in">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex items-start sm:items-center justify-between gap-3">
         <div>
           <h1 className="text-xl sm:text-2xl font-bold text-white">Portfolio</h1>
           <p className="text-xs text-dark-500 mt-0.5">{positions.length} position{positions.length !== 1 ? 's' : ''}</p>
         </div>
-        <Link to="/" className="btn-secondary text-xs px-3 py-1.5">
+        <Link to="/" className="btn-secondary text-xs px-3 py-1.5 shrink-0 !min-h-0">
           Browse Markets
         </Link>
       </div>
