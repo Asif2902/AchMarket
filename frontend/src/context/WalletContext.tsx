@@ -1,7 +1,7 @@
 import { createContext, useContext, useState, useEffect, useCallback, ReactNode } from 'react';
 import { ethers } from 'ethers';
-import { useAccount, useDisconnect, useWalletClient } from 'wagmi';
-import { useConnectModal } from '@rainbow-me/rainbowkit';
+import { useAccount, useDisconnect, useWalletClient, useSwitchChain } from 'wagmi';
+import { useConnectModal, useChainModal } from '@rainbow-me/rainbowkit';
 import { NETWORK, FACTORY_ADDRESS } from '../config/network';
 import { FACTORY_ABI, MARKET_ABI } from '../config/abis';
 
@@ -53,7 +53,9 @@ export function WalletProvider({ children }: { children: ReactNode }) {
   const { address: wagmiAddress, isConnected: wagmiConnected, isConnecting: wagmiConnecting, chain } = useAccount();
   const { data: walletClient } = useWalletClient();
   const { openConnectModal } = useConnectModal();
+  const { openChainModal } = useChainModal();
   const { disconnect: wagmiDisconnect } = useDisconnect();
+  const { switchChain } = useSwitchChain();
 
   // ── Local state for ethers bridge + owner check ──────────────
   const [signer, setSigner] = useState<ethers.Signer | null>(null);
@@ -76,16 +78,27 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     }
 
     const { account, chain: wChain, transport } = walletClient;
+
+    if (!wChain) {
+      setSigner(null);
+      setProvider(null);
+      return;
+    }
+
     const network = {
       chainId: wChain.id,
       name: wChain.name,
     };
     const ethersProvider = new ethers.BrowserProvider(transport, network);
     setProvider(ethersProvider);
+
+    let cancelled = false;
     ethersProvider
       .getSigner(account.address)
-      .then((s) => setSigner(s))
-      .catch(() => setSigner(null));
+      .then((s) => { if (!cancelled) setSigner(s); })
+      .catch(() => { if (!cancelled) setSigner(null); });
+
+    return () => { cancelled = true; };
   }, [walletClient]);
 
   // ── Check if connected wallet is the factory owner ──────────
@@ -94,15 +107,22 @@ export function WalletProvider({ children }: { children: ReactNode }) {
       setIsOwner(false);
       return;
     }
+    let cancelled = false;
+    const currentAddress = address;
     (async () => {
       try {
         const factory = new ethers.Contract(FACTORY_ADDRESS, FACTORY_ABI, readProvider);
         const ownerAddr: string = await factory.owner();
-        setIsOwner(ownerAddr.toLowerCase() === address.toLowerCase());
+        if (!cancelled) {
+          setIsOwner(ownerAddr.toLowerCase() === currentAddress.toLowerCase());
+        }
       } catch {
-        setIsOwner(false);
+        if (!cancelled) {
+          setIsOwner(false);
+        }
       }
     })();
+    return () => { cancelled = true; };
   }, [address]);
 
   // ── Actions (thin wrappers over RainbowKit / wagmi) ─────────
@@ -117,10 +137,15 @@ export function WalletProvider({ children }: { children: ReactNode }) {
   }, [wagmiDisconnect]);
 
   const switchNetwork = useCallback(() => {
-    // RainbowKit's ConnectButton already shows a network-switch UI.
-    // This is a no-op fallback kept for API compatibility.
-    openConnectModal?.();
-  }, [openConnectModal]);
+    if (switchChain) {
+      switchChain(
+        { chainId: NETWORK.chainId },
+        { onError: () => openChainModal?.() },
+      );
+    } else {
+      openChainModal?.();
+    }
+  }, [switchChain, openChainModal]);
 
   // ── Contract helpers (unchanged) ────────────────────────────
   const getFactoryContract = useCallback(

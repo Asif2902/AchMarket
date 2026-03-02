@@ -269,6 +269,7 @@
   /* Hover elevate — matches Achswap hover-elevate system */
   .hover-elevate {
     @apply transition-all duration-300;
+    position: relative;
   }
   .hover-elevate:hover {
     transform: scale(1.02);

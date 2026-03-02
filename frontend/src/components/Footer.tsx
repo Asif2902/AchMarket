@@ -1,3 +1,5 @@
+const ACH_SWAP_URL = 'https://achswapfi.xyz';
+
 export default function Footer() {
   return (
     <footer className="mt-auto border-t border-white/[0.08]">
@@ -15,7 +17,7 @@ export default function Footer() {
               <p className="text-2xs text-dark-500">
                 by{' '}
                 <a
-                  href="https://achswapfi.xyz"
+                  href={ACH_SWAP_URL}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="text-primary-400 hover:text-primary-300 transition-colors"
@@ -29,7 +31,7 @@ export default function Footer() {
           {/* Links */}
           <div className="flex items-center gap-6 text-xs text-dark-400">
             <a
-              href="https://achswapfi.xyz"
+              href={ACH_SWAP_URL}
               target="_blank"
               rel="noopener noreferrer"
               className="hover:text-white transition-colors"
