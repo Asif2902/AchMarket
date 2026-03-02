@@ -63,7 +63,8 @@ contract PredictionMarket is ReentrancyGuard {
         uint256         proceedsWei
     );
     event MarketResolved(uint256 winningOutcome, string proofUri);
-    event MarketCancelled(string reason);
+    event MarketCancelled(string reason, string proofUri);
+    event MarketEdited(string newTitle, string newDescription);
     event Redeemed(address indexed user, uint256 amountWei);
     event Refunded(address indexed user, uint256 amountWei);
     event FeeCollected(address indexed recipient, uint256 amountWei);
@@ -101,6 +102,8 @@ contract PredictionMarket is ReentrancyGuard {
     uint256 public winningOutcome;        // valid only when stage == Resolved
     uint256 public marketDeadline;        // unix timestamp; trading closes here
     string  public proofUri;             // admin-attached resolution proof
+    string  public cancelReason;          // reason when cancelled
+    string  public cancelProofUri;        // proof link when cancelled
 
     // ── Fee / Redemption ─────────────────────────────────────────
     /// @notice Pool balance snapshotted at resolution time (after fee).
@@ -108,7 +111,8 @@ contract PredictionMarket is ReentrancyGuard {
     uint256 public resolvedPoolWei;
 
     // ── Analytics ─────────────────────────────────────────────────
-    uint256 public totalVolumeWei;        // cumulative buy volume
+    uint256 public totalVolumeWei;        // cumulative buy+sell volume (analytics)
+    uint256 public totalNetDepositedWei;  // sum of all users' net deposits (for refund pro-rata)
     uint256 public participantCount;
 
     mapping(address => bool) private  _hasParticipated;
@@ -219,6 +223,7 @@ contract PredictionMarket is ReentrancyGuard {
         sharesOf[msg.sender][outcomeIdx]   += sharesWad;
         netDepositedWei[msg.sender]        += costWei;
         totalVolumeWei                     += costWei;
+        totalNetDepositedWei               += costWei;
         _trackParticipant(msg.sender);
 
         // Refund excess ETH to caller
@@ -270,15 +275,23 @@ contract PredictionMarket is ReentrancyGuard {
         // Update state
         totalSharesWad[outcomeIdx]          -= int256(sharesWad);
         sharesOf[msg.sender][outcomeIdx]    -= sharesWad;
+        totalVolumeWei                      += proceedsWei;
 
         if (proceedsWei > 0) {
             require(address(this).balance >= proceedsWei, "PM: insufficient liquidity");
 
             // Adjust net deposited (cap at zero to avoid underflow on profit)
+            uint256 depositReduction;
             if (netDepositedWei[msg.sender] >= proceedsWei) {
+                depositReduction = proceedsWei;
                 netDepositedWei[msg.sender] -= proceedsWei;
             } else {
+                depositReduction = netDepositedWei[msg.sender];
                 netDepositedWei[msg.sender] = 0;
+            }
+            // Track aggregate net deposits for accurate refund pro-rata
+            if (depositReduction > 0) {
+                totalNetDepositedWei -= depositReduction;
             }
 
             (bool ok,) = msg.sender.call{value: proceedsWei}("");
@@ -311,7 +324,7 @@ contract PredictionMarket is ReentrancyGuard {
         // after users could already have refunded).
         if (stage == Stage.Active && block.timestamp > marketDeadline + RESOLUTION_GRACE_PERIOD) {
             stage = Stage.Expired;
-            emit MarketCancelled("Auto-expired after grace period");
+            emit MarketCancelled("Auto-expired after grace period", "");
         }
 
         require(stage == Stage.Active, "PM: market not active or grace period expired");
@@ -343,13 +356,37 @@ contract PredictionMarket is ReentrancyGuard {
     /// @notice Admin cancels the market; all deposited ETH becomes refundable.
     ///         Can be called during the active trading period or during the
     ///         3-day resolution grace period.
-    function cancel(string calldata reason)
+    ///         A reason and proof URI are mandatory for transparency.
+    function cancel(string calldata reason, string calldata _proofUri)
         external
         onlyAdmin
     {
         require(stage == Stage.Active, "PM: not active");
+        require(bytes(reason).length > 0, "PM: reason required");
+        require(bytes(_proofUri).length > 0, "PM: proof URI required");
+        cancelReason   = reason;
+        cancelProofUri = _proofUri;
         stage = Stage.Cancelled;
-        emit MarketCancelled(reason);
+        emit MarketCancelled(reason, _proofUri);
+    }
+
+    /*//////////////////////////////////////////////////////////////
+                       ADMIN: EDIT MARKET
+    //////////////////////////////////////////////////////////////*/
+
+    /// @notice Admin can edit the market title and description while it is Active.
+    ///         Useful for correcting typos or clarifying resolution criteria.
+    ///         Cannot change outcomes, duration, or liquidity parameter.
+    function editMarket(string calldata _title, string calldata _description)
+        external
+        onlyAdmin
+    {
+        require(stage == Stage.Active, "PM: not active");
+        require(bytes(_title).length > 0, "PM: empty title");
+        require(bytes(_description).length > 0, "PM: empty description");
+        title       = _title;
+        description = _description;
+        emit MarketEdited(_title, _description);
     }
 
     /*//////////////////////////////////////////////////////////////
@@ -366,7 +403,7 @@ contract PredictionMarket is ReentrancyGuard {
             "PM: resolution grace period not passed"
         );
         stage = Stage.Expired;
-        emit MarketCancelled("Expired: not resolved within grace period");
+        emit MarketCancelled("Expired: not resolved within grace period", "");
     }
 
     /*//////////////////////////////////////////////////////////////
@@ -402,7 +439,7 @@ contract PredictionMarket is ReentrancyGuard {
     //////////////////////////////////////////////////////////////*/
 
     /// @notice Refund deposited ETH when the market is cancelled or expired.
-    ///         Pro-rata refund based on user's net deposit vs total volume.
+    ///         Pro-rata refund based on user's net deposit vs total net deposits.
     function refund() external nonReentrant {
         require(
             stage == Stage.Cancelled || stage == Stage.Expired,
@@ -417,8 +454,8 @@ contract PredictionMarket is ReentrancyGuard {
 
         // Pro-rata: user gets back their share of the remaining contract balance
         uint256 bal    = address(this).balance;
-        uint256 payout = totalVolumeWei > 0
-            ? (userDeposit * bal) / totalVolumeWei
+        uint256 payout = totalNetDepositedWei > 0
+            ? (userDeposit * bal) / totalNetDepositedWei
             : 0;
         if (payout > bal) payout = bal; // safety cap
 
@@ -448,7 +485,9 @@ contract PredictionMarket is ReentrancyGuard {
             uint256          _createdAt,
             uint256          _marketDeadline,
             uint256          _totalVolumeWei,
-            uint256          _participantCount
+            uint256          _participantCount,
+            string   memory _cancelReason,
+            string   memory _cancelProofUri
         )
     {
         return (
@@ -463,7 +502,9 @@ contract PredictionMarket is ReentrancyGuard {
             createdAt,
             marketDeadline,
             totalVolumeWei,
-            participantCount
+            participantCount,
+            cancelReason,
+            cancelProofUri
         );
     }
 
@@ -574,7 +615,7 @@ contract PredictionMarket is ReentrancyGuard {
     function _assertActive() internal {
         if (stage == Stage.Active && block.timestamp > marketDeadline + RESOLUTION_GRACE_PERIOD) {
             stage = Stage.Expired;
-            emit MarketCancelled("Auto-expired after grace period");
+            emit MarketCancelled("Auto-expired after grace period", "");
         }
         require(stage == Stage.Active, "PM: market not active");
     }

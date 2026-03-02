@@ -154,6 +154,17 @@ contract PredictionMarketFactory is Ownable {
         maxDuration = _max;
     }
 
+    /// @notice Edit an existing market's title and description.
+    ///         Only callable by factory owner (who is also each market's admin).
+    function editMarket(
+        address market,
+        string calldata _title,
+        string calldata _description
+    ) external onlyOwner {
+        require(isMarket[market], "Factory: unknown market");
+        PredictionMarket(payable(market)).editMarket(_title, _description);
+    }
+
     /*//////////////////////////////////////////////////////////////
                      GLOBAL ANALYTICS  (VIEW)
     //////////////////////////////////////////////////////////////*/
@@ -241,7 +252,8 @@ contract PredictionMarketFactory is Ownable {
                 ,
                 uint256 _deadline,
                 uint256 _vol,
-                uint256 _part
+                uint256 _part,
+                ,
             ) = pm.getMarketInfo();
 
             summaries[i] = MarketSummary({
@@ -291,6 +303,9 @@ contract PredictionMarketFactory is Ownable {
         // Resolution / Fee
         uint256   resolvedPoolWei;      // pool after fee, set at resolution (0 if not resolved)
         uint256   resolutionDeadline;    // marketDeadline + RESOLUTION_GRACE_PERIOD
+        // Cancel info
+        string    cancelReason;         // reason if cancelled
+        string    cancelProofUri;       // proof link if cancelled
     }
 
     /// @notice Full detail for a single market — use for the market detail page.
@@ -314,7 +329,9 @@ contract PredictionMarketFactory is Ownable {
             uint256 _created,
             uint256 _deadline,
             uint256 _vol,
-            uint256 _part
+            uint256 _part,
+            string memory _cancelReason,
+            string memory _cancelProofUri
         ) = pm.getMarketInfo();
 
         d = MarketDetail({
@@ -335,7 +352,9 @@ contract PredictionMarketFactory is Ownable {
             totalVolumeWei:           _vol,
             participants:             _part,
             resolvedPoolWei:          pm.resolvedPoolWei(),
-            resolutionDeadline:       pm.resolutionDeadline()
+            resolutionDeadline:       pm.resolutionDeadline(),
+            cancelReason:             _cancelReason,
+            cancelProofUri:           _cancelProofUri
         });
     }
 
@@ -399,6 +418,7 @@ contract PredictionMarketFactory is Ownable {
                 string[] memory _labels,
                 PredictionMarket.Stage _stage,
                 ,,,,
+                ,
             ) = pm.getMarketInfo();
 
             positions[idx++] = UserPosition({

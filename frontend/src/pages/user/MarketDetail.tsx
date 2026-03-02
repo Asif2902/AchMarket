@@ -36,6 +36,8 @@ interface MarketDetailData {
   participants: number;
   resolvedPoolWei: bigint;
   resolutionDeadline: number;
+  cancelReason: string;
+  cancelProofUri: string;
 }
 
 interface UserInfo {
@@ -103,6 +105,7 @@ export default function MarketDetail() {
         bWad: d.bWad, totalVolumeWei: d.totalVolumeWei,
         participants: Number(d.participants), resolvedPoolWei: d.resolvedPoolWei,
         resolutionDeadline: Number(d.resolutionDeadline),
+        cancelReason: d.cancelReason || '', cancelProofUri: d.cancelProofUri || '',
       };
       setDetail(parsed);
 
@@ -147,6 +150,7 @@ export default function MarketDetail() {
         bWad: d.bWad, totalVolumeWei: d.totalVolumeWei,
         participants: Number(d.participants), resolvedPoolWei: d.resolvedPoolWei,
         resolutionDeadline: Number(d.resolutionDeadline),
+        cancelReason: d.cancelReason || '', cancelProofUri: d.cancelProofUri || '',
       };
       setDetail(parsed);
 
@@ -384,7 +388,9 @@ export default function MarketDetail() {
 
   const isActive = detail.stage === STAGE.Active;
   const isResolved = detail.stage === STAGE.Resolved;
-  const isCancelledOrExpired = detail.stage === STAGE.Cancelled || detail.stage === STAGE.Expired;
+  const isCancelled = detail.stage === STAGE.Cancelled;
+  const isExpired = detail.stage === STAGE.Expired;
+  const isCancelledOrExpired = isCancelled || isExpired;
   const now = Math.floor(Date.now() / 1000);
   const tradingEnded = now > detail.marketDeadline;
   const inGracePeriod = isActive && tradingEnded && now <= detail.resolutionDeadline;
@@ -516,6 +522,43 @@ export default function MarketDetail() {
                         <path strokeLinecap="round" strokeLinejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
                       </svg>
                     </a>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Cancellation reason & proof */}
+            {(isCancelled || isExpired) && (detail.cancelReason || detail.cancelProofUri) && (
+              <div className="card border-red-500/20 bg-red-500/5 p-4">
+                <div className="flex items-start gap-3">
+                  <div className="w-8 h-8 rounded-lg bg-red-500/15 flex items-center justify-center shrink-0 mt-0.5">
+                    <svg className="w-4 h-4 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" />
+                    </svg>
+                  </div>
+                  <div className="flex-1 space-y-2.5">
+                    <p className="text-sm font-semibold text-red-400">
+                      {isExpired ? 'Expired' : 'Cancelled'}
+                    </p>
+                    {detail.cancelReason && (
+                      <div>
+                        <p className="text-2xs font-medium text-dark-500 uppercase tracking-wider mb-1">Reason</p>
+                        <p className="text-xs text-dark-300 whitespace-pre-wrap leading-relaxed">{detail.cancelReason}</p>
+                      </div>
+                    )}
+                    {detail.cancelProofUri && (
+                      <div>
+                        <p className="text-2xs font-medium text-dark-500 uppercase tracking-wider mb-1.5">Proof / Evidence</p>
+                        <a href={resolveImageUri(detail.cancelProofUri)} target="_blank" rel="noopener noreferrer">
+                          <img
+                            src={resolveImageUri(detail.cancelProofUri)}
+                            alt="Cancellation proof"
+                            className="rounded-lg border border-white/[0.06] max-h-56 w-auto object-contain bg-dark-800 hover:opacity-80 transition-opacity cursor-pointer"
+                            onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
+                          />
+                        </a>
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>
