@@ -6,6 +6,7 @@ import { FACTORY_ADDRESS, STAGE_LABELS, STAGE_COLORS } from '../../config/networ
 import { FACTORY_ABI, MARKET_ABI } from '../../config/abis';
 import { PageLoader } from '../../components/LoadingSpinner';
 import EmptyState from '../../components/EmptyState';
+import UsdcIcon from '../../components/UsdcIcon';
 import { formatUSDC, formatWad, parseContractError, makeMarketSlug } from '../../utils/format';
 import { getOutcomeColor } from '../../components/ProbabilityBar';
 
@@ -161,7 +162,7 @@ export default function Portfolio() {
         <div className="grid grid-cols-3 gap-3">
           <div className="card p-3.5">
             <span className="text-2xs text-dark-500 font-medium uppercase tracking-wider">Total Deposited</span>
-            <p className="text-base sm:text-lg font-bold text-white mt-0.5 tabular-nums">{formatUSDC(totalDeposited)} <span className="text-2xs text-dark-500">USDC</span></p>
+            <p className="text-base sm:text-lg font-bold text-white mt-0.5 tabular-nums flex items-center gap-1.5"><UsdcIcon size={16} />{formatUSDC(totalDeposited)} <span className="text-2xs text-dark-500">USDC</span></p>
           </div>
           <div className="card p-3.5">
             <span className="text-2xs text-dark-500 font-medium uppercase tracking-wider">Active</span>
@@ -210,7 +211,7 @@ export default function Portfolio() {
                 </div>
                 <div className="text-right shrink-0">
                   <p className="text-2xs text-dark-500 font-medium">Deposited</p>
-                  <p className="text-sm font-bold text-white tabular-nums">{formatUSDC(pos.netDepositedWei)}</p>
+                  <p className="text-sm font-bold text-white tabular-nums flex items-center gap-1 justify-end"><UsdcIcon size={13} />{formatUSDC(pos.netDepositedWei)}</p>
                 </div>
               </div>
 

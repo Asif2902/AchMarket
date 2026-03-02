@@ -9,6 +9,7 @@ import ImageWithFallback from '../../components/ImageWithFallback';
 import ProbabilityBar, { getOutcomeColor } from '../../components/ProbabilityBar';
 import Countdown from '../../components/Countdown';
 import { PageLoader } from '../../components/LoadingSpinner';
+import UsdcIcon from '../../components/UsdcIcon';
 import {
   formatUSDC, formatWad, formatProbability, probToPercent, formatDate,
   applyBuySlippage, applySellSlippage, parseContractError, resolveImageUri,
@@ -446,7 +447,7 @@ export default function MarketDetail() {
           <div className="lg:col-span-2 space-y-5">
             {/* Quick stats */}
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-              <MiniStat label="Volume" value={`${formatUSDC(detail.totalVolumeWei)}`} suffix="USDC" />
+              <MiniStat label="Volume" value={`${formatUSDC(detail.totalVolumeWei)}`} suffix="USDC" icon={<UsdcIcon size={14} />} />
               <MiniStat label="Traders" value={detail.participants.toString()} />
               <MiniStat label="Created" value={formatDate(detail.createdAt)} small />
               <MiniStat label={isActive ? 'Ends' : 'Ended'} value={formatDate(detail.marketDeadline)} small />
@@ -519,11 +520,11 @@ export default function MarketDetail() {
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <span className="text-2xs text-dark-500 font-medium uppercase tracking-wider">Prize Pool (after fee)</span>
-                    <p className="text-base font-bold text-white mt-0.5">{formatUSDC(detail.resolvedPoolWei)} USDC</p>
+                    <p className="text-base font-bold text-white mt-0.5 flex items-center gap-1.5"><UsdcIcon size={16} />{formatUSDC(detail.resolvedPoolWei)} USDC</p>
                   </div>
                   <div>
                     <span className="text-2xs text-dark-500 font-medium uppercase tracking-wider">Platform Fee (0.25%)</span>
-                    <p className="text-base font-bold text-dark-400 mt-0.5">{formatUSDC((detail.totalVolumeWei * 25n) / 10000n)} USDC</p>
+                    <p className="text-base font-bold text-dark-400 mt-0.5 flex items-center gap-1.5"><UsdcIcon size={16} className="opacity-50" />{formatUSDC((detail.totalVolumeWei * 25n) / 10000n)} USDC</p>
                   </div>
                 </div>
               </div>
@@ -669,7 +670,7 @@ export default function MarketDetail() {
                             <div className={`w-2 h-2 rounded-full ${color.bg} ${selectedOutcome === i ? 'ring-2 ring-offset-1 ring-offset-dark-900' : ''}`} style={selectedOutcome === i ? { boxShadow: `0 0 0 2px var(--tw-ring-offset-color), 0 0 0 4px currentColor`, color: 'rgba(99,102,241,0.3)' } : {}} />
                             <span className="font-medium text-white text-sm">{label}</span>
                           </div>
-                          <span className={`font-mono text-xs font-bold tabular-nums ${color.text}`}>{(pct / 100).toFixed(2)} USDC</span>
+                          <span className={`font-mono text-xs font-bold tabular-nums flex items-center gap-1 ${color.text}`}><UsdcIcon size={12} />{(pct / 100).toFixed(2)} USDC</span>
                         </div>
                         {tradeTab === 'sell' && userShares > 0n && (
                           <p className="text-2xs text-dark-500 mt-1 ml-4">Your shares: {formatWad(userShares)}</p>
@@ -680,8 +681,8 @@ export default function MarketDetail() {
                 </div>
 
                 {/* Amount input */}
-                <label className="text-2xs font-semibold text-dark-500 uppercase tracking-wider mb-1.5 block">
-                  {tradeTab === 'buy' ? 'Amount (USDC)' : 'Shares to Sell'}
+                <label className="text-2xs font-semibold text-dark-500 uppercase tracking-wider mb-1.5 flex items-center gap-1.5">
+                  {tradeTab === 'buy' ? <><UsdcIcon size={12} />Amount (USDC)</> : 'Shares to Sell'}
                 </label>
                 <div className="relative mb-3">
                   <input
@@ -705,7 +706,8 @@ export default function MarketDetail() {
                         Max
                       </button>
                     )}
-                    <span className="text-2xs text-dark-500 font-medium">
+                    <span className="text-2xs text-dark-500 font-medium flex items-center gap-1">
+                      {tradeTab === 'buy' && <UsdcIcon size={12} />}
                       {tradeTab === 'buy' ? 'USDC' : 'shares'}
                     </span>
                   </div>
@@ -879,7 +881,7 @@ export default function MarketDetail() {
                 <div className="p-3 rounded-xl bg-dark-900/30 border border-white/[0.04] mb-4">
                   <div className="flex justify-between text-sm">
                     <span className="text-dark-500 font-medium">Net Deposited</span>
-                    <span className="font-bold text-white tabular-nums">{formatUSDC(userInfo.netDeposited)} USDC</span>
+                    <span className="font-bold text-white tabular-nums flex items-center gap-1"><UsdcIcon size={14} />{formatUSDC(userInfo.netDeposited)} USDC</span>
                   </div>
                 </div>
 
@@ -916,11 +918,12 @@ export default function MarketDetail() {
 
 /* ─── Sub-components ─── */
 
-function MiniStat({ label, value, suffix, small }: { label: string; value: string; suffix?: string; small?: boolean }) {
+function MiniStat({ label, value, suffix, small, icon }: { label: string; value: string; suffix?: string; small?: boolean; icon?: React.ReactNode }) {
   return (
     <div className="card p-3">
       <span className="text-2xs text-dark-500 font-medium uppercase tracking-wider">{label}</span>
-      <div className="flex items-baseline gap-1 mt-0.5">
+      <div className="flex items-center gap-1 mt-0.5">
+        {icon}
         <span className={`font-bold text-white tabular-nums ${small ? 'text-xs' : 'text-sm'}`}>{value}</span>
         {suffix && <span className="text-2xs text-dark-500">{suffix}</span>}
       </div>
