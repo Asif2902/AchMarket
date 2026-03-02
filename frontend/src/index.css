@@ -3,25 +3,43 @@
 @tailwind utilities;
 
 @layer base {
+  :root {
+    --color-primary: 59 130 246;
+    --color-yes: 34 197 94;
+    --color-no: 239 68 68;
+  }
+
   * {
     scrollbar-width: thin;
     scrollbar-color: #334155 transparent;
   }
   *::-webkit-scrollbar {
-    width: 6px;
-    height: 6px;
+    width: 5px;
+    height: 5px;
   }
   *::-webkit-scrollbar-track {
     background: transparent;
   }
   *::-webkit-scrollbar-thumb {
-    background: #334155;
-    border-radius: 3px;
+    background: #283548;
+    border-radius: 10px;
+  }
+  *::-webkit-scrollbar-thumb:hover {
+    background: #3b4f6b;
+  }
+
+  html {
+    scroll-behavior: smooth;
+    -webkit-tap-highlight-color: transparent;
   }
 
   body {
-    @apply bg-dark-950 text-white;
+    @apply bg-dark-950 text-white antialiased;
     min-height: 100vh;
+    background-image:
+      radial-gradient(ellipse 80% 50% at 50% -20%, rgba(59, 130, 246, 0.08), transparent),
+      radial-gradient(ellipse 60% 40% at 80% 60%, rgba(34, 211, 238, 0.03), transparent);
+    background-attachment: fixed;
   }
 
   input[type="number"]::-webkit-outer-spin-button,
@@ -32,75 +50,223 @@
   input[type="number"] {
     -moz-appearance: textfield;
   }
+
+  ::selection {
+    background: rgba(59, 130, 246, 0.3);
+    color: white;
+  }
 }
 
 @layer components {
+  /* ═══════════════════════════════════════
+     CARDS
+     ═══════════════════════════════════════ */
   .card {
-    @apply bg-dark-800/60 backdrop-blur-sm border border-dark-700/50 rounded-2xl;
+    @apply bg-dark-800/50 backdrop-blur-sm border border-white/[0.06] rounded-2xl shadow-card;
+    background-image: linear-gradient(135deg, rgba(255, 255, 255, 0.03) 0%, rgba(255, 255, 255, 0) 100%);
   }
   .card-hover {
-    @apply card transition-all duration-200 hover:border-primary-500/30 hover:shadow-lg hover:shadow-primary-500/5 cursor-pointer;
+    @apply card transition-all duration-250 cursor-pointer;
   }
+  .card-hover:hover {
+    @apply border-primary-500/20 shadow-card-hover;
+    transform: translateY(-2px);
+    background-image: linear-gradient(135deg, rgba(59, 130, 246, 0.04) 0%, rgba(255, 255, 255, 0.01) 100%);
+  }
+
+  /* ═══════════════════════════════════════
+     GLASS PANELS
+     ═══════════════════════════════════════ */
+  .glass {
+    @apply bg-dark-900/70 backdrop-blur-xl border border-white/[0.06];
+    background-image: linear-gradient(135deg, rgba(255, 255, 255, 0.02) 0%, rgba(255, 255, 255, 0) 100%);
+  }
+  .glass-subtle {
+    @apply bg-dark-800/30 backdrop-blur-md border border-white/[0.04];
+  }
+
+  /* ═══════════════════════════════════════
+     BUTTONS
+     ═══════════════════════════════════════ */
   .btn-primary {
-    @apply px-5 py-2.5 bg-primary-600 hover:bg-primary-500 text-white font-medium rounded-xl transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed active:scale-[0.98];
+    @apply relative px-5 py-2.5 bg-primary-600 text-white font-semibold rounded-xl
+           transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed
+           active:scale-[0.97] shadow-glow-sm;
+    background-image: linear-gradient(180deg, rgba(255,255,255,0.1) 0%, transparent 40%);
   }
+  .btn-primary:hover:not(:disabled) {
+    @apply bg-primary-500 shadow-glow;
+    transform: translateY(-1px);
+  }
+  .btn-primary:active:not(:disabled) {
+    transform: translateY(0px) scale(0.97);
+  }
+
   .btn-secondary {
-    @apply px-5 py-2.5 bg-dark-700 hover:bg-dark-600 text-dark-200 font-medium rounded-xl border border-dark-600 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed;
+    @apply px-5 py-2.5 bg-dark-750 text-dark-200 font-medium rounded-xl
+           border border-white/[0.08] transition-all duration-200
+           disabled:opacity-50 disabled:cursor-not-allowed hover:bg-dark-700
+           hover:text-white hover:border-white/[0.12];
   }
+
   .btn-danger {
-    @apply px-5 py-2.5 bg-red-600/20 hover:bg-red-600/30 text-red-400 font-medium rounded-xl border border-red-500/30 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed;
+    @apply px-5 py-2.5 bg-red-500/10 text-red-400 font-medium rounded-xl
+           border border-red-500/20 transition-all duration-200
+           disabled:opacity-50 disabled:cursor-not-allowed
+           hover:bg-red-500/20 hover:border-red-500/30;
   }
+
   .btn-success {
-    @apply px-5 py-2.5 bg-green-600/20 hover:bg-green-600/30 text-green-400 font-medium rounded-xl border border-green-500/30 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed;
+    @apply px-5 py-2.5 bg-green-500/10 text-green-400 font-medium rounded-xl
+           border border-green-500/20 transition-all duration-200
+           disabled:opacity-50 disabled:cursor-not-allowed
+           hover:bg-green-500/20 hover:border-green-500/30;
   }
+
+  .btn-ghost {
+    @apply px-4 py-2 text-dark-300 font-medium rounded-xl
+           transition-all duration-200 hover:text-white hover:bg-white/[0.06];
+  }
+
+  .btn-yes {
+    @apply px-5 py-2.5 bg-yes-muted text-yes-light font-semibold rounded-xl
+           border border-yes-border transition-all duration-200
+           hover:bg-green-500/25 hover:shadow-glow-yes
+           disabled:opacity-50 disabled:cursor-not-allowed active:scale-[0.97];
+  }
+
+  .btn-no {
+    @apply px-5 py-2.5 bg-no-muted text-no-light font-semibold rounded-xl
+           border border-no-border transition-all duration-200
+           hover:bg-red-500/25 hover:shadow-glow-no
+           disabled:opacity-50 disabled:cursor-not-allowed active:scale-[0.97];
+  }
+
+  /* ═══════════════════════════════════════
+     FORM INPUTS
+     ═══════════════════════════════════════ */
   .input-field {
-    @apply w-full px-4 py-3 bg-dark-900/80 border border-dark-600/50 rounded-xl text-white placeholder-dark-400 focus:outline-none focus:border-primary-500/50 focus:ring-1 focus:ring-primary-500/25 transition-all duration-200;
+    @apply w-full px-4 py-3 bg-dark-900/60 border border-white/[0.08] rounded-xl
+           text-white placeholder-dark-500 transition-all duration-200
+           focus:outline-none focus:border-primary-500/40 focus:ring-2 focus:ring-primary-500/10
+           focus:bg-dark-900/80;
   }
   .select-field {
-    @apply w-full px-4 py-3 bg-dark-900/80 border border-dark-600/50 rounded-xl text-white focus:outline-none focus:border-primary-500/50 focus:ring-1 focus:ring-primary-500/25 transition-all duration-200 appearance-none cursor-pointer;
+    @apply w-full px-4 py-3 bg-dark-900/60 border border-white/[0.08] rounded-xl
+           text-white transition-all duration-200 appearance-none cursor-pointer
+           focus:outline-none focus:border-primary-500/40 focus:ring-2 focus:ring-primary-500/10;
   }
   .label {
     @apply block text-sm font-medium text-dark-300 mb-1.5;
   }
+
+  /* ═══════════════════════════════════════
+     BADGES
+     ═══════════════════════════════════════ */
   .badge {
-    @apply inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border;
+    @apply inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold border leading-none;
+  }
+  .badge-sm {
+    @apply inline-flex items-center px-2 py-0.5 rounded-full text-2xs font-semibold border leading-none;
   }
 
-  .glass {
-    @apply bg-dark-800/40 backdrop-blur-xl border border-dark-700/30;
+  /* ═══════════════════════════════════════
+     STAT CARDS
+     ═══════════════════════════════════════ */
+  .stat-card {
+    @apply card p-4 flex flex-col gap-1;
+  }
+  .stat-label {
+    @apply text-xs font-medium text-dark-400 uppercase tracking-wider;
+  }
+  .stat-value {
+    @apply text-xl font-bold text-white;
   }
 
+  /* ═══════════════════════════════════════
+     SKELETON / LOADING
+     ═══════════════════════════════════════ */
+  .skeleton {
+    @apply bg-gradient-to-r from-dark-800/80 via-dark-700/60 to-dark-800/80 rounded-lg;
+    background-size: 200% 100%;
+    animation: shimmer 1.5s ease-in-out infinite;
+  }
+
+  /* ═══════════════════════════════════════
+     ANIMATIONS (kept as CSS for non-Tailwind usage)
+     ═══════════════════════════════════════ */
   @keyframes shimmer {
     0% { background-position: -200% 0; }
     100% { background-position: 200% 0; }
   }
-  .skeleton {
-    @apply bg-gradient-to-r from-dark-800 via-dark-700 to-dark-800 rounded-lg;
-    background-size: 200% 100%;
-    animation: shimmer 1.5s infinite;
-  }
-
-  @keyframes fadeIn {
-    from { opacity: 0; transform: translateY(8px); }
-    to { opacity: 1; transform: translateY(0); }
-  }
-  .animate-fade-in {
-    animation: fadeIn 0.3s ease-out;
-  }
-
-  @keyframes slideUp {
-    from { opacity: 0; transform: translateY(20px); }
-    to { opacity: 1; transform: translateY(0); }
-  }
-  .animate-slide-up {
-    animation: slideUp 0.4s ease-out;
-  }
 
   @keyframes pulse-glow {
-    0%, 100% { box-shadow: 0 0 0 0 rgba(99, 102, 241, 0); }
-    50% { box-shadow: 0 0 20px 4px rgba(99, 102, 241, 0.15); }
+    0%, 100% { box-shadow: 0 0 0 0 rgba(59, 130, 246, 0); }
+    50% { box-shadow: 0 0 20px 4px rgba(59, 130, 246, 0.12); }
   }
   .pulse-glow {
-    animation: pulse-glow 2s infinite;
+    animation: pulse-glow 2.5s ease-in-out infinite;
+  }
+
+  /* ═══════════════════════════════════════
+     UTILITY CLASSES
+     ═══════════════════════════════════════ */
+  .text-gradient {
+    @apply bg-clip-text text-transparent bg-gradient-to-r from-primary-400 to-accent-cyan;
+  }
+  .text-gradient-warm {
+    @apply bg-clip-text text-transparent bg-gradient-to-r from-accent-amber to-accent-rose;
+  }
+
+  .divider {
+    @apply border-t border-white/[0.06];
+  }
+
+  .chip {
+    @apply inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium
+           bg-dark-800/60 border border-white/[0.06] text-dark-300
+           transition-all duration-200 cursor-pointer select-none
+           hover:border-white/[0.12] hover:text-white;
+  }
+  .chip-active {
+    @apply bg-primary-600/20 border-primary-500/30 text-primary-400;
+  }
+
+  /* Mobile-friendly touch targets */
+  @media (max-width: 640px) {
+    .btn-primary, .btn-secondary, .btn-danger, .btn-success, .btn-yes, .btn-no {
+      @apply min-h-[44px];
+    }
+    .chip {
+      @apply min-h-[36px] px-3.5;
+    }
+  }
+
+  /* ═══════════════════════════════════════
+     MOBILE OVERLAY / DRAWER
+     ═══════════════════════════════════════ */
+  .mobile-overlay {
+    @apply fixed inset-0 z-50 bg-black/60 backdrop-blur-sm;
+    animation: fadeIn 0.2s ease-out;
+  }
+  .mobile-drawer {
+    @apply fixed top-0 right-0 bottom-0 z-50 w-72 bg-dark-900 border-l border-white/[0.06]
+           shadow-elevated overflow-y-auto;
+    animation: slideInRight 0.3s ease-out;
+  }
+  @keyframes slideInRight {
+    0% { transform: translateX(100%); }
+    100% { transform: translateX(0); }
+  }
+
+  /* ═══════════════════════════════════════
+     SCROLLBAR HIDE (for horizontal scroll containers)
+     ═══════════════════════════════════════ */
+  .scrollbar-hide {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+  .scrollbar-hide::-webkit-scrollbar {
+    display: none;
   }
 }

@@ -44,7 +44,6 @@ export function useOwnerMarkets() {
       const result: OwnerMarketData[] = [];
 
       for (const s of summaries) {
-        // Get additional data (description, proofUri, createdAt) from the market contract
         const marketContract = new ethers.Contract(s.market, MARKET_ABI, readProvider);
         const info = await marketContract.getMarketInfo();
 
@@ -93,24 +92,37 @@ export function OwnerMarketCard({ market, actions, urgentBadge }: OwnerCardProps
   return (
     <div className="card overflow-hidden animate-fade-in">
       <div className="flex flex-col sm:flex-row">
-        <ImageWithFallback src={market.imageUri} alt={market.title} className="w-full sm:w-48 h-36 sm:h-auto flex-shrink-0" />
-        <div className="flex-1 p-5">
-          <div className="flex items-start justify-between mb-2">
-            <div>
-              <div className="flex items-center gap-2 mb-1.5">
-                <span className={`badge ${STAGE_COLORS[market.stage]}`}>{STAGE_LABELS[market.stage]}</span>
-                <span className="badge bg-dark-700/50 text-dark-300 border-dark-600/30">{market.category}</span>
-                {urgentBadge && (
-                  <span className="badge bg-yellow-500/20 text-yellow-400 border-yellow-500/30 animate-pulse">
-                    {urgentBadge}
-                  </span>
-                )}
-              </div>
-              <h3 className="font-semibold text-white leading-tight">{market.title}</h3>
-            </div>
+        {/* Image */}
+        <div className="relative w-full sm:w-48 h-36 sm:h-auto flex-shrink-0 overflow-hidden">
+          <ImageWithFallback src={market.imageUri} alt={market.title} className="w-full h-full" />
+          <div className="absolute inset-0 bg-gradient-to-r from-transparent to-dark-800/20 hidden sm:block" />
+          <div className="absolute inset-0 bg-gradient-to-t from-dark-900/60 to-transparent sm:hidden" />
+          {/* Mobile badges overlay */}
+          <div className="absolute top-3 left-3 flex gap-1.5 sm:hidden">
+            <span className={`badge-sm ${STAGE_COLORS[market.stage]}`}>{STAGE_LABELS[market.stage]}</span>
+            {urgentBadge && (
+              <span className="badge-sm bg-yellow-500/20 text-yellow-400 border-yellow-500/30 animate-pulse">
+                {urgentBadge}
+              </span>
+            )}
+          </div>
+        </div>
+
+        {/* Content */}
+        <div className="flex-1 p-4 sm:p-5">
+          {/* Desktop badges */}
+          <div className="hidden sm:flex items-center gap-2 mb-2">
+            <span className={`badge ${STAGE_COLORS[market.stage]}`}>{STAGE_LABELS[market.stage]}</span>
+            <span className="badge bg-dark-750/80 text-dark-300 border-white/[0.06]">{market.category}</span>
+            {urgentBadge && (
+              <span className="badge bg-yellow-500/20 text-yellow-400 border-yellow-500/30 animate-pulse">
+                {urgentBadge}
+              </span>
+            )}
           </div>
 
-          <p className="text-sm text-dark-400 line-clamp-2 mb-3">{market.description}</p>
+          <h3 className="font-semibold text-white leading-tight text-sm sm:text-base">{market.title}</h3>
+          <p className="text-xs sm:text-sm text-dark-400 line-clamp-2 mt-1.5 mb-3">{market.description}</p>
 
           <ProbabilityBar
             labels={market.outcomeLabels}
@@ -120,18 +132,35 @@ export function OwnerMarketCard({ market, actions, urgentBadge }: OwnerCardProps
             compact
           />
 
-          <div className="flex flex-wrap items-center gap-4 mt-3 text-xs text-dark-400">
-            <span>Volume: {formatUSDC(market.totalVolumeWei)} USDC</span>
-            <span>Participants: {market.participants}</span>
-            {isActive && (
+          {/* Stats row */}
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 mt-3 text-xs text-dark-400">
+            <span className="flex items-center gap-1">
+              <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+              {formatUSDC(market.totalVolumeWei)} USDC
+            </span>
+            <span className="flex items-center gap-1">
+              <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
+              {market.participants}
+            </span>
+            {isActive ? (
               <span className="flex items-center gap-1">
-                Ends: <Countdown deadline={market.marketDeadline} compact className="text-dark-300" />
+                <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                <Countdown deadline={market.marketDeadline} compact className="text-dark-300" />
+              </span>
+            ) : (
+              <span className="flex items-center gap-1">
+                <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
+                {formatDate(market.marketDeadline)}
               </span>
             )}
-            {!isActive && <span>Deadline: {formatDate(market.marketDeadline)}</span>}
           </div>
 
-          {actions && <div className="mt-4 flex flex-wrap gap-2">{actions}</div>}
+          {/* Actions */}
+          {actions && (
+            <div className="mt-4 pt-3 border-t border-white/[0.06] flex flex-wrap gap-2">
+              {actions}
+            </div>
+          )}
         </div>
       </div>
     </div>
@@ -172,22 +201,27 @@ export function ResolveModal({ market, onClose, onResolved }: ResolveModalProps)
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      <div className="absolute inset-0 bg-dark-950/80 backdrop-blur-sm" onClick={onClose} />
+      <div className="absolute inset-0 bg-dark-950/80 backdrop-blur-sm animate-fade-in" onClick={onClose} />
       <div className="relative card w-full max-w-lg max-h-[90vh] overflow-y-auto p-6 animate-slide-up">
-        <button onClick={onClose} className="absolute top-4 right-4 text-dark-400 hover:text-white">
-          <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <button onClick={onClose} className="absolute top-4 right-4 w-8 h-8 rounded-lg bg-dark-750 border border-white/[0.08] flex items-center justify-center text-dark-400 hover:text-white hover:border-white/[0.15] transition-colors">
+          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
           </svg>
         </button>
 
-        <h2 className="text-xl font-bold text-white mb-2">Resolve Market</h2>
+        <div className="flex items-center gap-3 mb-5">
+          <div className="w-10 h-10 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center">
+            <svg className="w-5 h-5 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+          </div>
+          <h2 className="text-xl font-bold text-white">Resolve Market</h2>
+        </div>
 
         {/* Context */}
-        <div className="p-4 rounded-xl bg-dark-900/60 mb-6">
+        <div className="p-4 rounded-xl bg-dark-900/60 border border-white/[0.04] mb-6">
           <div className="flex gap-3">
-            <ImageWithFallback src={market.imageUri} alt={market.title} className="w-16 h-16 rounded-xl flex-shrink-0" />
-            <div>
-              <h3 className="font-semibold text-white text-sm">{market.title}</h3>
+            <ImageWithFallback src={market.imageUri} alt={market.title} className="w-14 h-14 rounded-xl flex-shrink-0" />
+            <div className="min-w-0">
+              <h3 className="font-semibold text-white text-sm leading-tight">{market.title}</h3>
               <p className="text-xs text-dark-400 line-clamp-2 mt-1">{market.description}</p>
             </div>
           </div>
@@ -200,18 +234,21 @@ export function ResolveModal({ market, onClose, onResolved }: ResolveModalProps)
             <button
               key={i}
               onClick={() => setSelectedOutcome(i)}
-              className={`w-full p-3 rounded-xl text-left text-sm transition-all border flex items-center gap-3 ${
+              className={`w-full p-3.5 rounded-xl text-left text-sm transition-all border flex items-center gap-3 ${
                 selectedOutcome === i
-                  ? 'border-green-500/50 bg-green-500/10'
-                  : 'border-dark-700/30 bg-dark-900/40 hover:border-dark-600'
+                  ? 'border-emerald-500/40 bg-emerald-500/10'
+                  : 'border-white/[0.06] bg-dark-900/40 hover:border-white/[0.12] hover:bg-dark-800/40'
               }`}
             >
-              <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center ${
-                selectedOutcome === i ? 'border-green-500' : 'border-dark-600'
+              <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center transition-colors ${
+                selectedOutcome === i ? 'border-emerald-500' : 'border-dark-600'
               }`}>
-                {selectedOutcome === i && <div className="w-2.5 h-2.5 rounded-full bg-green-500" />}
+                {selectedOutcome === i && <div className="w-2.5 h-2.5 rounded-full bg-emerald-500" />}
               </div>
-              <span className="font-medium text-white">{label}</span>
+              <span className={`font-medium ${selectedOutcome === i ? 'text-white' : 'text-dark-300'}`}>{label}</span>
+              {selectedOutcome === i && (
+                <span className="ml-auto badge-sm bg-emerald-500/15 text-emerald-400 border-emerald-500/25">Winner</span>
+              )}
             </button>
           ))}
         </div>
@@ -225,22 +262,23 @@ export function ResolveModal({ market, onClose, onResolved }: ResolveModalProps)
           placeholder="https://... (news article, tweet, IPFS link)"
           className="input-field mb-2"
         />
-        <p className="text-xs text-dark-400 mb-4">
-          This proof link will be displayed publicly to all users. Provide a link to verifiable evidence.
+        <p className="text-xs text-dark-500 mb-4">
+          This proof link will be displayed publicly to all users.
         </p>
 
         {proofUri.trim() && (
-          <div className="p-3 rounded-xl bg-blue-500/10 border border-blue-500/20 mb-6">
-            <p className="text-xs text-dark-400 mb-1">Users will see:</p>
-            <a href={proofUri} target="_blank" rel="noopener noreferrer" className="text-sm text-blue-400 hover:text-blue-300 underline break-all">
+          <div className="p-3 rounded-xl bg-primary-500/5 border border-primary-500/15 mb-6 flex items-start gap-2">
+            <svg className="w-4 h-4 text-primary-400 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" /></svg>
+            <a href={proofUri} target="_blank" rel="noopener noreferrer" className="text-sm text-primary-400 hover:text-primary-300 underline break-all">
               {proofUri}
             </a>
           </div>
         )}
 
         {error && (
-          <div className="p-3 rounded-xl bg-red-500/10 text-red-400 border border-red-500/20 text-sm mb-4">
-            {error}
+          <div className="p-3 rounded-xl bg-red-500/10 text-red-400 border border-red-500/20 text-sm mb-4 flex items-start gap-2">
+            <svg className="w-4 h-4 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+            <span>{error}</span>
           </div>
         )}
 
@@ -256,7 +294,12 @@ export function ResolveModal({ market, onClose, onResolved }: ResolveModalProps)
                 <div className="w-4 h-4 border-2 border-green-300/30 border-t-green-300 rounded-full animate-spin" />
                 Resolving...
               </span>
-            ) : 'Confirm Resolution'}
+            ) : (
+              <span className="flex items-center justify-center gap-2">
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
+                Confirm Resolution
+              </span>
+            )}
           </button>
         </div>
       </div>
@@ -295,14 +338,25 @@ export function CancelModal({ market, onClose, onCancelled }: CancelModalProps) 
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      <div className="absolute inset-0 bg-dark-950/80 backdrop-blur-sm" onClick={onClose} />
+      <div className="absolute inset-0 bg-dark-950/80 backdrop-blur-sm animate-fade-in" onClick={onClose} />
       <div className="relative card w-full max-w-md p-6 animate-slide-up">
-        <h2 className="text-xl font-bold text-white mb-2">Cancel Market</h2>
-        <p className="text-sm text-dark-400 mb-4">
-          Are you sure you want to cancel "{market.title}"? All participants will be eligible for a refund.
-        </p>
+        <div className="flex items-center gap-3 mb-4">
+          <div className="w-10 h-10 rounded-xl bg-red-500/10 border border-red-500/20 flex items-center justify-center">
+            <svg className="w-5 h-5 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" /></svg>
+          </div>
+          <div>
+            <h2 className="text-lg font-bold text-white">Cancel Market</h2>
+            <p className="text-xs text-dark-400">This action cannot be undone</p>
+          </div>
+        </div>
 
-        <label className="label">Reason (optional)</label>
+        <div className="p-3 rounded-xl bg-red-500/5 border border-red-500/10 mb-4">
+          <p className="text-sm text-dark-300">
+            Are you sure you want to cancel "<span className="text-white font-medium">{market.title}</span>"? All participants will be eligible for a full refund.
+          </p>
+        </div>
+
+        <label className="label">Reason <span className="text-dark-500 font-normal">(optional)</span></label>
         <input
           type="text"
           value={reason}
@@ -312,13 +366,26 @@ export function CancelModal({ market, onClose, onCancelled }: CancelModalProps) 
         />
 
         {error && (
-          <div className="p-3 rounded-xl bg-red-500/10 text-red-400 border border-red-500/20 text-sm mb-4">{error}</div>
+          <div className="p-3 rounded-xl bg-red-500/10 text-red-400 border border-red-500/20 text-sm mb-4 flex items-start gap-2">
+            <svg className="w-4 h-4 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+            <span>{error}</span>
+          </div>
         )}
 
         <div className="flex gap-3">
           <button onClick={onClose} className="btn-secondary flex-1">Go Back</button>
           <button onClick={handleSubmit} disabled={submitting} className="btn-danger flex-1 font-semibold">
-            {submitting ? 'Cancelling...' : 'Confirm Cancel'}
+            {submitting ? (
+              <span className="flex items-center justify-center gap-2">
+                <div className="w-4 h-4 border-2 border-red-300/30 border-t-red-300 rounded-full animate-spin" />
+                Cancelling...
+              </span>
+            ) : (
+              <span className="flex items-center justify-center gap-2">
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+                Confirm Cancel
+              </span>
+            )}
           </button>
         </div>
       </div>
