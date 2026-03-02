@@ -8,6 +8,7 @@ import { SkeletonCard } from '../../components/LoadingSpinner';
 import EmptyState from '../../components/EmptyState';
 import UsdcIcon from '../../components/UsdcIcon';
 import { formatUSDC } from '../../utils/format';
+import { fetchAllMarketVolumes } from '../../services/blockscout';
 
 const CATEGORIES = ['All', 'Crypto', 'Sports', 'Politics', 'Entertainment', 'Science', 'Other'];
 const SORT_OPTIONS = [
@@ -87,6 +88,33 @@ export default function Home() {
       }));
 
       setMarkets(parsed);
+
+      // Fetch accurate volumes from BlockScout events (buys + sells) in background.
+      // This overrides on-chain totalVolumeWei which only tracks buy-side LMSR cost.
+      const addresses = parsed.map((m) => m.market);
+      fetchAllMarketVolumes(addresses).then((volumes) => {
+        if (volumes.size === 0) return;
+
+        setMarkets((prev) =>
+          prev.map((m) => {
+            const vol = volumes.get(m.market.toLowerCase());
+            return vol !== undefined ? { ...m, totalVolumeWei: vol } : m;
+          })
+        );
+
+        // Also update global stats total volume
+        setStats((prev) => {
+          if (!prev) return prev;
+          let globalVol = 0n;
+          for (const m of parsed) {
+            const vol = volumes.get(m.market.toLowerCase());
+            globalVol += vol !== undefined ? vol : m.totalVolumeWei;
+          }
+          return { ...prev, totalVolumeWei: globalVol };
+        });
+      }).catch((err) => {
+        console.warn('BlockScout volume fetch failed, using on-chain values:', err);
+      });
     } catch (err) {
       console.error('Failed to fetch markets:', err);
     } finally {

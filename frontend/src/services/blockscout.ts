@@ -73,6 +73,53 @@ export async function fetchTradeEvents(marketAddress: string): Promise<TradeEven
   return events;
 }
 
+/* ─── Compute volume from trade events ─── */
+
+/**
+ * Compute total trading volume (buys + sells) from trade events.
+ * This is more accurate than the on-chain totalVolumeWei which only tracks buy-side LMSR cost.
+ */
+export function computeVolumeFromEvents(events: TradeEvent[]): bigint {
+  let total = 0n;
+  for (const e of events) {
+    total += e.costOrProceedsWei;
+  }
+  return total;
+}
+
+/**
+ * Fetch accurate total volume for a single market from BlockScout events.
+ * Returns the sum of all buy costs + sell proceeds.
+ */
+export async function fetchMarketVolume(marketAddress: string): Promise<bigint> {
+  const events = await fetchTradeEvents(marketAddress);
+  return computeVolumeFromEvents(events);
+}
+
+/**
+ * Fetch accurate volumes for multiple markets in parallel.
+ * Returns a Map of marketAddress → totalVolume.
+ * Falls back to 0n for any market whose events fail to fetch.
+ */
+export async function fetchAllMarketVolumes(
+  marketAddresses: string[]
+): Promise<Map<string, bigint>> {
+  const results = await Promise.allSettled(
+    marketAddresses.map(async (addr) => ({
+      addr: addr.toLowerCase(),
+      volume: await fetchMarketVolume(addr),
+    }))
+  );
+
+  const volumes = new Map<string, bigint>();
+  for (const r of results) {
+    if (r.status === 'fulfilled') {
+      volumes.set(r.value.addr, r.value.volume);
+    }
+  }
+  return volumes;
+}
+
 /* ─── Parse a single log entry into a TradeEvent ─── */
 
 function parseTradeLog(log: BlockscoutLogEntry, type: 'buy' | 'sell'): TradeEvent | null {

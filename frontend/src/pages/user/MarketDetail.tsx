@@ -10,7 +10,7 @@ import ProbabilityBar, { getOutcomeColor } from '../../components/ProbabilityBar
 import Countdown from '../../components/Countdown';
 import { PageLoader } from '../../components/LoadingSpinner';
 import UsdcIcon from '../../components/UsdcIcon';
-import { fetchTradeEvents } from '../../services/blockscout';
+import { fetchTradeEvents, computeVolumeFromEvents } from '../../services/blockscout';
 import {
   formatUSDC, formatWad, formatProbability, probToPercent, formatDate,
   applyBuySlippage, applySellSlippage, parseContractError, resolveImageUri,
@@ -61,6 +61,7 @@ export default function MarketDetail() {
   const [detail, setDetail] = useState<MarketDetailData | null>(null);
   const [userInfo, setUserInfo] = useState<UserInfo | null>(null);
   const [probHistory, setProbHistory] = useState<ProbHistoryPoint[]>([]);
+  const [accurateVolume, setAccurateVolume] = useState<bigint | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -187,6 +188,9 @@ export default function MarketDetail() {
 
       // Fetch trade events from BlockScout API (reliable, includes timestamps)
       const events = await fetchTradeEvents(addr);
+
+      // Compute accurate volume from all trade events (buys + sells)
+      setAccurateVolume(computeVolumeFromEvents(events));
 
       for (const event of events) {
         if (event.type === 'buy') {
@@ -450,7 +454,7 @@ export default function MarketDetail() {
           <div className="lg:col-span-2 space-y-5">
             {/* Quick stats */}
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-              <MiniStat label="Volume" value={`${formatUSDC(detail.totalVolumeWei)}`} suffix="USDC" icon={<UsdcIcon size={14} />} />
+              <MiniStat label="Volume" value={`${formatUSDC(accurateVolume ?? detail.totalVolumeWei)}`} suffix="USDC" icon={<UsdcIcon size={14} />} />
               <MiniStat label="Traders" value={detail.participants.toString()} />
               <MiniStat label="Created" value={formatDate(detail.createdAt)} small />
               <MiniStat label={isActive ? 'Ends' : 'Ended'} value={formatDate(detail.marketDeadline)} small />

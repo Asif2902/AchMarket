@@ -9,6 +9,7 @@ import Countdown from '../../components/Countdown';
 import { PageLoader } from '../../components/LoadingSpinner';
 import EmptyState from '../../components/EmptyState';
 import { formatUSDC, formatDate, formatTimeAgo, parseContractError } from '../../utils/format';
+import { fetchAllMarketVolumes } from '../../services/blockscout';
 
 export interface OwnerMarketData {
   market: string;
@@ -67,6 +68,20 @@ export function useOwnerMarkets() {
       }
 
       setMarkets(result);
+
+      // Fetch accurate volumes from BlockScout events (buys + sells)
+      const addresses = result.map((m) => m.market);
+      fetchAllMarketVolumes(addresses).then((volumes) => {
+        if (volumes.size === 0) return;
+        setMarkets((prev) =>
+          prev.map((m) => {
+            const vol = volumes.get(m.market.toLowerCase());
+            return vol !== undefined ? { ...m, totalVolumeWei: vol } : m;
+          })
+        );
+      }).catch((err) => {
+        console.warn('BlockScout volume fetch failed, using on-chain values:', err);
+      });
     } catch (err) {
       console.error('Failed to fetch markets:', err);
     } finally {

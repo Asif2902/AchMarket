@@ -5,6 +5,7 @@ import { FACTORY_ADDRESS, STAGE } from '../../config/network';
 import { FACTORY_ABI, MARKET_ABI } from '../../config/abis';
 import { PageLoader } from '../../components/LoadingSpinner';
 import { formatUSDC } from '../../utils/format';
+import { fetchAllMarketVolumes } from '../../services/blockscout';
 
 interface FeeEvent {
   market: string;
@@ -66,6 +67,24 @@ export default function FeeManagement() {
         setTotalResolved(resolvedCount);
         setTotalResolvedVolume(resolvedVol);
         setFeeEvents(events.sort((a, b) => b.blockNumber - a.blockNumber));
+
+        // Fetch accurate volumes from BlockScout events (buys + sells)
+        const resolvedAddresses = summaries
+          .filter((s: Record<string, unknown>) => Number(s.stage) === STAGE.Resolved)
+          .map((s: Record<string, unknown>) => s.market as string);
+        if (resolvedAddresses.length > 0) {
+          fetchAllMarketVolumes(resolvedAddresses).then((volumes) => {
+            if (volumes.size === 0) return;
+            let accurateVol = 0n;
+            for (const addr of resolvedAddresses) {
+              const vol = volumes.get(addr.toLowerCase());
+              accurateVol += vol !== undefined ? vol : 0n;
+            }
+            if (accurateVol > 0n) {
+              setTotalResolvedVolume(accurateVol);
+            }
+          }).catch(() => {});
+        }
       } catch (err) {
         console.error('Failed to fetch fee data:', err);
       } finally {
