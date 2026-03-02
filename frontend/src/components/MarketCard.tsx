@@ -1,9 +1,9 @@
 import { Link } from 'react-router-dom';
 import ImageWithFallback from './ImageWithFallback';
+import ProbabilityBar from './ProbabilityBar';
 import Countdown from './Countdown';
 import UsdcIcon from './UsdcIcon';
-import { getOutcomeColor } from './ProbabilityBar';
-import { formatUSDC, makeMarketSlug, probToPercent } from '../utils/format';
+import { formatUSDC, makeMarketSlug } from '../utils/format';
 import { STAGE, STAGE_LABELS, STAGE_COLORS } from '../config/network';
 
 export interface MarketSummaryData {
@@ -29,17 +29,6 @@ export default function MarketCard({ data }: Props) {
   const isActive = data.stage === STAGE.Active;
   const isResolved = data.stage === STAGE.Resolved;
 
-  // Build outcome probabilities
-  const outcomes = data.outcomeLabels.map((label, i) => ({
-    label,
-    pct: probToPercent(data.impliedProbabilitiesWad[i]),
-    color: getOutcomeColor(i),
-    isWinner: isResolved && data.winningOutcome === i,
-  }));
-
-  // For the mini bar chart — scale bar widths relative to max probability
-  const maxPct = Math.max(...outcomes.map(o => o.pct), 1);
-
   return (
     <Link to={`/market/${makeMarketSlug(data.marketId, data.title)}`} className="block group">
       <div className="card-hover overflow-hidden h-full flex flex-col">
@@ -50,6 +39,7 @@ export default function MarketCard({ data }: Props) {
             alt={data.title}
             className="h-36 sm:h-40 w-full"
           />
+          {/* Gradient overlay for readability */}
           <div className="absolute inset-0 bg-gradient-to-t from-dark-900/60 via-transparent to-transparent" />
 
           {/* Badges */}
@@ -83,56 +73,15 @@ export default function MarketCard({ data }: Props) {
             {data.title}
           </h3>
 
-          {/* Prediction market style outcome prices */}
-          <div className="flex-1 space-y-2">
-            {/* Outcome buttons — like Polymarket Yes/No pricing */}
-            <div className={`grid gap-2 ${outcomes.length === 2 ? 'grid-cols-2' : 'grid-cols-1'}`}>
-              {outcomes.slice(0, outcomes.length === 2 ? 2 : 3).map((o, i) => (
-                <div
-                  key={i}
-                  className={`relative overflow-hidden rounded-lg border px-3 py-2 transition-all ${
-                    o.isWinner
-                      ? 'border-emerald-500/30 bg-emerald-500/10'
-                      : 'border-white/[0.06] bg-dark-900/30 group-hover:border-white/[0.1]'
-                  }`}
-                >
-                  {/* Background fill bar */}
-                  <div
-                    className={`absolute inset-y-0 left-0 opacity-[0.08] transition-all duration-700 bg-gradient-to-r ${o.color.gradient}`}
-                    style={{ width: `${Math.max(o.pct, 2)}%` }}
-                  />
-                  <div className="relative flex items-center justify-between">
-                    <span className={`text-xs font-medium truncate mr-2 ${
-                      o.isWinner ? 'text-emerald-400' : 'text-dark-300'
-                    }`}>
-                      {o.isWinner && (
-                        <svg className="w-3 h-3 inline mr-0.5 -mt-0.5" fill="currentColor" viewBox="0 0 20 20">
-                          <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
-                        </svg>
-                      )}
-                      {o.label}
-                    </span>
-                    <span className={`text-sm font-bold tabular-nums whitespace-nowrap ${o.color.text}`}>
-                      {o.pct.toFixed(0)}%
-                    </span>
-                  </div>
-                </div>
-              ))}
-            </div>
-
-            {/* Mini horizontal bar chart for visual comparison */}
-            <div className="flex items-end gap-[3px] h-6">
-              {outcomes.map((o, i) => (
-                <div key={i} className="flex-1 flex flex-col justify-end h-full">
-                  <div
-                    className={`w-full rounded-t-sm transition-all duration-700 bg-gradient-to-t ${o.color.gradient} ${
-                      o.isWinner ? 'opacity-90' : 'opacity-40 group-hover:opacity-60'
-                    }`}
-                    style={{ height: `${Math.max((o.pct / maxPct) * 100, 8)}%` }}
-                  />
-                </div>
-              ))}
-            </div>
+          {/* Probability display — compact inline version for cards */}
+          <div className="flex-1">
+            <ProbabilityBar
+              labels={data.outcomeLabels}
+              probabilities={data.impliedProbabilitiesWad}
+              winningOutcome={data.winningOutcome}
+              isResolved={isResolved}
+              compact
+            />
           </div>
 
           {/* Footer */}
