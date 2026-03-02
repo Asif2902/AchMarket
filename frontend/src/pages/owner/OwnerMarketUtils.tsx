@@ -113,7 +113,7 @@ export function OwnerMarketCard({ market, actions, urgentBadge }: OwnerCardProps
           {/* Desktop badges */}
           <div className="hidden sm:flex items-center gap-2 mb-2">
             <span className={`badge ${STAGE_COLORS[market.stage]}`}>{STAGE_LABELS[market.stage]}</span>
-            <span className="badge bg-dark-750/80 text-dark-300 border-white/[0.06]">{market.category}</span>
+            <span className="badge bg-dark-750/80 text-dark-300 border-white/[0.08]">{market.category}</span>
             {urgentBadge && (
               <span className="badge bg-yellow-500/20 text-yellow-400 border-yellow-500/30 animate-pulse">
                 {urgentBadge}
@@ -157,7 +157,7 @@ export function OwnerMarketCard({ market, actions, urgentBadge }: OwnerCardProps
 
           {/* Actions */}
           {actions && (
-            <div className="mt-4 pt-3 border-t border-white/[0.06] flex flex-wrap gap-2">
+            <div className="mt-4 pt-3 border-t border-white/[0.08] flex flex-wrap gap-2">
               {actions}
             </div>
           )}
@@ -217,7 +217,7 @@ export function ResolveModal({ market, onClose, onResolved }: ResolveModalProps)
         </div>
 
         {/* Context */}
-        <div className="p-4 rounded-xl bg-dark-900/60 border border-white/[0.04] mb-6">
+        <div className="p-4 rounded-xl bg-dark-900/60 border border-white/[0.06] mb-6">
           <div className="flex gap-3">
             <ImageWithFallback src={market.imageUri} alt={market.title} className="w-14 h-14 rounded-xl flex-shrink-0" />
             <div className="min-w-0">
@@ -237,7 +237,7 @@ export function ResolveModal({ market, onClose, onResolved }: ResolveModalProps)
               className={`w-full p-3.5 rounded-xl text-left text-sm transition-all border flex items-center gap-3 ${
                 selectedOutcome === i
                   ? 'border-emerald-500/40 bg-emerald-500/10'
-                  : 'border-white/[0.06] bg-dark-900/40 hover:border-white/[0.12] hover:bg-dark-800/40'
+                  : 'border-white/[0.08] bg-dark-900/40 hover:border-white/[0.12] hover:bg-dark-800/40'
               }`}
             >
               <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center transition-colors ${

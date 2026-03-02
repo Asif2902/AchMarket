@@ -147,22 +147,22 @@ export default function Portfolio() {
   return (
     <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8 space-y-6 animate-fade-in">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex items-start sm:items-center justify-between gap-3">
         <div>
           <h1 className="text-xl sm:text-2xl font-bold text-white">Portfolio</h1>
           <p className="text-xs text-dark-500 mt-0.5">{positions.length} position{positions.length !== 1 ? 's' : ''}</p>
         </div>
-        <Link to="/" className="btn-secondary text-xs px-3 py-1.5">
+        <Link to="/" className="btn-secondary text-xs px-3 py-1.5 shrink-0 !min-h-0">
           Browse Markets
         </Link>
       </div>
 
       {/* Summary stats */}
       {positions.length > 0 && (
-        <div className="grid grid-cols-3 gap-3">
-          <div className="card p-3.5">
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+          <div className="card p-3.5 col-span-2 sm:col-span-1">
             <span className="text-2xs text-dark-500 font-medium uppercase tracking-wider">Total Deposited</span>
-            <p className="text-base sm:text-lg font-bold text-white mt-0.5 tabular-nums flex items-center gap-1.5"><UsdcIcon size={16} />{formatUSDC(totalDeposited)} <span className="text-2xs text-dark-500">USDC</span></p>
+            <p className="text-base sm:text-lg font-bold text-white mt-0.5 tabular-nums flex items-center gap-1.5 truncate"><UsdcIcon size={16} />{formatUSDC(totalDeposited)} <span className="text-2xs text-dark-500">USDC</span></p>
           </div>
           <div className="card p-3.5">
             <span className="text-2xs text-dark-500 font-medium uppercase tracking-wider">Active</span>
@@ -196,11 +196,11 @@ export default function Portfolio() {
           {positions.map((pos, idx) => (
             <div key={pos.market} className="card p-4 sm:p-5 animate-fade-in-up" style={{ animationDelay: `${idx * 50}ms`, animationFillMode: 'both' }}>
               {/* Title + Badge */}
-              <div className="flex items-start justify-between gap-3 mb-3">
+              <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2 sm:gap-3 mb-3">
                 <div className="min-w-0 flex-1">
                   <Link
                     to={`/market/${makeMarketSlug(pos.marketId, pos.title)}`}
-                    className="font-semibold text-sm text-white hover:text-primary-400 transition-colors line-clamp-1"
+                    className="font-semibold text-sm text-white hover:text-primary-400 transition-colors line-clamp-2 sm:line-clamp-1"
                   >
                     {pos.title}
                   </Link>
@@ -209,9 +209,9 @@ export default function Portfolio() {
                     <span className="text-2xs text-dark-500">{pos.category}</span>
                   </div>
                 </div>
-                <div className="text-right shrink-0">
+                <div className="flex items-center sm:items-end gap-1.5 sm:flex-col sm:text-right shrink-0">
                   <p className="text-2xs text-dark-500 font-medium">Deposited</p>
-                  <p className="text-sm font-bold text-white tabular-nums flex items-center gap-1 justify-end"><UsdcIcon size={13} />{formatUSDC(pos.netDepositedWei)}</p>
+                  <p className="text-sm font-bold text-white tabular-nums flex items-center gap-1"><UsdcIcon size={13} />{formatUSDC(pos.netDepositedWei)}</p>
                 </div>
               </div>
 
@@ -231,7 +231,7 @@ export default function Portfolio() {
               </div>
 
               {/* Actions */}
-              <div className="flex flex-wrap items-center gap-2 pt-3 border-t border-white/[0.04]">
+              <div className="flex flex-wrap items-center gap-2 pt-3 border-t border-white/[0.06]">
                 {pos.canRedeem && (
                   <button
                     onClick={() => handleAction(pos.market, 'redeem')}

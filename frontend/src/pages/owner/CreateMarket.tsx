@@ -266,7 +266,7 @@ export default function CreateMarket() {
               className="input-field"
             />
             {imageUri && (
-              <div className="mt-3 rounded-xl overflow-hidden border border-white/[0.06]">
+              <div className="mt-3 rounded-xl overflow-hidden border border-white/[0.08]">
                 <ImageWithFallback src={imageUri} alt="Preview" className="h-40 w-full" />
               </div>
             )}
@@ -295,7 +295,7 @@ export default function CreateMarket() {
                   {outcomes.length > 2 && (
                     <button
                       onClick={() => removeOutcome(i)}
-                      className="w-10 h-10 rounded-xl bg-dark-800/80 hover:bg-red-500/15 text-dark-400 hover:text-red-400 transition-all border border-white/[0.06] hover:border-red-500/20 flex items-center justify-center flex-shrink-0"
+                      className="w-10 h-10 rounded-xl bg-dark-800/80 hover:bg-red-500/15 text-dark-400 hover:text-red-400 transition-all border border-white/[0.08] hover:border-red-500/20 flex items-center justify-center flex-shrink-0"
                     >
                       <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -359,7 +359,7 @@ export default function CreateMarket() {
               </div>
             )}
             {durationSeconds >= 3600 && (
-              <div className="mt-3 p-3 rounded-xl bg-dark-900/40 border border-white/[0.04] flex items-center gap-2">
+              <div className="mt-3 p-3 rounded-xl bg-dark-900/40 border border-white/[0.06] flex items-center gap-2">
                 <svg className="w-4 h-4 text-dark-400 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
                 </svg>
@@ -503,7 +503,7 @@ export default function CreateMarket() {
                 <div className="flex items-center gap-2">
                   <span className="badge bg-emerald-500/15 text-emerald-400 border-emerald-500/25">Active</span>
                   {actualCategory && (
-                    <span className="badge bg-dark-750/80 text-dark-300 border-white/[0.06]">{actualCategory}</span>
+                    <span className="badge bg-dark-750/80 text-dark-300 border-white/[0.08]">{actualCategory}</span>
                   )}
                 </div>
                 <h4 className="font-semibold text-white text-sm leading-tight">
@@ -516,7 +516,7 @@ export default function CreateMarket() {
                     compact
                   />
                 )}
-                <div className="flex items-center justify-between pt-3 border-t border-white/[0.06] text-xs text-dark-400">
+                <div className="flex items-center justify-between pt-3 border-t border-white/[0.08] text-xs text-dark-400">
                   <span className="flex items-center gap-1">
                     <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
                     0 USDC volume

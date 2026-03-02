@@ -21,7 +21,7 @@ export default function ResolvedMarkets() {
           </div>
           Resolved Markets
         </h1>
-        <span className="badge bg-dark-750/80 text-dark-300 border-white/[0.06]">{resolved.length}</span>
+        <span className="badge bg-dark-750/80 text-dark-300 border-white/[0.08]">{resolved.length}</span>
       </div>
 
       {resolved.length === 0 ? (
