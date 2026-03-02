@@ -137,10 +137,16 @@ export function WalletProvider({ children }: { children: ReactNode }) {
   }, [wagmiDisconnect]);
 
   const switchNetwork = useCallback(() => {
+    setError(null);
     if (switchChain) {
       switchChain(
         { chainId: NETWORK.chainId },
-        { onError: () => openChainModal?.() },
+        {
+          onError: (err) => {
+            setError(err?.message ?? 'Failed to switch network');
+            openChainModal?.();
+          },
+        },
       );
     } else {
       openChainModal?.();
@@ -150,16 +156,22 @@ export function WalletProvider({ children }: { children: ReactNode }) {
   // ── Contract helpers (unchanged) ────────────────────────────
   const getFactoryContract = useCallback(
     (withSigner = false): ethers.Contract | null => {
-      const providerToUse = withSigner && signer ? signer : readProvider;
-      return new ethers.Contract(FACTORY_ADDRESS, FACTORY_ABI, providerToUse);
+      if (withSigner) {
+        if (!signer) return null;
+        return new ethers.Contract(FACTORY_ADDRESS, FACTORY_ABI, signer);
+      }
+      return new ethers.Contract(FACTORY_ADDRESS, FACTORY_ABI, readProvider);
     },
     [signer],
   );
 
   const getMarketContract = useCallback(
     (marketAddress: string, withSigner = false): ethers.Contract | null => {
-      const providerToUse = withSigner && signer ? signer : readProvider;
-      return new ethers.Contract(marketAddress, MARKET_ABI, providerToUse);
+      if (withSigner) {
+        if (!signer) return null;
+        return new ethers.Contract(marketAddress, MARKET_ABI, signer);
+      }
+      return new ethers.Contract(marketAddress, MARKET_ABI, readProvider);
     },
     [signer],
   );

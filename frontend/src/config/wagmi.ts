@@ -1,12 +1,13 @@
 import { getDefaultConfig } from '@rainbow-me/rainbowkit';
 import { defineChain } from 'viem';
+import { NETWORK } from './network';
 
 export const arcTestnet = defineChain({
-  id: 5_042_002,
-  name: 'ARC Testnet',
-  nativeCurrency: { name: 'USDC', symbol: 'USDC', decimals: 18 },
+  id: NETWORK.chainId,
+  name: NETWORK.name,
+  nativeCurrency: NETWORK.nativeCurrency,
   rpcUrls: {
-    default: { http: ['https://arc-testnet.drpc.org/'] },
+    default: { http: [NETWORK.rpcUrl] },
   },
 });
 

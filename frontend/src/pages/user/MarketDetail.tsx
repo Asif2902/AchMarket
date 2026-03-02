@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { ethers } from 'ethers';
-import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend } from 'recharts';
+import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend, CartesianGrid } from 'recharts';
 import { useWallet } from '../../context/WalletContext';
 import { FACTORY_ADDRESS, STAGE, STAGE_LABELS, STAGE_COLORS } from '../../config/network';
 import { FACTORY_ABI, MARKET_ABI } from '../../config/abis';
@@ -566,59 +566,11 @@ export default function MarketDetail() {
 
             {/* Probability history chart */}
             {probHistory.length > 1 && (
-              <div className="card p-5">
-                <h2 className="text-sm font-semibold text-dark-300 uppercase tracking-wider mb-4">Probability History</h2>
-                <div className="h-64 sm:h-72">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <LineChart data={probHistory}>
-                      <XAxis
-                        dataKey="time"
-                        tickFormatter={(t) => new Date(t * 1000).toLocaleDateString()}
-                        stroke="#2a3650"
-                        tick={{ fontSize: 10, fill: '#64748b' }}
-                        axisLine={false}
-                        tickLine={false}
-                      />
-                      <YAxis
-                        domain={[0, 100]}
-                        tickFormatter={(v) => `${v}%`}
-                        stroke="#2a3650"
-                        tick={{ fontSize: 10, fill: '#64748b' }}
-                        axisLine={false}
-                        tickLine={false}
-                        width={35}
-                      />
-                      <Tooltip
-                        contentStyle={{
-                          backgroundColor: 'rgba(15, 23, 42, 0.95)',
-                          border: '1px solid rgba(255,255,255,0.06)',
-                          borderRadius: '12px',
-                          backdropFilter: 'blur(12px)',
-                          padding: '8px 12px',
-                          fontSize: '12px',
-                        }}
-                        labelFormatter={(t) => formatDate(t as number)}
-                        formatter={(value: number) => [`${value.toFixed(1)}%`]}
-                      />
-                      <Legend wrapperStyle={{ fontSize: '11px' }} />
-                      {detail.outcomeLabels.map((label, i) => {
-                        const colors = ['#22c55e', '#ef4444', '#3b82f6', '#a855f7', '#f97316', '#06b6d4'];
-                        return (
-                          <Line
-                            key={label}
-                            type="monotone"
-                            dataKey={label}
-                            stroke={colors[i % colors.length]}
-                            strokeWidth={2}
-                            dot={false}
-                            activeDot={{ r: 4, strokeWidth: 0 }}
-                          />
-                        );
-                      })}
-                    </LineChart>
-                  </ResponsiveContainer>
-                </div>
-              </div>
+              <ProbabilityChart
+                history={probHistory}
+                outcomeLabels={detail.outcomeLabels}
+                createdAt={detail.createdAt}
+              />
             )}
           </div>
 
@@ -911,6 +863,192 @@ export default function MarketDetail() {
             )}
           </div>
         </div>
+      </div>
+    </div>
+  );
+}
+
+/* ─── Probability Chart ─── */
+
+const CHART_COLORS = ['#22c55e', '#ef4444', '#3b82f6', '#a855f7', '#f97316', '#06b6d4'];
+
+const TIME_RANGES = [
+  { key: '1D', label: '1D', seconds: 86400 },
+  { key: '1W', label: '1W', seconds: 604800 },
+  { key: '1M', label: '1M', seconds: 2592000 },
+  { key: 'ALL', label: 'All', seconds: 0 },
+] as const;
+
+function ProbabilityChart({
+  history,
+  outcomeLabels,
+  createdAt,
+}: {
+  history: ProbHistoryPoint[];
+  outcomeLabels: string[];
+  createdAt: number;
+}) {
+  const [timeRange, setTimeRange] = useState<string>('ALL');
+  const [hoveredData, setHoveredData] = useState<ProbHistoryPoint | null>(null);
+
+  const filteredHistory = (() => {
+    if (timeRange === 'ALL' || history.length === 0) return history;
+    const range = TIME_RANGES.find(r => r.key === timeRange);
+    if (!range || range.seconds === 0) return history;
+    const cutoff = Math.floor(Date.now() / 1000) - range.seconds;
+    const filtered = history.filter(p => p.time >= cutoff);
+    // Always include at least one point before the cutoff for continuity
+    if (filtered.length < history.length && filtered.length > 0) {
+      const prevIdx = history.findIndex(p => p.time >= cutoff);
+      if (prevIdx > 0) return [history[prevIdx - 1], ...filtered];
+    }
+    return filtered.length > 0 ? filtered : history;
+  })();
+
+  // Current values (last point or hovered)
+  const displayData = hoveredData ?? (filteredHistory.length > 0 ? filteredHistory[filteredHistory.length - 1] : null);
+
+  return (
+    <div className="card overflow-hidden">
+      {/* Header with current values */}
+      <div className="p-5 pb-0">
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-sm font-semibold text-dark-300 uppercase tracking-wider">Price Chart</h2>
+          {/* Time range selector */}
+          <div className="flex items-center rounded-lg bg-dark-900/60 p-0.5 border border-white/[0.06]">
+            {TIME_RANGES.map(range => (
+              <button
+                key={range.key}
+                onClick={() => setTimeRange(range.key)}
+                className={`px-2.5 py-1 rounded-md text-2xs font-semibold transition-all ${
+                  timeRange === range.key
+                    ? 'bg-primary-600/20 text-primary-400'
+                    : 'text-dark-500 hover:text-dark-300'
+                }`}
+              >
+                {range.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Current / hovered probability values */}
+        {displayData && (
+          <div className="flex flex-wrap items-center gap-x-5 gap-y-1.5 mb-3">
+            {outcomeLabels.map((label, i) => {
+              const value = displayData[label] as number | undefined;
+              return (
+                <div key={label} className="flex items-center gap-1.5">
+                  <div
+                    className="w-2 h-2 rounded-full"
+                    style={{ backgroundColor: CHART_COLORS[i % CHART_COLORS.length] }}
+                  />
+                  <span className="text-xs text-dark-400">{label}</span>
+                  <span
+                    className="text-sm font-bold tabular-nums"
+                    style={{ color: CHART_COLORS[i % CHART_COLORS.length] }}
+                  >
+                    {value != null ? `${value.toFixed(1)}%` : '--'}
+                  </span>
+                </div>
+              );
+            })}
+            {hoveredData && (
+              <span className="text-2xs text-dark-600 ml-auto">
+                {formatDate(hoveredData.time)}
+              </span>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Chart */}
+      <div className="h-72 sm:h-80 px-2">
+        <ResponsiveContainer width="100%" height="100%">
+          <AreaChart
+            data={filteredHistory}
+            onMouseMove={(state: { activePayload?: Array<{ payload: ProbHistoryPoint }> }) => {
+              if (state?.activePayload?.[0]) {
+                setHoveredData(state.activePayload[0].payload);
+              }
+            }}
+            onMouseLeave={() => setHoveredData(null)}
+          >
+            <defs>
+              {outcomeLabels.map((_, i) => (
+                <linearGradient key={i} id={`gradient-${i}`} x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor={CHART_COLORS[i % CHART_COLORS.length]} stopOpacity={0.3} />
+                  <stop offset="95%" stopColor={CHART_COLORS[i % CHART_COLORS.length]} stopOpacity={0} />
+                </linearGradient>
+              ))}
+            </defs>
+            <CartesianGrid
+              strokeDasharray="3 3"
+              stroke="rgba(255,255,255,0.04)"
+              vertical={false}
+            />
+            <XAxis
+              dataKey="time"
+              tickFormatter={(t) => {
+                const d = new Date(t * 1000);
+                if (timeRange === '1D') return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                return d.toLocaleDateString([], { month: 'short', day: 'numeric' });
+              }}
+              stroke="transparent"
+              tick={{ fontSize: 10, fill: '#475569' }}
+              axisLine={false}
+              tickLine={false}
+              minTickGap={40}
+            />
+            <YAxis
+              domain={[0, 100]}
+              tickFormatter={(v) => `${v}%`}
+              stroke="transparent"
+              tick={{ fontSize: 10, fill: '#475569' }}
+              axisLine={false}
+              tickLine={false}
+              width={35}
+            />
+            <Tooltip
+              cursor={{
+                stroke: 'rgba(255,255,255,0.1)',
+                strokeWidth: 1,
+                strokeDasharray: '4 4',
+              }}
+              contentStyle={{
+                backgroundColor: 'rgba(15, 23, 42, 0.95)',
+                border: '1px solid rgba(255,255,255,0.08)',
+                borderRadius: '12px',
+                backdropFilter: 'blur(12px)',
+                padding: '10px 14px',
+                fontSize: '12px',
+                boxShadow: '0 8px 32px rgba(0,0,0,0.4)',
+              }}
+              labelFormatter={(t) => formatDate(t as number)}
+              formatter={(value: number, name: string) => {
+                return [`${value.toFixed(1)}%`, name];
+              }}
+            />
+            {outcomeLabels.map((label, i) => (
+              <Area
+                key={label}
+                type="monotone"
+                dataKey={label}
+                stroke={CHART_COLORS[i % CHART_COLORS.length]}
+                strokeWidth={2}
+                fill={`url(#gradient-${i})`}
+                fillOpacity={1}
+                dot={false}
+                activeDot={{
+                  r: 5,
+                  strokeWidth: 2,
+                  stroke: CHART_COLORS[i % CHART_COLORS.length],
+                  fill: '#0f1219',
+                }}
+              />
+            ))}
+          </AreaChart>
+        </ResponsiveContainer>
       </div>
     </div>
   );
