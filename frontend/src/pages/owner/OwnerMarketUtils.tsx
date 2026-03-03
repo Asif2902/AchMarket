@@ -1,14 +1,15 @@
 import { useState, useEffect, useCallback } from 'react';
 import { ethers } from 'ethers';
 import { useWallet } from '../../context/WalletContext';
-import { FACTORY_ADDRESS, STAGE, STAGE_LABELS, STAGE_COLORS } from '../../config/network';
-import { FACTORY_ABI, MARKET_ABI } from '../../config/abis';
+import { FACTORY_ADDRESS, LENS_ADDRESS, STAGE, STAGE_LABELS, STAGE_COLORS } from '../../config/network';
+import { FACTORY_ABI, LENS_ABI, MARKET_ABI } from '../../config/abis';
 import ImageWithFallback from '../../components/ImageWithFallback';
 import ProbabilityBar from '../../components/ProbabilityBar';
 import Countdown from '../../components/Countdown';
 import { PageLoader } from '../../components/LoadingSpinner';
 import EmptyState from '../../components/EmptyState';
-import { formatUSDC, formatDate, formatTimeAgo, parseContractError } from '../../utils/format';
+import { formatUSDC, formatDate, formatTimeAgo, parseContractError, resolveImageUri } from '../../utils/format';
+import { fetchAllMarketVolumes } from '../../services/blockscout';
 
 export interface OwnerMarketData {
   market: string;
@@ -26,6 +27,8 @@ export interface OwnerMarketData {
   totalVolumeWei: bigint;
   participants: number;
   proofUri: string;
+  cancelReason: string;
+  cancelProofUri: string;
 }
 
 export function useOwnerMarkets() {
@@ -37,10 +40,11 @@ export function useOwnerMarkets() {
     try {
       setLoading(true);
       const factory = new ethers.Contract(FACTORY_ADDRESS, FACTORY_ABI, readProvider);
+      const lens = new ethers.Contract(LENS_ADDRESS, LENS_ABI, readProvider);
       const total = Number(await factory.totalMarkets());
       if (total === 0) { setMarkets([]); return; }
 
-      const summaries = await factory.getMarketSummaries(0, total);
+      const summaries = await lens.getMarketSummaries(0, total);
       const result: OwnerMarketData[] = [];
 
       for (const s of summaries) {
@@ -63,10 +67,26 @@ export function useOwnerMarkets() {
           totalVolumeWei: s.totalVolumeWei,
           participants: Number(s.participants),
           proofUri: info._proofUri,
+          cancelReason: info._cancelReason || '',
+          cancelProofUri: info._cancelProofUri || '',
         });
       }
 
       setMarkets(result);
+
+      // Fetch accurate volumes from BlockScout events (buys + sells)
+      const addresses = result.map((m) => m.market);
+      fetchAllMarketVolumes(addresses).then((volumes) => {
+        if (volumes.size === 0) return;
+        setMarkets((prev) =>
+          prev.map((m) => {
+            const vol = volumes.get(m.market.toLowerCase());
+            return vol !== undefined ? { ...m, totalVolumeWei: vol } : m;
+          })
+        );
+      }).catch((err) => {
+        console.warn('BlockScout volume fetch failed, using on-chain values:', err);
+      });
     } catch (err) {
       console.error('Failed to fetch markets:', err);
     } finally {
@@ -307,6 +327,106 @@ export function ResolveModal({ market, onClose, onResolved }: ResolveModalProps)
   );
 }
 
+// Edit Modal
+interface EditModalProps {
+  market: OwnerMarketData;
+  onClose: () => void;
+  onEdited: () => void;
+}
+
+export function EditModal({ market, onClose, onEdited }: EditModalProps) {
+  const { signer } = useWallet();
+  const [title, setTitle] = useState(market.title);
+  const [description, setDescription] = useState(market.description);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const hasChanges = title.trim() !== market.title || description.trim() !== market.description;
+  const canSubmit = title.trim().length > 0 && hasChanges && !submitting;
+
+  const handleSubmit = async () => {
+    if (!signer || !canSubmit) return;
+    setSubmitting(true);
+    setError(null);
+    try {
+      const marketContract = new ethers.Contract(market.market, MARKET_ABI, signer);
+      const tx = await marketContract.editMarket(title.trim(), description.trim());
+      await tx.wait();
+      onEdited();
+    } catch (err) {
+      setError(parseContractError(err));
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <div className="absolute inset-0 bg-dark-950/80 backdrop-blur-sm animate-fade-in" onClick={onClose} />
+      <div className="relative card w-full max-w-md p-6 animate-slide-up">
+        <button onClick={onClose} className="absolute top-4 right-4 w-8 h-8 rounded-lg bg-dark-750 border border-white/[0.08] flex items-center justify-center text-dark-400 hover:text-white hover:border-white/[0.15] transition-colors">
+          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+          </svg>
+        </button>
+
+        <div className="flex items-center gap-3 mb-5">
+          <div className="w-10 h-10 rounded-xl bg-primary-500/10 border border-primary-500/20 flex items-center justify-center">
+            <svg className="w-5 h-5 text-primary-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
+          </div>
+          <div>
+            <h2 className="text-lg font-bold text-white">Edit Market</h2>
+            <p className="text-xs text-dark-400">Update title or description</p>
+          </div>
+        </div>
+
+        <label className="label">Title <span className="text-red-400">*</span></label>
+        <input
+          type="text"
+          value={title}
+          onChange={e => setTitle(e.target.value)}
+          placeholder="Market title..."
+          className="input-field mb-3"
+        />
+
+        <label className="label">Description</label>
+        <textarea
+          value={description}
+          onChange={e => setDescription(e.target.value)}
+          placeholder="Market description..."
+          rows={4}
+          className="input-field mb-1 resize-none"
+        />
+        <p className="text-2xs text-dark-500 mb-4">Changes are permanent and visible to all users.</p>
+
+        {error && (
+          <div className="p-3 rounded-xl bg-red-500/10 text-red-400 border border-red-500/20 text-sm mb-4 flex items-start gap-2">
+            <svg className="w-4 h-4 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+            <span>{error}</span>
+          </div>
+        )}
+
+        <div className="flex gap-3">
+          <button onClick={onClose} className="btn-secondary flex-1">Cancel</button>
+          <button onClick={handleSubmit} disabled={!canSubmit} className="btn-primary flex-1 font-semibold">
+            {submitting ? (
+              <span className="flex items-center justify-center gap-2">
+                <div className="w-4 h-4 border-2 border-primary-300/30 border-t-primary-300 rounded-full animate-spin" />
+                Saving...
+              </span>
+            ) : (
+              <span className="flex items-center justify-center gap-2">
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
+                Save Changes
+              </span>
+            )}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // Cancel Modal
 interface CancelModalProps {
   market: OwnerMarketData;
@@ -317,16 +437,19 @@ interface CancelModalProps {
 export function CancelModal({ market, onClose, onCancelled }: CancelModalProps) {
   const { signer } = useWallet();
   const [reason, setReason] = useState('');
+  const [proofUri, setProofUri] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const canSubmit = reason.trim().length > 0 && proofUri.trim().length > 0 && !submitting;
+
   const handleSubmit = async () => {
-    if (!signer) return;
+    if (!signer || !canSubmit) return;
     setSubmitting(true);
     setError(null);
     try {
       const marketContract = new ethers.Contract(market.market, MARKET_ABI, signer);
-      const tx = await marketContract.cancel(reason.trim() || 'Cancelled by admin');
+      const tx = await marketContract.cancel(reason.trim(), proofUri.trim());
       await tx.wait();
       onCancelled();
     } catch (err) {
@@ -339,7 +462,13 @@ export function CancelModal({ market, onClose, onCancelled }: CancelModalProps) 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-dark-950/80 backdrop-blur-sm animate-fade-in" onClick={onClose} />
-      <div className="relative card w-full max-w-md p-6 animate-slide-up">
+      <div className="relative card w-full max-w-lg max-h-[90vh] overflow-y-auto p-6 animate-slide-up">
+        <button onClick={onClose} className="absolute top-4 right-4 w-8 h-8 rounded-lg bg-dark-750 border border-white/[0.08] flex items-center justify-center text-dark-400 hover:text-white hover:border-white/[0.15] transition-colors">
+          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+          </svg>
+        </button>
+
         <div className="flex items-center gap-3 mb-4">
           <div className="w-10 h-10 rounded-xl bg-red-500/10 border border-red-500/20 flex items-center justify-center">
             <svg className="w-5 h-5 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" /></svg>
@@ -350,20 +479,60 @@ export function CancelModal({ market, onClose, onCancelled }: CancelModalProps) 
           </div>
         </div>
 
-        <div className="p-3 rounded-xl bg-red-500/5 border border-red-500/10 mb-4">
+        {/* Market context */}
+        <div className="p-4 rounded-xl bg-dark-900/60 border border-white/[0.06] mb-5">
+          <div className="flex gap-3">
+            <ImageWithFallback src={market.imageUri} alt={market.title} className="w-14 h-14 rounded-xl flex-shrink-0" />
+            <div className="min-w-0">
+              <h3 className="font-semibold text-white text-sm leading-tight">{market.title}</h3>
+              <p className="text-xs text-dark-400 line-clamp-2 mt-1">{market.description}</p>
+            </div>
+          </div>
+        </div>
+
+        <div className="p-3 rounded-xl bg-red-500/5 border border-red-500/10 mb-5">
           <p className="text-sm text-dark-300">
-            Are you sure you want to cancel "<span className="text-white font-medium">{market.title}</span>"? All participants will be eligible for a full refund.
+            Are you sure you want to cancel this market? All participants will be eligible for a <span className="text-white font-medium">full refund</span>.
           </p>
         </div>
 
-        <label className="label">Reason <span className="text-dark-500 font-normal">(optional)</span></label>
-        <input
-          type="text"
+        <label className="label">Cancellation Reason <span className="text-red-400">*</span></label>
+        <textarea
           value={reason}
           onChange={e => setReason(e.target.value)}
-          placeholder="Reason for cancellation..."
-          className="input-field mb-4"
+          placeholder="Provide a detailed explanation for why this market is being cancelled. This will be publicly visible to all users..."
+          rows={5}
+          className="input-field mb-1 resize-none"
         />
+        <p className="text-2xs text-dark-500 mb-4">Explain in detail why this market is being cancelled. Be transparent.</p>
+
+        <label className="label">Proof / Evidence Image <span className="text-red-400">*</span></label>
+        <input
+          type="text"
+          value={proofUri}
+          onChange={e => setProofUri(e.target.value)}
+          placeholder="https://... or ipfs://... (screenshot, evidence image)"
+          className="input-field mb-1"
+        />
+        <p className="text-2xs text-dark-500 mb-4">Link to a screenshot or image that supports the cancellation reason</p>
+
+        {/* Image preview */}
+        {proofUri.trim() && (
+          <div className="mb-5 rounded-xl overflow-hidden border border-white/[0.08]">
+            <img
+              src={resolveImageUri(proofUri.trim())}
+              alt="Cancel proof"
+              className="w-full max-h-48 object-cover"
+              onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
+            />
+            <div className="p-2.5 bg-dark-900/60 flex items-center gap-2">
+              <svg className="w-3.5 h-3.5 text-primary-400 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" /></svg>
+              <a href={resolveImageUri(proofUri.trim())} target="_blank" rel="noopener noreferrer" className="text-xs text-primary-400 hover:text-primary-300 underline break-all truncate">
+                {proofUri}
+              </a>
+            </div>
+          </div>
+        )}
 
         {error && (
           <div className="p-3 rounded-xl bg-red-500/10 text-red-400 border border-red-500/20 text-sm mb-4 flex items-start gap-2">
@@ -374,7 +543,7 @@ export function CancelModal({ market, onClose, onCancelled }: CancelModalProps) 
 
         <div className="flex gap-3">
           <button onClick={onClose} className="btn-secondary flex-1">Go Back</button>
-          <button onClick={handleSubmit} disabled={submitting} className="btn-danger flex-1 font-semibold">
+          <button onClick={handleSubmit} disabled={!canSubmit} className="btn-danger flex-1 font-semibold">
             {submitting ? (
               <span className="flex items-center justify-center gap-2">
                 <div className="w-4 h-4 border-2 border-red-300/30 border-t-red-300 rounded-full animate-spin" />

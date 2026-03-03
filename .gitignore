@@ -19,6 +19,11 @@ frontend/dist/
 .DS_Store
 Thumbs.db
 
+# Hardhat
+artifacts/
+cache/
+typechain-types/
+
 # Logs
 *.log
 npm-debug.log*

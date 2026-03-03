@@ -2,13 +2,14 @@ import { useState } from 'react';
 import { STAGE } from '../../config/network';
 import { PageLoader } from '../../components/LoadingSpinner';
 import EmptyState from '../../components/EmptyState';
-import { useOwnerMarkets, OwnerMarketCard, ResolveModal, CancelModal } from './OwnerMarketUtils';
+import { useOwnerMarkets, OwnerMarketCard, ResolveModal, CancelModal, EditModal } from './OwnerMarketUtils';
 import type { OwnerMarketData } from './OwnerMarketUtils';
 
 export default function ActiveMarkets() {
   const { markets, loading, refetch } = useOwnerMarkets();
   const [resolveTarget, setResolveTarget] = useState<OwnerMarketData | null>(null);
   const [cancelTarget, setCancelTarget] = useState<OwnerMarketData | null>(null);
+  const [editTarget, setEditTarget] = useState<OwnerMarketData | null>(null);
 
   const active = markets.filter(m => m.stage === STAGE.Active);
 
@@ -41,6 +42,12 @@ export default function ActiveMarkets() {
                 market={m}
                 actions={
                   <>
+                    <button onClick={() => setEditTarget(m)} className="btn-secondary text-xs">
+                      <span className="flex items-center gap-1.5">
+                        <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
+                        Edit
+                      </span>
+                    </button>
                     <button onClick={() => setResolveTarget(m)} className="btn-success text-xs">
                       <span className="flex items-center gap-1.5">
                         <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
@@ -73,6 +80,13 @@ export default function ActiveMarkets() {
           market={cancelTarget}
           onClose={() => setCancelTarget(null)}
           onCancelled={() => { setCancelTarget(null); refetch(); }}
+        />
+      )}
+      {editTarget && (
+        <EditModal
+          market={editTarget}
+          onClose={() => setEditTarget(null)}
+          onEdited={() => { setEditTarget(null); refetch(); }}
         />
       )}
     </div>

@@ -2,8 +2,8 @@ import { createContext, useContext, useState, useEffect, useCallback, ReactNode 
 import { ethers } from 'ethers';
 import { useAccount, useDisconnect, useWalletClient, useSwitchChain } from 'wagmi';
 import { useConnectModal, useChainModal } from '@rainbow-me/rainbowkit';
-import { NETWORK, FACTORY_ADDRESS } from '../config/network';
-import { FACTORY_ABI, MARKET_ABI } from '../config/abis';
+import { NETWORK, FACTORY_ADDRESS, LENS_ADDRESS } from '../config/network';
+import { FACTORY_ABI, LENS_ABI, MARKET_ABI } from '../config/abis';
 
 interface WalletState {
   provider: ethers.BrowserProvider | null;
@@ -18,6 +18,7 @@ interface WalletState {
   disconnect: () => void;
   switchNetwork: () => void;
   getFactoryContract: (withSigner?: boolean) => ethers.Contract | null;
+  getLensContract: () => ethers.Contract;
   getMarketContract: (address: string, withSigner?: boolean) => ethers.Contract | null;
   readProvider: ethers.JsonRpcProvider;
 }
@@ -40,6 +41,7 @@ const WalletContext = createContext<WalletState>({
   disconnect: () => {},
   switchNetwork: () => {},
   getFactoryContract: () => null,
+  getLensContract: () => new ethers.Contract(LENS_ADDRESS, LENS_ABI, readProvider),
   getMarketContract: () => null,
   readProvider,
 });
@@ -165,6 +167,13 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     [signer],
   );
 
+  const getLensContract = useCallback(
+    (): ethers.Contract => {
+      return new ethers.Contract(LENS_ADDRESS, LENS_ABI, readProvider);
+    },
+    [],
+  );
+
   const getMarketContract = useCallback(
     (marketAddress: string, withSigner = false): ethers.Contract | null => {
       if (withSigner) {
@@ -191,6 +200,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
         disconnect,
         switchNetwork,
         getFactoryContract,
+        getLensContract,
         getMarketContract,
         readProvider,
       }}

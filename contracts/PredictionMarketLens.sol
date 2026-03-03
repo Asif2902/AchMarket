@@ -1,161 +1,38 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-import {PredictionMarket} from "./PredictionMarket.sol";
-import {Ownable}           from "@openzeppelin/contracts/access/Ownable.sol";
+import {PredictionMarket}        from "./PredictionMarket.sol";
+import {PredictionMarketFactory} from "./PredictionMarketFactory.sol";
 
-/// @title  PredictionMarketFactory
-/// @notice Factory, registry, and global analytics hub.
+/// @title  PredictionMarketLens
+/// @notice Read-only analytics contract that aggregates data from
+///         PredictionMarketFactory and its child PredictionMarket contracts.
 ///
-///         • Deploys PredictionMarket contracts via createMarket()
-///           — ALL market data (title, description, image, category,
-///             outcomes, duration) is provided at creation.
-///           — Market is immediately Active on deploy; no second step.
+///         Separated from the Factory to keep both contracts under the
+///         24 KB EIP-170 size limit.
 ///
-///         • Registers every market and provides paginated views for
-///           the frontend market listing and global dashboard.
+///         All functions are `view` -- no state is modified.
 ///
-///         • User-level data lives entirely in each submarket contract.
-///
-contract PredictionMarketFactory is Ownable {
-
-    /*//////////////////////////////////////////////////////////////
-                               EVENTS
-    //////////////////////////////////////////////////////////////*/
-
-    event MarketCreated(
-        address  indexed market,
-        uint256  indexed marketId,
-        address  indexed creator,
-        string   title,
-        string   category,
-        uint256  outcomeCount,
-        uint256  deadline
-    );
+contract PredictionMarketLens {
 
     /*//////////////////////////////////////////////////////////////
                               STORAGE
     //////////////////////////////////////////////////////////////*/
 
-    /// All deployed market addresses in creation order.
-    address[] public markets;
-
-    /// market address → registered?
-    mapping(address => bool) public isMarket;
-
-    /// market address → index in `markets`
-    mapping(address => uint256) public marketIndex;
-
-    /// Total markets ever created.
-    uint256 public totalMarkets;
-
-    // ── Creation guards ───────────────────────────────────────────
-    int256  public minBWad              = 10e18;
-    uint256 public minDuration          = 1 hours;
-    uint256 public maxDuration          = 365 days;
+    /// @notice The factory this lens reads from.
+    PredictionMarketFactory public immutable factory;
 
     /*//////////////////////////////////////////////////////////////
                             CONSTRUCTOR
     //////////////////////////////////////////////////////////////*/
 
-    constructor(address _owner) Ownable(_owner) {}
-
-    /*//////////////////////////////////////////////////////////////
-                          MARKET CREATION
-    //////////////////////////////////////////////////////////////*/
-
-    /// @notice Create and immediately activate a new prediction market.
-    ///         All data is provided here — no further setup required.
-    ///
-    /// @param _title          Market question (e.g. "Will BTC hit $200k by end of 2025?").
-    /// @param _description    Full description, context, and resolution criteria.
-    /// @param _category       Category tag: "Crypto", "Sports", "Politics", "Entertainment", etc.
-    /// @param _imageUri       Header/thumbnail image — IPFS CID or HTTPS URL.
-    /// @param _outcomeLabels  Labels for each outcome.
-    ///                        Binary:      ["Yes", "No"]
-    ///                        Multi-choice: ["Team A", "Team B", "Draw"]
-    ///                        Must have at least 2 outcomes.
-    /// @param _bWad           LMSR liquidity parameter in WAD.
-    ///                        Higher b → flatter prices, smaller multipliers, more stable odds.
-    ///                        Lower b → steeper prices, bigger multipliers, more sensitive to volume.
-    ///                        Good starting point: expected_total_volume_in_wei / 10.
-    /// @param _durationSeconds  Market open window in seconds.
-    ///                          Admin can resolve at any time before expiry.
-    ///                          After expiry, anyone can call triggerExpiry() for auto-refund.
-    ///
-    /// @return market  Address of the newly deployed, immediately active PredictionMarket.
-    function createMarket(
-        string   calldata  _title,
-        string   calldata  _description,
-        string   calldata  _category,
-        string   calldata  _imageUri,
-        string[] calldata  _outcomeLabels,
-        int256             _bWad,
-        uint256            _durationSeconds
-    ) external returns (address market) {
-
-        // ── Input validation ──────────────────────────────────────
-        require(bytes(_title).length       > 0, "Factory: empty title");
-        require(bytes(_description).length > 0, "Factory: empty description");
-        require(bytes(_category).length    > 0, "Factory: empty category");
-        require(_outcomeLabels.length      >= 2, "Factory: need >= 2 outcomes");
-        require(_bWad >= minBWad,               "Factory: b too small");
-        require(
-            _durationSeconds >= minDuration &&
-            _durationSeconds <= maxDuration,
-            "Factory: invalid duration"
-        );
-
-        // ── Deploy ────────────────────────────────────────────────
-        // Admin of each submarket = factory owner (platform operator).
-        // Market is immediately Active — no activation step needed.
-        PredictionMarket pm = new PredictionMarket(
-            owner(),
-            _title,
-            _description,
-            _category,
-            _imageUri,
-            _outcomeLabels,
-            _bWad,
-            _durationSeconds
-        );
-
-        market = address(pm);
-
-        // ── Register ──────────────────────────────────────────────
-        marketIndex[market] = markets.length;
-        markets.push(market);
-        isMarket[market]    = true;
-        totalMarkets++;
-
-        emit MarketCreated(
-            market,
-            totalMarkets - 1,
-            msg.sender,
-            _title,
-            _category,
-            _outcomeLabels.length,
-            block.timestamp + _durationSeconds
-        );
+    constructor(address _factory) {
+        require(_factory != address(0), "Lens: zero factory");
+        factory = PredictionMarketFactory(_factory);
     }
 
     /*//////////////////////////////////////////////////////////////
-                         OWNER CONFIGURATION
-    //////////////////////////////////////////////////////////////*/
-
-    function setMinBWad(int256 _min) external onlyOwner {
-        require(_min > 0, "Factory: b must be > 0");
-        minBWad = _min;
-    }
-
-    function setDurationBounds(uint256 _min, uint256 _max) external onlyOwner {
-        require(_min < _max && _min > 0, "Factory: invalid bounds");
-        minDuration = _min;
-        maxDuration = _max;
-    }
-
-    /*//////////////////////////////////////////////////////////////
-                     GLOBAL ANALYTICS  (VIEW)
+                       GLOBAL ANALYTICS  (VIEW)
     //////////////////////////////////////////////////////////////*/
 
     struct GlobalStats {
@@ -167,15 +44,18 @@ contract PredictionMarketFactory is Ownable {
         uint256 cancelledOrExpiredMarkets;
     }
 
-    /// @notice Live global statistics — aggregates all submarkets.
+    /// @notice Live global statistics -- aggregates all submarkets.
     /// @dev    O(n) loop; for very large registries combine with off-chain indexing.
     function getGlobalStats() external view returns (GlobalStats memory stats) {
-        stats.totalMarkets = totalMarkets;
+        uint256 total = factory.totalMarkets();
+        stats.totalMarkets = total;
 
-        for (uint256 i = 0; i < markets.length; ) {
-            PredictionMarket pm = PredictionMarket(payable(markets[i]));
+        address[] memory mkts = factory.getMarkets(0, total);
 
-            stats.totalVolumeWei   += pm.totalVolumeWei();
+        for (uint256 i = 0; i < mkts.length; ) {
+            PredictionMarket pm = PredictionMarket(payable(mkts[i]));
+
+            stats.totalVolumeWei    += pm.totalVolumeWei();
             stats.totalParticipants += pm.participantCount();
 
             PredictionMarket.Stage s = pm.stage();
@@ -188,7 +68,7 @@ contract PredictionMarketFactory is Ownable {
     }
 
     /*//////////////////////////////////////////////////////////////
-                   MARKET LIST — PAGINATED  (VIEW)
+                  MARKET LIST -- PAGINATED  (VIEW)
     //////////////////////////////////////////////////////////////*/
 
     struct MarketSummary {
@@ -200,7 +80,7 @@ contract PredictionMarketFactory is Ownable {
         string    imageUri;
         // Outcomes
         string[]  outcomeLabels;
-        int256[]  impliedProbabilitiesWad; // one per outcome, each 0–1e18
+        int256[]  impliedProbabilitiesWad; // one per outcome, each 0-1e18
         // State
         PredictionMarket.Stage  stage;
         uint256   winningOutcome;
@@ -210,7 +90,7 @@ contract PredictionMarketFactory is Ownable {
         uint256   participants;
     }
 
-    /// @notice Paginated market list with live LMSR probabilities — use for the home page.
+    /// @notice Paginated market list with live LMSR probabilities.
     /// @param  offset  Start index.
     /// @param  limit   Max results per page.
     function getMarketSummaries(uint256 offset, uint256 limit)
@@ -218,30 +98,34 @@ contract PredictionMarketFactory is Ownable {
         view
         returns (MarketSummary[] memory summaries)
     {
-        uint256 total = markets.length;
+        uint256 total = factory.totalMarkets();
         if (offset >= total) return new MarketSummary[](0);
 
         uint256 end   = offset + limit > total ? total : offset + limit;
         uint256 count = end - offset;
-        summaries     = new MarketSummary[](count);
+
+        address[] memory mkts = factory.getMarkets(offset, count);
+        summaries = new MarketSummary[](count);
 
         for (uint256 i = 0; i < count; ) {
-            address     mAddr = markets[offset + i];
+            address mAddr = mkts[i];
             PredictionMarket pm = PredictionMarket(payable(mAddr));
 
             (
                 string memory _title,
-                ,
+                ,                           // description
                 string memory _cat,
                 string memory _img,
-                ,
+                ,                           // proofUri
                 string[] memory _labels,
                 PredictionMarket.Stage _stage,
                 uint256 _winning,
-                ,
+                ,                           // createdAt
                 uint256 _deadline,
                 uint256 _vol,
-                uint256 _part
+                uint256 _part,
+                ,                           // cancelReason
+                                            // cancelProofUri
             ) = pm.getMarketInfo();
 
             summaries[i] = MarketSummary({
@@ -264,7 +148,7 @@ contract PredictionMarketFactory is Ownable {
     }
 
     /*//////////////////////////////////////////////////////////////
-                   MARKET DETAIL — SINGLE MARKET  (VIEW)
+                  MARKET DETAIL -- SINGLE MARKET  (VIEW)
     //////////////////////////////////////////////////////////////*/
 
     struct MarketDetail {
@@ -289,17 +173,20 @@ contract PredictionMarketFactory is Ownable {
         uint256   totalVolumeWei;
         uint256   participants;
         // Resolution / Fee
-        uint256   resolvedPoolWei;      // pool after fee, set at resolution (0 if not resolved)
-        uint256   resolutionDeadline;    // marketDeadline + RESOLUTION_GRACE_PERIOD
+        uint256   resolvedPoolWei;
+        uint256   resolutionDeadline;
+        // Cancel info
+        string    cancelReason;
+        string    cancelProofUri;
     }
 
-    /// @notice Full detail for a single market — use for the market detail page.
+    /// @notice Full detail for a single market.
     function getMarketDetail(address market)
         external
         view
         returns (MarketDetail memory d)
     {
-        require(isMarket[market], "Factory: unknown market");
+        require(factory.isMarket(market), "Lens: unknown market");
         PredictionMarket pm = PredictionMarket(payable(market));
 
         (
@@ -314,7 +201,9 @@ contract PredictionMarketFactory is Ownable {
             uint256 _created,
             uint256 _deadline,
             uint256 _vol,
-            uint256 _part
+            uint256 _part,
+            string memory _cancelReason,
+            string memory _cancelProofUri
         ) = pm.getMarketInfo();
 
         d = MarketDetail({
@@ -335,12 +224,14 @@ contract PredictionMarketFactory is Ownable {
             totalVolumeWei:           _vol,
             participants:             _part,
             resolvedPoolWei:          pm.resolvedPoolWei(),
-            resolutionDeadline:       pm.resolutionDeadline()
+            resolutionDeadline:       pm.resolutionDeadline(),
+            cancelReason:             _cancelReason,
+            cancelProofUri:           _cancelProofUri
         });
     }
 
     /*//////////////////////////////////////////////////////////////
-                   USER PORTFOLIO — ALL POSITIONS  (VIEW)
+                  USER PORTFOLIO -- ALL POSITIONS  (VIEW)
     //////////////////////////////////////////////////////////////*/
 
     struct UserPosition {
@@ -365,18 +256,21 @@ contract PredictionMarketFactory is Ownable {
         view
         returns (UserPosition[] memory positions)
     {
+        uint256 total = factory.totalMarkets();
+        address[] memory mkts = factory.getMarkets(0, total);
+
         // Count relevant markets first
         uint256 count;
-        for (uint256 i = 0; i < markets.length; ) {
-            if (_userHasPosition(markets[i], user)) count++;
+        for (uint256 i = 0; i < mkts.length; ) {
+            if (_userHasPosition(mkts[i], user)) count++;
             unchecked { i++; }
         }
 
         positions = new UserPosition[](count);
         uint256 idx;
 
-        for (uint256 i = 0; i < markets.length && idx < count; ) {
-            address mAddr = markets[i];
+        for (uint256 i = 0; i < mkts.length && idx < count; ) {
+            address mAddr = mkts[i];
             if (!_userHasPosition(mAddr, user)) { unchecked { i++; } continue; }
 
             PredictionMarket pm = PredictionMarket(payable(mAddr));
@@ -392,13 +286,19 @@ contract PredictionMarketFactory is Ownable {
 
             (
                 string memory _title,
-                ,
+                ,                           // description
                 string memory _cat,
-                ,
-                ,
+                ,                           // imageUri
+                ,                           // proofUri
                 string[] memory _labels,
                 PredictionMarket.Stage _stage,
-                ,,,,
+                ,                           // winningOutcome
+                ,                           // createdAt
+                ,                           // marketDeadline
+                ,                           // totalVolumeWei
+                ,                           // participantCount
+                ,                           // cancelReason
+                                            // cancelProofUri
             ) = pm.getMarketInfo();
 
             positions[idx++] = UserPosition({

@@ -1,13 +1,14 @@
 import { useState, useEffect, useCallback } from 'react';
 import { ethers } from 'ethers';
 import { useWallet } from '../../context/WalletContext';
-import { FACTORY_ADDRESS, STAGE } from '../../config/network';
-import { FACTORY_ABI } from '../../config/abis';
+import { FACTORY_ADDRESS, LENS_ADDRESS, STAGE } from '../../config/network';
+import { FACTORY_ABI, LENS_ABI } from '../../config/abis';
 import MarketCard, { MarketSummaryData } from '../../components/MarketCard';
 import { SkeletonCard } from '../../components/LoadingSpinner';
 import EmptyState from '../../components/EmptyState';
 import UsdcIcon from '../../components/UsdcIcon';
 import { formatUSDC } from '../../utils/format';
+import { fetchAllMarketVolumes } from '../../services/blockscout';
 
 const CATEGORIES = ['All', 'Crypto', 'Sports', 'Politics', 'Entertainment', 'Science', 'Other'];
 const SORT_OPTIONS = [
@@ -49,9 +50,10 @@ export default function Home() {
     try {
       setLoading(true);
       const factory = new ethers.Contract(FACTORY_ADDRESS, FACTORY_ABI, readProvider);
+      const lens = new ethers.Contract(LENS_ADDRESS, LENS_ABI, readProvider);
 
       const [statsResult, totalMarkets] = await Promise.all([
-        factory.getGlobalStats(),
+        lens.getGlobalStats(),
         factory.totalMarkets(),
       ]);
 
@@ -70,7 +72,7 @@ export default function Home() {
         return;
       }
 
-      const summaries = await factory.getMarketSummaries(0, total);
+      const summaries = await lens.getMarketSummaries(0, total);
       const parsed: MarketSummaryData[] = summaries.map((s: Record<string, unknown>) => ({
         market: s.market as string,
         marketId: Number(s.marketId),
@@ -87,6 +89,33 @@ export default function Home() {
       }));
 
       setMarkets(parsed);
+
+      // Fetch accurate volumes from BlockScout events (buys + sells) in background.
+      // This overrides on-chain totalVolumeWei which only tracks buy-side LMSR cost.
+      const addresses = parsed.map((m) => m.market);
+      fetchAllMarketVolumes(addresses).then((volumes) => {
+        if (volumes.size === 0) return;
+
+        setMarkets((prev) =>
+          prev.map((m) => {
+            const vol = volumes.get(m.market.toLowerCase());
+            return vol !== undefined ? { ...m, totalVolumeWei: vol } : m;
+          })
+        );
+
+        // Also update global stats total volume
+        setStats((prev) => {
+          if (!prev) return prev;
+          let globalVol = 0n;
+          for (const m of parsed) {
+            const vol = volumes.get(m.market.toLowerCase());
+            globalVol += vol !== undefined ? vol : m.totalVolumeWei;
+          }
+          return { ...prev, totalVolumeWei: globalVol };
+        });
+      }).catch((err) => {
+        console.warn('BlockScout volume fetch failed, using on-chain values:', err);
+      });
     } catch (err) {
       console.error('Failed to fetch markets:', err);
     } finally {

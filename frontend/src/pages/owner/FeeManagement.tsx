@@ -1,10 +1,11 @@
 import { useState, useEffect } from 'react';
 import { ethers } from 'ethers';
 import { useWallet } from '../../context/WalletContext';
-import { FACTORY_ADDRESS, STAGE } from '../../config/network';
-import { FACTORY_ABI, MARKET_ABI } from '../../config/abis';
+import { FACTORY_ADDRESS, LENS_ADDRESS, STAGE } from '../../config/network';
+import { FACTORY_ABI, LENS_ABI, MARKET_ABI } from '../../config/abis';
 import { PageLoader } from '../../components/LoadingSpinner';
 import { formatUSDC } from '../../utils/format';
+import { fetchAllMarketVolumes } from '../../services/blockscout';
 
 interface FeeEvent {
   market: string;
@@ -27,10 +28,11 @@ export default function FeeManagement() {
       try {
         setLoading(true);
         const factory = new ethers.Contract(FACTORY_ADDRESS, FACTORY_ABI, readProvider);
+        const lens = new ethers.Contract(LENS_ADDRESS, LENS_ABI, readProvider);
         const total = Number(await factory.totalMarkets());
         if (total === 0) { setLoading(false); return; }
 
-        const summaries = await factory.getMarketSummaries(0, total);
+        const summaries = await lens.getMarketSummaries(0, total);
         let feesSum = 0n;
         let resolvedCount = 0;
         let resolvedVol = 0n;
@@ -66,6 +68,24 @@ export default function FeeManagement() {
         setTotalResolved(resolvedCount);
         setTotalResolvedVolume(resolvedVol);
         setFeeEvents(events.sort((a, b) => b.blockNumber - a.blockNumber));
+
+        // Fetch accurate volumes from BlockScout events (buys + sells)
+        const resolvedAddresses = summaries
+          .filter((s: Record<string, unknown>) => Number(s.stage) === STAGE.Resolved)
+          .map((s: Record<string, unknown>) => s.market as string);
+        if (resolvedAddresses.length > 0) {
+          fetchAllMarketVolumes(resolvedAddresses).then((volumes) => {
+            if (volumes.size === 0) return;
+            let accurateVol = 0n;
+            for (const addr of resolvedAddresses) {
+              const vol = volumes.get(addr.toLowerCase());
+              accurateVol += vol !== undefined ? vol : 0n;
+            }
+            if (accurateVol > 0n) {
+              setTotalResolvedVolume(accurateVol);
+            }
+          }).catch(() => {});
+        }
       } catch (err) {
         console.error('Failed to fetch fee data:', err);
       } finally {
