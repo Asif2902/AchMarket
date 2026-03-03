@@ -2,8 +2,8 @@ import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { ethers } from 'ethers';
 import { useWallet } from '../../context/WalletContext';
-import { FACTORY_ADDRESS, STAGE_LABELS, STAGE_COLORS } from '../../config/network';
-import { FACTORY_ABI, MARKET_ABI } from '../../config/abis';
+import { FACTORY_ADDRESS, LENS_ADDRESS, STAGE_LABELS, STAGE_COLORS } from '../../config/network';
+import { FACTORY_ABI, LENS_ABI, MARKET_ABI } from '../../config/abis';
 import { PageLoader } from '../../components/LoadingSpinner';
 import EmptyState from '../../components/EmptyState';
 import UsdcIcon from '../../components/UsdcIcon';
@@ -38,15 +38,16 @@ export default function Portfolio() {
       try {
         setLoading(true);
         const factory = new ethers.Contract(FACTORY_ADDRESS, FACTORY_ABI, readProvider);
+        const lens = new ethers.Contract(LENS_ADDRESS, LENS_ABI, readProvider);
         const [portfolio, totalMarkets] = await Promise.all([
-          factory.getUserPortfolio(address),
+          lens.getUserPortfolio(address),
           factory.totalMarkets(),
         ]);
 
         const total = Number(totalMarkets);
         let summaries: Record<string, unknown>[] = [];
         if (total > 0) {
-          summaries = await factory.getMarketSummaries(0, total);
+          summaries = await lens.getMarketSummaries(0, total);
         }
         const addrToId = new Map<string, number>();
         for (const s of summaries) {
@@ -87,14 +88,15 @@ export default function Portfolio() {
       setTxMsg({ type: 'success', text: `${action === 'redeem' ? 'Winnings' : 'Refund'} claimed!` });
       // Refresh
       const factory = new ethers.Contract(FACTORY_ADDRESS, FACTORY_ABI, readProvider);
+      const lens = new ethers.Contract(LENS_ADDRESS, LENS_ABI, readProvider);
       const [portfolio, totalMarkets2] = await Promise.all([
-        factory.getUserPortfolio(address!),
+        lens.getUserPortfolio(address!),
         factory.totalMarkets(),
       ]);
       const total2 = Number(totalMarkets2);
       let sums2: Record<string, unknown>[] = [];
       if (total2 > 0) {
-        sums2 = await factory.getMarketSummaries(0, total2);
+        sums2 = await lens.getMarketSummaries(0, total2);
       }
       const addrToId2 = new Map<string, number>();
       for (const s of sums2) {

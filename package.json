@@ -1,0 +1,21 @@
+{
+  "name": "achmarket",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "compile": "npx hardhat compile",
+    "deploy": "npx hardhat run scripts/deploy.js --network arc_testnet",
+    "deploy:local": "npx hardhat run scripts/deploy.js --network hardhat",
+    "clean": "npx hardhat clean",
+    "size": "npx hardhat size-contracts"
+  },
+  "devDependencies": {
+    "@nomicfoundation/hardhat-toolbox": "^4.0.0",
+    "hardhat": "^2.22.0",
+    "hardhat-contract-sizer": "^2.10.0"
+  },
+  "dependencies": {
+    "@openzeppelin/contracts": "^5.1.0",
+    "dotenv": "^17.3.1"
+  }
+}

@@ -7,7 +7,20 @@ export const FACTORY_ABI = [
   "function minBWad() view returns (int256)",
   "function minDuration() view returns (uint256)",
   "function maxDuration() view returns (uint256)",
+  "function getMarkets(uint256 offset, uint256 limit) view returns (address[])",
+  "function getMarketCount() view returns (uint256)",
 
+  // Write functions
+  "function createMarket(string _title, string _description, string _category, string _imageUri, string[] _outcomeLabels, int256 _bWad, uint256 _durationSeconds) returns (address market)",
+  "function setMinBWad(int256 _min)",
+  "function setDurationBounds(uint256 _min, uint256 _max)",
+  "function editMarket(address market, string _title, string _description)",
+
+  // Events
+  "event MarketCreated(address indexed market, uint256 indexed marketId, address indexed creator, string title, string category, uint256 outcomeCount, uint256 deadline)",
+] as const;
+
+export const LENS_ABI = [
   // Global stats
   "function getGlobalStats() view returns (tuple(uint256 totalMarkets, uint256 totalVolumeWei, uint256 totalParticipants, uint256 activeMarkets, uint256 resolvedMarkets, uint256 cancelledOrExpiredMarkets))",
 
@@ -19,15 +32,6 @@ export const FACTORY_ABI = [
 
   // User portfolio
   "function getUserPortfolio(address user) view returns (tuple(address market, string title, string category, string[] outcomeLabels, uint256[] sharesPerOutcome, uint256 netDepositedWei, bool canRedeem, bool canRefund, bool hasRedeemed, bool hasRefunded, uint8 stage)[])",
-
-  // Write functions
-  "function createMarket(string _title, string _description, string _category, string _imageUri, string[] _outcomeLabels, int256 _bWad, uint256 _durationSeconds) returns (address market)",
-  "function setMinBWad(int256 _min)",
-  "function setDurationBounds(uint256 _min, uint256 _max)",
-  "function editMarket(address market, string _title, string _description)",
-
-  // Events
-  "event MarketCreated(address indexed market, uint256 indexed marketId, address indexed creator, string title, string category, uint256 outcomeCount, uint256 deadline)",
 ] as const;
 
 export const MARKET_ABI = [

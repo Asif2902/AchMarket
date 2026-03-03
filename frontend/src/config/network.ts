@@ -12,7 +12,8 @@ export const NETWORK = {
   blockscoutApi: 'https://testnet.arcscan.app/api',
 } as const;
 
-export const FACTORY_ADDRESS = '0x7B7D71141B5b9b2F42E6D7Bf1657ad9c2B140272';
+export const FACTORY_ADDRESS = '0x249A649e138f46318AfC0aD128fe0fd432902e48';
+export const LENS_ADDRESS = '0xF9e1DFa4d020fbd70924200d27E82B520D178354';
 
 export const STAGE = {
   Active: 0,

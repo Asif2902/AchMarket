@@ -1,8 +1,8 @@
 import { useState, useEffect, useCallback } from 'react';
 import { ethers } from 'ethers';
 import { useWallet } from '../../context/WalletContext';
-import { FACTORY_ADDRESS, STAGE, STAGE_LABELS, STAGE_COLORS } from '../../config/network';
-import { FACTORY_ABI, MARKET_ABI } from '../../config/abis';
+import { FACTORY_ADDRESS, LENS_ADDRESS, STAGE, STAGE_LABELS, STAGE_COLORS } from '../../config/network';
+import { FACTORY_ABI, LENS_ABI, MARKET_ABI } from '../../config/abis';
 import ImageWithFallback from '../../components/ImageWithFallback';
 import ProbabilityBar from '../../components/ProbabilityBar';
 import Countdown from '../../components/Countdown';
@@ -40,10 +40,11 @@ export function useOwnerMarkets() {
     try {
       setLoading(true);
       const factory = new ethers.Contract(FACTORY_ADDRESS, FACTORY_ABI, readProvider);
+      const lens = new ethers.Contract(LENS_ADDRESS, LENS_ABI, readProvider);
       const total = Number(await factory.totalMarkets());
       if (total === 0) { setMarkets([]); return; }
 
-      const summaries = await factory.getMarketSummaries(0, total);
+      const summaries = await lens.getMarketSummaries(0, total);
       const result: OwnerMarketData[] = [];
 
       for (const s of summaries) {

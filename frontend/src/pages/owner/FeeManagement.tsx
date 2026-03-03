@@ -1,8 +1,8 @@
 import { useState, useEffect } from 'react';
 import { ethers } from 'ethers';
 import { useWallet } from '../../context/WalletContext';
-import { FACTORY_ADDRESS, STAGE } from '../../config/network';
-import { FACTORY_ABI, MARKET_ABI } from '../../config/abis';
+import { FACTORY_ADDRESS, LENS_ADDRESS, STAGE } from '../../config/network';
+import { FACTORY_ABI, LENS_ABI, MARKET_ABI } from '../../config/abis';
 import { PageLoader } from '../../components/LoadingSpinner';
 import { formatUSDC } from '../../utils/format';
 import { fetchAllMarketVolumes } from '../../services/blockscout';
@@ -28,10 +28,11 @@ export default function FeeManagement() {
       try {
         setLoading(true);
         const factory = new ethers.Contract(FACTORY_ADDRESS, FACTORY_ABI, readProvider);
+        const lens = new ethers.Contract(LENS_ADDRESS, LENS_ABI, readProvider);
         const total = Number(await factory.totalMarkets());
         if (total === 0) { setLoading(false); return; }
 
-        const summaries = await factory.getMarketSummaries(0, total);
+        const summaries = await lens.getMarketSummaries(0, total);
         let feesSum = 0n;
         let resolvedCount = 0;
         let resolvedVol = 0n;

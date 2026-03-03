@@ -1,8 +1,8 @@
 import { useState, useEffect, useCallback } from 'react';
 import { ethers } from 'ethers';
 import { useWallet } from '../../context/WalletContext';
-import { FACTORY_ADDRESS, STAGE } from '../../config/network';
-import { FACTORY_ABI } from '../../config/abis';
+import { FACTORY_ADDRESS, LENS_ADDRESS, STAGE } from '../../config/network';
+import { FACTORY_ABI, LENS_ABI } from '../../config/abis';
 import MarketCard, { MarketSummaryData } from '../../components/MarketCard';
 import { SkeletonCard } from '../../components/LoadingSpinner';
 import EmptyState from '../../components/EmptyState';
@@ -50,9 +50,10 @@ export default function Home() {
     try {
       setLoading(true);
       const factory = new ethers.Contract(FACTORY_ADDRESS, FACTORY_ABI, readProvider);
+      const lens = new ethers.Contract(LENS_ADDRESS, LENS_ABI, readProvider);
 
       const [statsResult, totalMarkets] = await Promise.all([
-        factory.getGlobalStats(),
+        lens.getGlobalStats(),
         factory.totalMarkets(),
       ]);
 
@@ -71,7 +72,7 @@ export default function Home() {
         return;
       }
 
-      const summaries = await factory.getMarketSummaries(0, total);
+      const summaries = await lens.getMarketSummaries(0, total);
       const parsed: MarketSummaryData[] = summaries.map((s: Record<string, unknown>) => ({
         market: s.market as string,
         marketId: Number(s.marketId),

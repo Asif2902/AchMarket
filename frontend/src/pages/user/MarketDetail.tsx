@@ -3,8 +3,8 @@ import { useParams, Link } from 'react-router-dom';
 import { ethers } from 'ethers';
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
 import { useWallet } from '../../context/WalletContext';
-import { FACTORY_ADDRESS, STAGE, STAGE_LABELS, STAGE_COLORS } from '../../config/network';
-import { FACTORY_ABI, MARKET_ABI } from '../../config/abis';
+import { FACTORY_ADDRESS, LENS_ADDRESS, STAGE, STAGE_LABELS, STAGE_COLORS } from '../../config/network';
+import { FACTORY_ABI, LENS_ABI, MARKET_ABI } from '../../config/abis';
 import ImageWithFallback from '../../components/ImageWithFallback';
 import ProbabilityBar, { getOutcomeColor } from '../../components/ProbabilityBar';
 import Countdown from '../../components/Countdown';
@@ -84,6 +84,7 @@ export default function MarketDetail() {
     try {
       setLoading(true);
       const factory = new ethers.Contract(FACTORY_ADDRESS, FACTORY_ABI, readProvider);
+      const lens = new ethers.Contract(LENS_ADDRESS, LENS_ABI, readProvider);
       const addr = await factory.markets(BigInt(marketId));
       if (!addr || addr === ethers.ZeroAddress) {
         setError('Market not found');
@@ -93,7 +94,7 @@ export default function MarketDetail() {
       setMarketAddress(addr);
 
       // Core data — must succeed
-      const d = await factory.getMarketDetail(addr);
+      const d = await lens.getMarketDetail(addr);
 
       const parsed: MarketDetailData = {
         market: d.market, title: d.title, description: d.description,
@@ -137,8 +138,8 @@ export default function MarketDetail() {
   const refreshData = useCallback(async () => {
     if (!marketAddress) return;
     try {
-      const factory = new ethers.Contract(FACTORY_ADDRESS, FACTORY_ABI, readProvider);
-      const d = await factory.getMarketDetail(marketAddress);
+      const lens = new ethers.Contract(LENS_ADDRESS, LENS_ABI, readProvider);
+      const d = await lens.getMarketDetail(marketAddress);
 
       const parsed = {
         market: d.market, title: d.title, description: d.description,
