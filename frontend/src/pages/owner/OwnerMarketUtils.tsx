@@ -194,22 +194,49 @@ interface ResolveModalProps {
   onResolved: () => void;
 }
 
+interface ExtraLink {
+  type: 'image' | 'link';
+  url: string;
+}
+
 export function ResolveModal({ market, onClose, onResolved }: ResolveModalProps) {
   const { signer } = useWallet();
   const [selectedOutcome, setSelectedOutcome] = useState<number | null>(null);
-  const [proofUri, setProofUri] = useState('');
+  const [imageProof, setImageProof] = useState('');
+  const [mainLink, setMainLink] = useState('');
+  const [extraLinks, setExtraLinks] = useState<ExtraLink[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const canSubmit = selectedOutcome !== null && proofUri.trim().length > 0 && !submitting;
+  const proofUri = [
+    imageProof.trim(),
+    mainLink.trim(),
+    ...extraLinks.filter(l => l.url.trim()).map(l => `${l.type}:${l.url.trim()}`)
+  ].filter(Boolean).join(' || ');
+
+  const canSubmit = selectedOutcome !== null && imageProof.trim().length > 0 && !submitting;
+
+  const addExtraLink = () => {
+    setExtraLinks([...extraLinks, { type: 'link', url: '' }]);
+  };
+
+  const removeExtraLink = (index: number) => {
+    setExtraLinks(extraLinks.filter((_, i) => i !== index));
+  };
+
+  const updateExtraLink = (index: number, field: 'type' | 'url', value: string) => {
+    const updated = [...extraLinks];
+    updated[index] = { ...updated[index], [field]: value };
+    setExtraLinks(updated);
+  };
 
   const handleSubmit = async () => {
-    if (!signer || selectedOutcome === null || !proofUri.trim()) return;
+    if (!signer || selectedOutcome === null || !proofUri) return;
     setSubmitting(true);
     setError(null);
     try {
       const marketContract = new ethers.Contract(market.market, MARKET_ABI, signer);
-      const tx = await marketContract.resolve(selectedOutcome, proofUri.trim());
+      const tx = await marketContract.resolve(selectedOutcome, proofUri);
       await tx.wait();
       onResolved();
     } catch (err) {
@@ -275,26 +302,77 @@ export function ResolveModal({ market, onClose, onResolved }: ResolveModalProps)
 
         {/* Proof URI */}
         <label className="label">Resolution Proof *</label>
-        <div className="space-y-3 mb-2">
+        <div className="space-y-3 mb-4">
+          {/* Image Proof - Required */}
           <div>
-            <span className="text-xs text-dark-400 mb-1 block">Image Proof (required)</span>
+            <span className="text-xs text-dark-400 mb-1.5 block">Image Proof <span className="text-red-400">*</span></span>
             <input
               type="text"
-              value={proofUri}
-              onChange={e => setProofUri(e.target.value)}
-              placeholder="https://... (image URL)"
+              value={imageProof}
+              onChange={e => setImageProof(e.target.value)}
+              placeholder="https://... (screenshot, image URL)"
               className="input-field"
             />
           </div>
-        </div>
-        <p className="text-xs text-dark-500 mb-4">
-          Add multiple links separated by <code className="text-primary-400">||</code>. Format: <br/>
-          <span className="text-dark-400">image_url || main_link || image:extra_url || link:extra_url</span>
-        </p>
 
-        {proofUri.trim() && proofUri.includes('||') && (
-          <div className="p-3 rounded-xl bg-primary-500/5 border border-primary-500/15 mb-6">
-            <p className="text-xs font-medium text-primary-400 mb-2">Preview ({proofUri.split('||').length} links):</p>
+          {/* Main Link - Optional */}
+          <div>
+            <span className="text-xs text-dark-400 mb-1.5 block">Main Proof Link (optional)</span>
+            <input
+              type="text"
+              value={mainLink}
+              onChange={e => setMainLink(e.target.value)}
+              placeholder="https://... (tweet, news article, website)"
+              className="input-field"
+            />
+          </div>
+
+          {/* Extra Links */}
+          {extraLinks.map((link, index) => (
+            <div key={index} className="flex items-center gap-2">
+              <select
+                value={link.type}
+                onChange={e => updateExtraLink(index, 'type', e.target.value)}
+                className="select-field w-24 flex-shrink-0"
+              >
+                <option value="link">Link</option>
+                <option value="image">Image</option>
+              </select>
+              <input
+                type="text"
+                value={link.url}
+                onChange={e => updateExtraLink(index, 'url', e.target.value)}
+                placeholder="https://..."
+                className="input-field flex-1"
+              />
+              <button
+                type="button"
+                onClick={() => removeExtraLink(index)}
+                className="w-8 h-8 rounded-lg bg-red-500/10 border border-red-500/20 flex items-center justify-center text-red-400 hover:bg-red-500/20 transition-colors flex-shrink-0"
+              >
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+          ))}
+
+          <button
+            type="button"
+            onClick={addExtraLink}
+            className="text-xs text-primary-400 hover:text-primary-300 font-medium flex items-center gap-1"
+          >
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
+            </svg>
+            Add Extra Link
+          </button>
+        </div>
+
+        {/* Preview */}
+        {proofUri && (
+          <div className="p-3 rounded-xl bg-primary-500/5 border border-primary-500/15 mb-4">
+            <p className="text-xs font-medium text-primary-400 mb-2">Preview ({proofUri.split('||').length} items):</p>
             <div className="space-y-1">
               {proofUri.split('||').map((link, i) => (
                 <a 
