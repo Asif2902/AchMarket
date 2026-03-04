@@ -57,39 +57,21 @@ export default function Analytics() {
 
   return (
     <div className="min-h-screen">
-      {/* Header Section */}
-      <div className="relative overflow-hidden border-b border-white/[0.06]">
-        <div className="absolute inset-0 bg-hero-gradient" />
-        <div className="absolute top-0 left-1/4 w-96 h-96 bg-primary-500/5 rounded-full blur-3xl" />
-        <div className="absolute bottom-0 right-1/4 w-72 h-72 bg-accent-cyan/5 rounded-full blur-3xl" />
-
-        <div className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 sm:py-14">
-          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-            <div className="max-w-2xl">
-              <h1 className="text-2xl sm:text-3xl lg:text-4xl font-extrabold text-white tracking-tight mb-3">
-                Platform <span className="text-gradient">Analytics</span>
-              </h1>
-              <p className="text-sm sm:text-base text-dark-400 leading-relaxed max-w-lg">
-                Real-time statistics and performance metrics for AchMarket prediction markets.
-              </p>
-            </div>
-
-            <button
-              onClick={refreshData}
-              disabled={loading}
-              className="btn-secondary flex items-center gap-2 self-start sm:self-center whitespace-nowrap"
-            >
-              <svg className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-              </svg>
-              Refresh
-            </button>
-          </div>
-        </div>
-      </div>
-
       {/* Main Content */}
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8">
+        <div className="flex items-center justify-between mb-6">
+          <h1 className="text-xl sm:text-2xl font-bold text-white">Analytics</h1>
+          <button
+            onClick={refreshData}
+            disabled={loading}
+            className="btn-secondary flex items-center gap-2"
+          >
+            <svg className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+            </svg>
+            <span className="hidden sm:inline">Refresh</span>
+          </button>
+        </div>
         {loading && !stats ? (
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-5">
             {Array.from({ length: 4 }).map((_, i) => (

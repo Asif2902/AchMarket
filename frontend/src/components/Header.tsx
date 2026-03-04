@@ -78,30 +78,23 @@ export default function Header() {
             </div>
 
             {/* Mobile: right side */}
-            <div className="flex sm:hidden items-center gap-2">
-              <ConnectButton
-                showBalance={false}
-                accountStatus="avatar"
-                chainStatus="icon"
-              />
-              {showUserNav && (
-                <button
-                  onClick={() => setMobileMenuOpen(true)}
-                  className="w-9 h-9 rounded-lg bg-dark-800/50 border border-white/[0.08] flex items-center justify-center text-dark-300 hover:bg-dark-800/70 hover:text-white transition-all duration-200"
-                  aria-label="Open menu"
-                >
-                  <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16M4 18h16" />
-                  </svg>
-                </button>
-              )}
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setMobileMenuOpen(true)}
+                className="w-9 h-9 rounded-lg bg-dark-800/50 border border-white/[0.08] flex items-center justify-center text-dark-300 hover:bg-dark-800/70 hover:text-white transition-all duration-200"
+                aria-label="Open menu"
+              >
+                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16M4 18h16" />
+                </svg>
+              </button>
             </div>
           </div>
         </div>
       </header>
 
       {/* Mobile Drawer — navigation links only */}
-      {mobileMenuOpen && showUserNav && (
+      {mobileMenuOpen && (
         <div className="mobile-overlay sm:hidden" onClick={() => setMobileMenuOpen(false)}>
           <div
             ref={menuRef}
@@ -149,6 +142,7 @@ export default function Header() {
               }>
                 Analytics
               </MobileNavLink>
+              {isConnected && (
               <MobileNavLink to="/portfolio" current={location.pathname === '/portfolio'} icon={
                 <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M21 12a2.25 2.25 0 00-2.25-2.25H15a3 3 0 11-6 0H5.25A2.25 2.25 0 003 12m18 0v6a2.25 2.25 0 01-2.25 2.25H5.25A2.25 2.25 0 013 18v-6m18 0V9M3 12V9m18 0a2.25 2.25 0 00-2.25-2.25H5.25A2.25 2.25 0 003 9m18 0V6a2.25 2.25 0 00-2.25-2.25H5.25A2.25 2.25 0 003 6v3" />
@@ -156,6 +150,7 @@ export default function Header() {
               }>
                 Portfolio
               </MobileNavLink>
+            )}
             </nav>
           </div>
         </div>
