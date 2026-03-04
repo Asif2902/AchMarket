@@ -63,8 +63,8 @@ export default function Analytics() {
         <div className="absolute top-0 left-1/4 w-96 h-96 bg-primary-500/5 rounded-full blur-3xl" />
         <div className="absolute bottom-0 right-1/4 w-72 h-72 bg-accent-cyan/5 rounded-full blur-3xl" />
 
-        <div className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10 sm:py-14">
-          <div className="flex items-center justify-between">
+        <div className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 sm:py-14">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
             <div className="max-w-2xl">
               <h1 className="text-2xl sm:text-3xl lg:text-4xl font-extrabold text-white tracking-tight mb-3">
                 Platform <span className="text-gradient">Analytics</span>
@@ -77,7 +77,7 @@ export default function Analytics() {
             <button
               onClick={refreshData}
               disabled={loading}
-              className="btn-secondary flex items-center gap-2"
+              className="btn-secondary flex items-center gap-2 self-start sm:self-center whitespace-nowrap"
             >
               <svg className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
@@ -149,8 +149,8 @@ export default function Analytics() {
             </div>
 
             {/* Market Status Breakdown */}
-            <div className="card p-5 sm:p-6">
-              <h2 className="text-lg font-semibold text-white mb-5">Market Status Breakdown</h2>
+            <div className="card p-4 sm:p-6">
+              <h2 className="text-base sm:text-lg font-semibold text-white mb-4 sm:mb-5">Market Status Breakdown</h2>
               <div className="grid grid-cols-3 gap-4">
                 <BreakdownCard
                   label="Active"
@@ -175,8 +175,8 @@ export default function Analytics() {
 
             {/* Additional Metrics */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div className="card p-5 sm:p-6">
-                <h2 className="text-lg font-semibold text-white mb-4">Trading Activity</h2>
+              <div className="card p-4 sm:p-6">
+                <h2 className="text-base sm:text-lg font-semibold text-white mb-3 sm:mb-4">Trading Activity</h2>
                 <div className="space-y-4">
                   <MetricRow
                     label="Average Volume per Market"
@@ -201,8 +201,8 @@ export default function Analytics() {
                 </div>
               </div>
 
-              <div className="card p-5 sm:p-6">
-                <h2 className="text-lg font-semibold text-white mb-4">Platform Health</h2>
+              <div className="card p-4 sm:p-6">
+                <h2 className="text-base sm:text-lg font-semibold text-white mb-3 sm:mb-4">Platform Health</h2>
                 <div className="space-y-4">
                   <MetricRow
                     label="Success Rate"
@@ -293,36 +293,36 @@ function BreakdownCard({
 
   return (
     <div className="text-center">
-      <div className="relative w-20 h-20 mx-auto mb-3">
-        <svg className="w-20 h-20 transform -rotate-90">
+      <div className="relative w-14 h-14 sm:w-20 sm:h-20 mx-auto mb-2 sm:mb-3">
+        <svg className="w-14 h-14 sm:w-20 sm:h-20 transform -rotate-90">
           <circle
-            cx="40"
-            cy="40"
-            r="36"
+            cx="28"
+            cy="28"
+            r="24"
             stroke="currentColor"
-            strokeWidth="6"
+            strokeWidth="4"
             fill="none"
             className="text-dark-750"
           />
           <circle
-            cx="40"
-            cy="40"
-            r="36"
+            cx="28"
+            cy="28"
+            r="24"
             stroke="currentColor"
-            strokeWidth="6"
+            strokeWidth="4"
             fill="none"
-            strokeDasharray={`${2 * Math.PI * 36}`}
-            strokeDashoffset={`${2 * Math.PI * 36 * (1 - percentage / 100)}`}
+            strokeDasharray={`${2 * Math.PI * 24}`}
+            strokeDashoffset={`${2 * Math.PI * 24 * (1 - percentage / 100)}`}
             className={`${color} transition-all duration-500`}
           />
         </svg>
         <div className="absolute inset-0 flex items-center justify-center">
-          <span className="text-lg font-bold text-white">{Math.round(percentage)}%</span>
+          <span className="text-xs sm:text-lg font-bold text-white">{Math.round(percentage)}%</span>
         </div>
       </div>
-      <div className="space-y-1">
-        <p className="text-sm font-medium text-white">{label}</p>
-        <p className="text-xs text-dark-500">{value} market{value !== 1 ? 's' : ''}</p>
+      <div className="space-y-0.5">
+        <p className="text-xs sm:text-sm font-medium text-white">{label}</p>
+        <p className="text-2xs sm:text-xs text-dark-500">{value} market{value !== 1 ? 's' : ''}</p>
       </div>
     </div>
   );
@@ -330,9 +330,9 @@ function BreakdownCard({
 
 function MetricRow({ label, value, suffix }: { label: string; value: string; suffix?: string }) {
   return (
-    <div className="flex items-center justify-between py-2 border-b border-white/[0.06] last:border-0">
-      <span className="text-sm text-dark-400">{label}</span>
-      <span className="text-sm font-semibold text-white">
+    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1 sm:gap-4 py-2 border-b border-white/[0.06] last:border-0">
+      <span className="text-xs sm:text-sm text-dark-400">{label}</span>
+      <span className="text-sm font-semibold text-white whitespace-nowrap">
         {value}{suffix && <span className="text-dark-500 ml-1">{suffix}</span>}
       </span>
     </div>

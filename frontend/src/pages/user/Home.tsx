@@ -15,11 +15,10 @@ const SORT_OPTIONS = [
   { value: 'participants', label: 'Most Participants' },
 ];
 const STAGE_FILTERS = [
-  { value: -1, label: 'All Stages' },
+  { value: -1, label: 'All' },
   { value: 0, label: 'Active' },
   { value: 1, label: 'Resolved' },
   { value: 2, label: 'Cancelled' },
-  { value: 3, label: 'Expired' },
 ];
 const PAGE_SIZE = 12;
 
@@ -77,7 +76,11 @@ export default function Home() {
   const filtered = markets
     .filter((m) => {
       if (categoryFilter !== 'All' && m.category.toLowerCase() !== categoryFilter.toLowerCase()) return false;
-      if (stageFilter >= 0 && m.stage !== stageFilter) return false;
+      if (stageFilter === -1) {
+        if (m.stage !== STAGE.Active && m.stage !== STAGE.Resolved) return false;
+      } else if (m.stage !== stageFilter) {
+        return false;
+      }
       if (searchQuery && !m.title.toLowerCase().includes(searchQuery.toLowerCase())) return false;
       return true;
     })
