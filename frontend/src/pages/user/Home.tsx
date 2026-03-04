@@ -153,9 +153,9 @@ export default function Home() {
             <p className="text-xs text-dark-500 font-medium">
               {filtered.length} market{filtered.length !== 1 ? 's' : ''} found
             </p>
-            {(searchQuery || categoryFilter !== 'All' || stageFilter >= 0) && (
+            {(searchQuery || categoryFilter !== 'All') && (
               <button
-                onClick={() => { setSearchQuery(''); setCategoryFilter('All'); setStageFilter(-1); setPage(0); }}
+                onClick={() => { setSearchQuery(''); setCategoryFilter('All'); setPage(0); }}
                 className="text-xs text-primary-400 hover:text-primary-300 font-medium transition-colors"
               >
                 Clear filters
@@ -171,7 +171,7 @@ export default function Home() {
         ) : paginated.length === 0 ? (
           <EmptyState
             title="No markets found"
-            description={searchQuery || categoryFilter !== 'All' || stageFilter >= 0
+            description={searchQuery || categoryFilter !== 'All'
               ? "Try adjusting your filters or search query."
               : "No prediction markets have been created yet. Check back soon!"}
           />
