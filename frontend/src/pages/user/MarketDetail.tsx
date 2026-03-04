@@ -549,7 +549,9 @@ export default function MarketDetail() {
                         <div className="mb-3">
                           <div className="flex items-center gap-2 mb-1.5">
                             <p className="text-2xs font-medium text-emerald-500/70 uppercase tracking-wider">Main Proof</p>
-                            {!unsupported && (
+                            {unsupported ? (
+                              <span className="text-2xs text-dark-500">(embed not supported)</span>
+                            ) : (
                               <button
                                 onClick={() => setShowMainFrame(!showMainFrame)}
                                 className="text-xs text-emerald-400 hover:text-emerald-300 flex items-center gap-1 transition-colors"
