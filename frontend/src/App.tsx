@@ -5,6 +5,7 @@ import Footer from './components/Footer';
 import Home from './pages/user/Home';
 import MarketDetail from './pages/user/MarketDetail';
 import Portfolio from './pages/user/Portfolio';
+import Analytics from './pages/user/Analytics';
 import OwnerLayout from './pages/owner/OwnerLayout';
 import CreateMarket from './pages/owner/CreateMarket';
 import ActiveMarkets from './pages/owner/ActiveMarkets';
@@ -41,6 +42,7 @@ function AppRoutes() {
   return (
     <Routes>
       <Route path="/" element={<Home />} />
+      <Route path="/analytics" element={<Analytics />} />
       <Route path="/market/:slug" element={<MarketDetail />} />
       <Route path="/portfolio" element={<Portfolio />} />
       <Route path="*" element={<Navigate to="/" replace />} />
