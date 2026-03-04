@@ -78,6 +78,8 @@ export default function MarketDetail() {
   const [txPending, setTxPending] = useState(false);
   const [txMessage, setTxMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [poolBalance, setPoolBalance] = useState<bigint>(0n);
+  const [showMainFrame, setShowMainFrame] = useState(false);
+  const [hoveredImage, setHoveredImage] = useState<number | null>(null);
 
   const fetchAll = useCallback(async () => {
     if (marketId === null) return;
@@ -502,8 +504,6 @@ export default function MarketDetail() {
             {/* Resolution proof */}
             {isResolved && detail.proofUri && (() => {
               const proof = parseProofLinks(detail.proofUri);
-              const [showMainFrame, setShowMainFrame] = useState(false);
-              const [hoveredImage, setHoveredImage] = useState<number | null>(null);
               return (
                 <div className="card border-emerald-500/20 bg-emerald-500/5 p-4">
                   <div className="flex items-start gap-3">
