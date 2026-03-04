@@ -10,7 +10,6 @@ import ProbabilityBar, { getOutcomeColor } from '../../components/ProbabilityBar
 import Countdown from '../../components/Countdown';
 import { PageLoader } from '../../components/LoadingSpinner';
 import UsdcIcon from '../../components/UsdcIcon';
-import TwitterEmbed from '../../components/TwitterEmbed';
 import { fetchTradeEvents, computeVolumeFromEvents } from '../../services/blockscout';
 import {
   formatUSDC, formatWad, formatProbability, probToPercent, formatDate,
@@ -536,29 +535,21 @@ export default function MarketDetail() {
                       {/* Main link with frame toggle */}
                       {proof.mainLink ? (() => {
                         const mainLinkStr = proof.mainLink;
-                        const isTwitterTweet = (url: string) => {
+                        const isUnsupportedFrame = (url: string) => {
                           const lower = url.toLowerCase();
-                          return (lower.includes('twitter.com') || lower.includes('x.com')) && 
-                                 (lower.includes('/status/') || lower.includes('/i/status/'));
+                          return lower.includes('twitter.com') || 
+                                 lower.includes('x.com') || 
+                                 lower.includes('facebook.com') ||
+                                 lower.includes('instagram.com') ||
+                                 lower.includes('linkedin.com') ||
+                                 lower.includes('tiktok.com');
                         };
-                        const isTwitter = (url: string) => {
-                          return url.toLowerCase().includes('twitter.com') || url.toLowerCase().includes('x.com');
-                        };
-                        const isFacebook = (url: string) => url.toLowerCase().includes('facebook.com');
-                        const isInstagram = (url: string) => url.toLowerCase().includes('instagram.com');
-                        const isLinkedIn = (url: string) => url.toLowerCase().includes('linkedin.com');
-                        const isTikTok = (url: string) => url.toLowerCase().includes('tiktok.com');
-                        
-                        const twitterTweet = isTwitterTweet(mainLinkStr);
-                        const unsupported = !twitterTweet && (isTwitter(mainLinkStr) || isFacebook(mainLinkStr) || isInstagram(mainLinkStr) || isLinkedIn(mainLinkStr) || isTikTok(mainLinkStr));
-                        
+                        const unsupported = isUnsupportedFrame(mainLinkStr);
                         return (
                         <div className="mb-3">
                           <div className="flex items-center gap-2 mb-1.5">
                             <p className="text-2xs font-medium text-emerald-500/70 uppercase tracking-wider">Main Proof</p>
-                            {twitterTweet ? (
-                              <span className="text-2xs text-primary-400">(Twitter embed)</span>
-                            ) : unsupported ? (
+                            {unsupported ? (
                               <span className="text-2xs text-dark-500">(embed not supported)</span>
                             ) : (
                               <button
@@ -584,7 +575,7 @@ export default function MarketDetail() {
                               </button>
                             )}
                           </div>
-                          {twitterTweet ? (
+                          {unsupported ? (
                             <a
                               href={resolveImageUri(mainLinkStr)}
                               target="_blank"
@@ -596,8 +587,6 @@ export default function MarketDetail() {
                               </svg>
                               Open {mainLinkStr.length > 40 ? mainLinkStr.slice(0, 40) + '...' : mainLinkStr}
                             </a>
-                          ) : twitterTweet ? (
-                            <TwitterEmbed url={mainLinkStr} />
                           ) : showMainFrame ? (
                             <iframe
                               src={resolveImageUri(mainLinkStr)}
