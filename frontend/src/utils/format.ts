@@ -202,3 +202,60 @@ export function parseContractError(error: unknown): string {
   }
   return 'An unexpected error occurred';
 }
+
+export interface ProofLink {
+  url: string;
+  type: 'image' | 'link';
+  label?: string;
+}
+
+/**
+ * Parse proofUri string into structured proof links.
+ * Format: "image_url || main_link_url || extra_link_type:url || ..."
+ * - First link: always treated as image
+ * - Second link: always treated as main proof link
+ * - Third+ links: format "type:url" where type is "image" or "link"
+ */
+export function parseProofLinks(proofUri: string): {
+  image: string | null;
+  mainLink: string | null;
+  extraLinks: ProofLink[];
+} {
+  if (!proofUri) {
+    return { image: null, mainLink: null, extraLinks: [] };
+  }
+
+  const parts = proofUri.split('||').map(p => p.trim()).filter(p => p.length > 0);
+  
+  if (parts.length === 0) {
+    return { image: null, mainLink: null, extraLinks: [] };
+  }
+
+  const image = parts[0] || null;
+  const mainLink = parts[1] || null;
+  
+  const extraLinks: ProofLink[] = [];
+  for (let i = 2; i < parts.length; i++) {
+    const part = parts[i];
+    // Check if it has a type prefix like "image:url" or "link:url"
+    const colonIndex = part.indexOf(':');
+    if (colonIndex > 0) {
+      const type = part.slice(0, colonIndex).toLowerCase();
+      const url = part.slice(colonIndex + 1).trim();
+      if ((type === 'image' || type === 'link') && url) {
+        extraLinks.push({
+          url,
+          type: type as 'image' | 'link',
+        });
+      }
+    } else {
+      // No type prefix, treat as link
+      extraLinks.push({
+        url: part,
+        type: 'link',
+      });
+    }
+  }
+
+  return { image, mainLink, extraLinks };
+}

@@ -274,24 +274,40 @@ export function ResolveModal({ market, onClose, onResolved }: ResolveModalProps)
         </div>
 
         {/* Proof URI */}
-        <label className="label">Resolution Proof URL *</label>
-        <input
-          type="text"
-          value={proofUri}
-          onChange={e => setProofUri(e.target.value)}
-          placeholder="https://... (news article, tweet, IPFS link)"
-          className="input-field mb-2"
-        />
+        <label className="label">Resolution Proof *</label>
+        <div className="space-y-3 mb-2">
+          <div>
+            <span className="text-xs text-dark-400 mb-1 block">Image Proof (required)</span>
+            <input
+              type="text"
+              value={proofUri}
+              onChange={e => setProofUri(e.target.value)}
+              placeholder="https://... (image URL)"
+              className="input-field"
+            />
+          </div>
+        </div>
         <p className="text-xs text-dark-500 mb-4">
-          This proof link will be displayed publicly to all users.
+          Add multiple links separated by <code className="text-primary-400">||</code>. Format: <br/>
+          <span className="text-dark-400">image_url || main_link || image:extra_url || link:extra_url</span>
         </p>
 
-        {proofUri.trim() && (
-          <div className="p-3 rounded-xl bg-primary-500/5 border border-primary-500/15 mb-6 flex items-start gap-2">
-            <svg className="w-4 h-4 text-primary-400 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" /></svg>
-            <a href={proofUri} target="_blank" rel="noopener noreferrer" className="text-sm text-primary-400 hover:text-primary-300 underline break-all">
-              {proofUri}
-            </a>
+        {proofUri.trim() && proofUri.includes('||') && (
+          <div className="p-3 rounded-xl bg-primary-500/5 border border-primary-500/15 mb-6">
+            <p className="text-xs font-medium text-primary-400 mb-2">Preview ({proofUri.split('||').length} links):</p>
+            <div className="space-y-1">
+              {proofUri.split('||').map((link, i) => (
+                <a 
+                  key={i} 
+                  href={link.trim()} 
+                  target="_blank" 
+                  rel="noopener noreferrer" 
+                  className="text-xs text-primary-300 hover:text-primary-200 underline break-all block"
+                >
+                  {i + 1}. {link.trim()}
+                </a>
+              ))}
+            </div>
           </div>
         )}
 
