@@ -677,20 +677,23 @@ export default function MarketDetail() {
             )}
 
             {/* Resolved pool & fee info */}
-            {isResolved && detail.resolvedPoolWei > 0n && (
-              <div className="card p-4">
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <span className="text-2xs text-dark-500 font-medium uppercase tracking-wider">Prize Pool (after fee)</span>
-                    <p className="text-base font-bold text-white mt-0.5 flex items-center gap-1.5"><UsdcIcon size={16} />{formatUSDC(detail.resolvedPoolWei)} USDC</p>
-                  </div>
-                  <div>
-                    <span className="text-2xs text-dark-500 font-medium uppercase tracking-wider">Platform Fee (0.25%)</span>
-                    <p className="text-base font-bold text-dark-400 mt-0.5 flex items-center gap-1.5"><UsdcIcon size={16} className="opacity-50" />{formatUSDC((detail.totalVolumeWei * 25n) / 10000n)} USDC</p>
+            {isResolved && detail.resolvedPoolWei > 0n && (() => {
+              const fee = (detail.resolvedPoolWei * 25n) / 9975n;
+              return (
+                <div className="card p-4">
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <span className="text-2xs text-dark-500 font-medium uppercase tracking-wider">Prize Pool (after fee)</span>
+                      <p className="text-base font-bold text-white mt-0.5 flex items-center gap-1.5"><UsdcIcon size={16} />{formatUSDC(detail.resolvedPoolWei)} USDC</p>
+                    </div>
+                    <div>
+                      <span className="text-2xs text-dark-500 font-medium uppercase tracking-wider">Platform Fee (0.25%)</span>
+                      <p className="text-base font-bold text-dark-400 mt-0.5 flex items-center gap-1.5"><UsdcIcon size={16} className="opacity-50" />{formatUSDC(fee)} USDC</p>
+                    </div>
                   </div>
                 </div>
-              </div>
-            )}
+              );
+            })()}
 
             {/* Description */}
             {detail.description && (
