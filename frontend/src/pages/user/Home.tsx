@@ -15,7 +15,6 @@ const SORT_OPTIONS = [
   { value: 'participants', label: 'Most Participants' },
 ];
 const STAGE_FILTERS = [
-  { value: -1, label: 'All' },
   { value: 0, label: 'Active' },
   { value: 1, label: 'Resolved' },
   { value: 2, label: 'Cancelled' },
@@ -27,7 +26,7 @@ export default function Home() {
   const [markets, setMarkets] = useState<MarketSummaryData[]>([]);
   const [loading, setLoading] = useState(true);
   const [categoryFilter, setCategoryFilter] = useState('All');
-  const [stageFilter, setStageFilter] = useState(-1);
+  const [stageFilter, setStageFilter] = useState(0);
   const [sortBy, setSortBy] = useState('newest');
   const [searchQuery, setSearchQuery] = useState('');
   const [page, setPage] = useState(0);
@@ -76,11 +75,7 @@ export default function Home() {
   const filtered = markets
     .filter((m) => {
       if (categoryFilter !== 'All' && m.category.toLowerCase() !== categoryFilter.toLowerCase()) return false;
-      if (stageFilter === -1) {
-        if (m.stage !== STAGE.Active && m.stage !== STAGE.Resolved) return false;
-      } else if (m.stage !== stageFilter) {
-        return false;
-      }
+      if (m.stage !== stageFilter) return false;
       if (searchQuery && !m.title.toLowerCase().includes(searchQuery.toLowerCase())) return false;
       return true;
     })
