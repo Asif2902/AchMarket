@@ -105,6 +105,23 @@ export default function FeeManagement() {
         </div>
       </div>
 
+      <div className="card p-4 bg-primary-500/5 border-primary-500/20">
+        <div className="flex items-start gap-3">
+          <div className="w-8 h-8 rounded-lg bg-primary-500/15 flex items-center justify-center shrink-0 mt-0.5">
+            <svg className="w-4 h-4 text-primary-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+          </div>
+          <div>
+            <p className="text-sm font-medium text-primary-400 mb-1">No Claim Required</p>
+            <p className="text-xs text-dark-400 leading-relaxed">
+              Fees are automatically transferred to your admin wallet during the <span className="text-dark-300">resolve()</span> transaction. 
+              No additional steps needed. The 0.25% fee is deducted from the pool before winners redeem.
+            </p>
+          </div>
+        </div>
+      </div>
+
       <div className="card p-5 sm:p-6">
         <h2 className="text-base font-semibold text-white mb-4 flex items-center gap-2">
           <svg className="w-4 h-4 text-dark-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" /></svg>
