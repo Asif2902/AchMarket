@@ -15,6 +15,27 @@ export function formatUSDC(weiValue: bigint | string, decimals = 4): string {
 }
 
 /**
+ * Format a number to compact form (K, M, B, T)
+ */
+export function formatCompact(num: number): string {
+  if (num >= 1e12) return (num / 1e12).toFixed(1).replace(/\.0$/, '') + 'T';
+  if (num >= 1e9) return (num / 1e9).toFixed(1).replace(/\.0$/, '') + 'B';
+  if (num >= 1e6) return (num / 1e6).toFixed(1).replace(/\.0$/, '') + 'M';
+  if (num >= 1e3) return (num / 1e3).toFixed(1).replace(/\.0$/, '') + 'K';
+  return num.toFixed(0);
+}
+
+/**
+ * Format a bigint wei value to compact USDC (K, M, B, T)
+ */
+export function formatCompactUSDC(weiValue: bigint | string): string {
+  const formatted = ethers.formatEther(weiValue);
+  const num = parseFloat(formatted);
+  if (num === 0) return '0';
+  return formatCompact(num);
+}
+
+/**
  * Format a WAD value (1e18 = 1.0) to a human-readable number.
  */
 export function formatWad(wadValue: bigint | string, decimals = 2): string {
