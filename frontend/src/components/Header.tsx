@@ -67,18 +67,14 @@ export default function Header() {
               </nav>
             )}
 
-            {/* Desktop right side */}
-            <div className="hidden sm:flex items-center gap-2.5">
+            {/* Right side */}
+            <div className="flex items-center gap-2">
               {isConnected && isOwner && (
-                <span className="badge bg-primary-500/15 text-primary-400 border-primary-500/25 text-2xs">
+                <span className="hidden sm:inline-flex badge bg-primary-500/15 text-primary-400 border-primary-500/25 text-2xs">
                   Owner
                 </span>
               )}
               <ConnectButton showBalance={false} />
-            </div>
-
-            {/* Mobile: right side */}
-            <div className="flex items-center gap-2">
               <button
                 onClick={() => setMobileMenuOpen(true)}
                 className="w-9 h-9 rounded-lg bg-dark-800/50 border border-white/[0.08] flex items-center justify-center text-dark-300 hover:bg-dark-800/70 hover:text-white transition-all duration-200"
@@ -93,9 +89,9 @@ export default function Header() {
         </div>
       </header>
 
-      {/* Mobile Drawer — navigation links only */}
+      {/* Drawer — navigation */}
       {mobileMenuOpen && (
-        <div className="mobile-overlay sm:hidden" onClick={() => setMobileMenuOpen(false)}>
+        <div className="mobile-overlay" onClick={() => setMobileMenuOpen(false)}>
           <div
             ref={menuRef}
             className="mobile-drawer"
