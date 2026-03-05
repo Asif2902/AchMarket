@@ -92,12 +92,12 @@ export default function Analytics() {
         ) : stats ? (
           <div className="space-y-8">
             {/* Main Stats Grid */}
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4">
               <StatCard
                 label="Total Markets"
                 value={stats.totalMarkets.toString()}
                 icon={
-                  <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                  <svg className="w-4 h-4 md:w-5 md:h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6A2.25 2.25 0 016 3.75h2.25A2.25 2.25 0 0110.5 6v2.25a2.25 2.25 0 01-2.25 2.25H6a2.25 2.25 0 01-2.25-2.25V6zM3.75 15.75A2.25 2.25 0 016 13.5h2.25a2.25 2.25 0 012.25 2.25V18a2.25 2.25 0 01-2.25 2.25H6A2.25 2.25 0 013.75 18v-2.25zM13.5 6a2.25 2.25 0 012.25-2.25H18A2.25 2.25 0 0120.25 6v2.25A2.25 2.25 0 0118 10.5h-2.25a2.25 2.25 0 01-2.25-2.25V6zM13.5 15.75a2.25 2.25 0 012.25-2.25H18a2.25 2.25 0 012.25 2.25V18A2.25 2.25 0 0118 20.25h-2.25A2.25 2.25 0 0113.5 18v-2.25z" />
                   </svg>
                 }
@@ -106,14 +106,14 @@ export default function Analytics() {
                 label="Total Volume"
                 value={formatUSDC(stats.totalVolumeWei)}
                 suffix="USDC"
-                icon={<UsdcIcon size={20} />}
+                icon={<UsdcIcon size={18} />}
                 accent
               />
               <StatCard
                 label="Active Markets"
                 value={stats.activeMarkets.toString()}
                 icon={
-                  <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                  <svg className="w-4 h-4 md:w-5 md:h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 13.5l10.5-11.25L12 10.5h8.25L9.75 21.75 12 13.5H3.75z" />
                   </svg>
                 }
@@ -123,7 +123,7 @@ export default function Analytics() {
                 label="Total Traders"
                 value={stats.totalParticipants.toString()}
                 icon={
-                  <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                  <svg className="w-4 h-4 md:w-5 md:h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M15 19.128a9.38 9.38 0 002.625.372 9.337 9.337 0 004.121-.952 4.125 4.125 0 00-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128v.106A12.318 12.318 0 018.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0111.964-3.07M12 6.375a3.375 3.375 0 11-6.75 0 3.375 3.375 0 016.75 0zm8.25 2.25a2.625 2.625 0 11-5.25 0 2.625 2.625 0 015.25 0z" />
                   </svg>
                 }
@@ -131,9 +131,9 @@ export default function Analytics() {
             </div>
 
             {/* Market Status Breakdown */}
-            <div className="card p-4 sm:p-6">
-              <h2 className="text-base sm:text-lg font-semibold text-white mb-4 sm:mb-5">Market Status Breakdown</h2>
-              <div className="grid grid-cols-3 gap-4">
+            <div className="card p-4 md:p-6">
+              <h2 className="text-base md:text-lg font-semibold text-white mb-4 md:mb-5">Market Status Breakdown</h2>
+              <div className="grid grid-cols-3 gap-2 md:gap-4">
                 <BreakdownCard
                   label="Active"
                   value={stats.activeMarkets}
@@ -235,9 +235,9 @@ function StatCard({
   highlight?: boolean;
 }) {
   return (
-    <div className="card p-4 sm:p-5">
-      <div className="flex items-center gap-3 mb-3">
-        <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${
+    <div className="card p-3 md:p-5">
+      <div className="flex items-center gap-2 md:gap-3 mb-2 md:mb-3">
+        <div className={`w-8 h-8 md:w-10 md:h-10 rounded-lg md:rounded-xl flex items-center justify-center shrink-0 ${
           accent 
             ? 'bg-primary-500/15 text-primary-400' 
             : highlight
@@ -246,15 +246,15 @@ function StatCard({
         }`}>
           {icon}
         </div>
-        <span className="text-xs font-medium text-dark-500 uppercase tracking-wider">{label}</span>
+        <span className="text-2xs md:text-xs font-medium text-dark-500 uppercase tracking-wider truncate">{label}</span>
       </div>
-      <div className="flex items-baseline gap-1.5">
-        <span className={`text-2xl sm:text-3xl font-bold tabular-nums ${
+      <div className="flex items-baseline gap-1">
+        <span className={`text-xl md:text-2xl lg:text-3xl font-bold tabular-nums ${
           accent ? 'text-gradient' : highlight ? 'text-green-400' : 'text-white'
         }`}>
           {value}
         </span>
-        {suffix && <span className="text-xs text-dark-500 font-medium">{suffix}</span>}
+        {suffix && <span className="text-2xs md:text-xs text-dark-500 font-medium">{suffix}</span>}
       </div>
     </div>
   );
@@ -272,39 +272,43 @@ function BreakdownCard({
   color: string 
 }) {
   const percentage = total > 0 ? (value / total) * 100 : 0;
+  const size = 60;
+  const strokeWidth = 4;
+  const radius = (size - strokeWidth) / 2;
+  const circumference = 2 * Math.PI * radius;
 
   return (
     <div className="text-center">
-      <div className="relative w-14 h-14 sm:w-20 sm:h-20 mx-auto mb-2 sm:mb-3">
-        <svg className="w-14 h-14 sm:w-20 sm:h-20 transform -rotate-90">
+      <div className="relative w-16 h-16 md:w-20 md:h-20 mx-auto mb-2">
+        <svg className="w-16 h-16 md:w-20 md:h-20 transform -rotate-90" viewBox={`0 0 ${size} ${size}`}>
           <circle
-            cx="28"
-            cy="28"
-            r="24"
+            cx={size / 2}
+            cy={size / 2}
+            r={radius}
             stroke="currentColor"
-            strokeWidth="4"
+            strokeWidth={strokeWidth}
             fill="none"
             className="text-dark-750"
           />
           <circle
-            cx="28"
-            cy="28"
-            r="24"
+            cx={size / 2}
+            cy={size / 2}
+            r={radius}
             stroke="currentColor"
-            strokeWidth="4"
+            strokeWidth={strokeWidth}
             fill="none"
-            strokeDasharray={`${2 * Math.PI * 24}`}
-            strokeDashoffset={`${2 * Math.PI * 24 * (1 - percentage / 100)}`}
+            strokeDasharray={circumference}
+            strokeDashoffset={circumference * (1 - percentage / 100)}
             className={`${color} transition-all duration-500`}
           />
         </svg>
         <div className="absolute inset-0 flex items-center justify-center">
-          <span className="text-xs sm:text-lg font-bold text-white">{Math.round(percentage)}%</span>
+          <span className="text-xs md:text-base font-bold text-white">{Math.round(percentage)}%</span>
         </div>
       </div>
       <div className="space-y-0.5">
-        <p className="text-xs sm:text-sm font-medium text-white">{label}</p>
-        <p className="text-2xs sm:text-xs text-dark-500">{value} market{value !== 1 ? 's' : ''}</p>
+        <p className="text-xs font-medium text-white">{label}</p>
+        <p className="text-2xs text-dark-500">{value} market{value !== 1 ? 's' : ''}</p>
       </div>
     </div>
   );
