@@ -235,19 +235,17 @@ function StatCard({
   highlight?: boolean;
 }) {
   return (
-    <div className="card p-3 md:p-5 flex flex-col items-center text-center">
-      <div className="flex items-center gap-2 md:gap-3 mb-2 md:mb-3">
-        <div className={`w-8 h-8 md:w-10 md:h-10 rounded-lg md:rounded-xl flex items-center justify-center shrink-0 ${
-          accent 
-            ? 'bg-primary-500/15 text-primary-400' 
-            : highlight
-              ? 'bg-green-500/15 text-green-400'
-              : 'bg-dark-750 text-dark-400'
-        }`}>
-          {icon}
-        </div>
-        <span className="text-2xs md:text-xs font-medium text-dark-500 uppercase tracking-wider truncate">{label}</span>
+    <div className="card p-3 md:p-5 flex flex-col items-center justify-center h-full">
+      <div className={`w-8 h-8 md:w-10 md:h-10 rounded-lg md:rounded-xl flex items-center justify-center mb-2 ${
+        accent 
+          ? 'bg-primary-500/15 text-primary-400' 
+          : highlight
+            ? 'bg-green-500/15 text-green-400'
+            : 'bg-dark-750 text-dark-400'
+      }`}>
+        {icon}
       </div>
+      <span className="text-2xs md:text-xs font-medium text-dark-500 uppercase tracking-wider mb-1">{label}</span>
       <div className="flex items-baseline gap-1">
         <span className={`text-xl md:text-2xl lg:text-3xl font-bold tabular-nums ${
           accent ? 'text-gradient' : highlight ? 'text-green-400' : 'text-white'
