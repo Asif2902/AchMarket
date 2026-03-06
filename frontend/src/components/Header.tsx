@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { ConnectButton } from '@rainbow-me/rainbowkit';
 import { useWallet } from '../context/WalletContext';
+import { Globe } from 'lucide-react';
 
 export default function Header() {
   const { isConnected, isOwner } = useWallet();
@@ -158,9 +159,7 @@ export default function Header() {
                 Swap
               </MobileExternalLink>
               <MobileExternalLink href="https://app.achswapfi.xyz/bridge" icon={
-                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 21v-7.5a.75.75 0 01.75-.75h3a.75.75 0 01.75.75V21m-4.5-5.5h6.75a.75.75 0 010 1.5h-6.75a.75.75 0 010-1.5z" />
-                </svg>
+                <Globe className="w-5 h-5" />
               }>
                 Bridge
               </MobileExternalLink>
