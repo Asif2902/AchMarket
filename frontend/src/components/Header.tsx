@@ -64,6 +64,9 @@ export default function Header() {
                 <NavLink to="/" current={location.pathname === '/'}>Markets</NavLink>
                 <NavLink to="/analytics" current={location.pathname === '/analytics'}>Analytics</NavLink>
                 <NavLink to="/portfolio" current={location.pathname === '/portfolio'}>Portfolio</NavLink>
+                <ExternalNavLink href="https://app.achswapfi.xyz">Swap</ExternalNavLink>
+                <ExternalNavLink href="https://app.achswapfi.xyz/bridge">Bridge</ExternalNavLink>
+                <ExternalNavLink href="https://docs.achswapfi.xyz">Docs</ExternalNavLink>
               </nav>
             )}
 
@@ -147,6 +150,27 @@ export default function Header() {
                 Portfolio
               </MobileNavLink>
             )}
+              <MobileExternalLink href="https://app.achswapfi.xyz" icon={
+                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M7.5 21L3 16.5m0 0L7.5 12M3 16.5h13.5m0-13.5L21 7.5m0 0L16.5 12M21 7.5H7.5" />
+                </svg>
+              }>
+                Swap
+              </MobileExternalLink>
+              <MobileExternalLink href="https://app.achswapfi.xyz/bridge" icon={
+                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 21v-7.5a.75.75 0 01.75-.75h3a.75.75 0 01.75.75V21m-4.5-5.5h6.75a.75.75 0 010 1.5h-6.75a.75.75 0 010-1.5z" />
+                </svg>
+              }>
+                Bridge
+              </MobileExternalLink>
+              <MobileExternalLink href="https://docs.achswapfi.xyz" icon={
+                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 6.042A8.967 8.967 0 006 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 016 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 016-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0018 18a8.967 8.967 0 00-6 2.292m0-14.25v14.25" />
+                </svg>
+              }>
+                Docs
+              </MobileExternalLink>
             </nav>
           </div>
         </div>
@@ -171,6 +195,20 @@ function NavLink({ to, current, children }: { to: string; current: boolean; chil
   );
 }
 
+/* Desktop external nav link */
+function ExternalNavLink({ href, children }: { href: string; children: React.ReactNode }) {
+  return (
+    <a
+      href={href}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="px-4 py-2 rounded-lg text-sm font-medium text-dark-400 border-transparent hover:text-white hover:bg-white/[0.06] transition-all duration-200"
+    >
+      {children}
+    </a>
+  );
+}
+
 /* Mobile nav link */
 function MobileNavLink({ to, current, children, icon }: { to: string; current: boolean; children: React.ReactNode; icon: React.ReactNode }) {
   return (
@@ -185,5 +223,20 @@ function MobileNavLink({ to, current, children, icon }: { to: string; current: b
       {icon}
       {children}
     </Link>
+  );
+}
+
+/* Mobile external nav link */
+function MobileExternalLink({ href, children, icon }: { href: string; children: React.ReactNode; icon: React.ReactNode }) {
+  return (
+    <a
+      href={href}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium text-dark-300 border-transparent hover:text-white hover:bg-white/[0.06] transition-all duration-200"
+    >
+      {icon}
+      {children}
+    </a>
   );
 }
