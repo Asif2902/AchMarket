@@ -37,7 +37,7 @@ export default function Header() {
     return () => { document.body.style.overflow = ''; };
   }, [mobileMenuOpen]);
 
-  const showUserNav = isConnected && !isOwner;
+  const showUserNav = !isOwner;
 
   return (
     <>
@@ -58,18 +58,6 @@ export default function Header() {
                 <span className="text-2xs text-dark-500 leading-none mt-0.5">by Achswap</span>
               </div>
             </Link>
-
-            {/* Desktop Nav Links (User mode) */}
-            {showUserNav && (
-              <nav className="hidden sm:flex items-center gap-1 ml-8">
-                <NavLink to="/" current={location.pathname === '/'}>Markets</NavLink>
-                <NavLink to="/analytics" current={location.pathname === '/analytics'}>Analytics</NavLink>
-                <NavLink to="/portfolio" current={location.pathname === '/portfolio'}>Portfolio</NavLink>
-                <ExternalNavLink href="https://app.achswapfi.xyz">Swap</ExternalNavLink>
-                <ExternalNavLink href="https://app.achswapfi.xyz/bridge">Bridge</ExternalNavLink>
-                <ExternalNavLink href="https://docs.achswapfi.xyz">Docs</ExternalNavLink>
-              </nav>
-            )}
 
             {/* Right side */}
             <div className="flex items-center gap-2">
