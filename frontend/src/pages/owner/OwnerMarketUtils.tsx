@@ -108,15 +108,36 @@ interface OwnerCardProps {
 
 export function OwnerMarketCard({ market, actions, urgentBadge }: OwnerCardProps) {
   const isActive = market.stage === STAGE.Active;
+  const isResolved = market.stage === STAGE.Resolved;
+  const isCancelled = market.stage === STAGE.Cancelled || market.stage === STAGE.Expired;
 
   return (
-    <div className="card overflow-hidden animate-fade-in">
+    <div className={`card overflow-hidden animate-fade-in transition-all duration-300 ${
+      isResolved ? 'ring-2 ring-emerald-500/30' : isCancelled ? 'ring-2 ring-red-500/20' : ''
+    }`}>
       <div className="flex flex-col sm:flex-row">
         {/* Image */}
         <div className="relative w-full sm:w-48 h-36 sm:h-auto flex-shrink-0 overflow-hidden">
-          <ImageWithFallback src={market.imageUri} alt={market.title} className="w-full h-full" />
+          <ImageWithFallback 
+            src={market.imageUri} 
+            alt={market.title} 
+            className={`w-full h-full transition-all duration-300 ${
+              isCancelled ? 'grayscale-[0.5] opacity-70' : ''
+            }`} 
+          />
           <div className="absolute inset-0 bg-gradient-to-r from-transparent to-dark-800/20 hidden sm:block" />
           <div className="absolute inset-0 bg-gradient-to-t from-dark-900/60 to-transparent sm:hidden" />
+          {/* Resolved/Cancelled overlay */}
+          {isResolved && (
+            <div className="absolute inset-0 bg-emerald-500/10 sm:bg-emerald-500/5 flex items-center justify-center">
+              <span className="sm:hidden absolute top-3 right-3 badge bg-emerald-500/90 text-white text-2xs">Resolved</span>
+            </div>
+          )}
+          {isCancelled && (
+            <div className="absolute inset-0 bg-red-500/10 sm:bg-red-500/5 flex items-center justify-center">
+              <span className="sm:hidden absolute top-3 right-3 badge bg-red-500/90 text-white text-2xs">Cancelled</span>
+            </div>
+          )}
           {/* Mobile badges overlay */}
           <div className="absolute top-3 left-3 flex gap-1.5 sm:hidden">
             <span className={`badge-sm ${STAGE_COLORS[market.stage]}`}>{STAGE_LABELS[market.stage]}</span>
@@ -141,7 +162,34 @@ export function OwnerMarketCard({ market, actions, urgentBadge }: OwnerCardProps
             )}
           </div>
 
-          <h3 className="font-semibold text-white leading-tight text-sm sm:text-base">{market.title}</h3>
+          <h3 className={`font-semibold leading-tight text-sm sm:text-base ${
+            isResolved ? 'text-emerald-400' : isCancelled ? 'text-red-400/80' : 'text-white'
+          }`}>{market.title}</h3>
+          
+          {/* Winner indicator for resolved markets */}
+          {isResolved && market.winningOutcome !== undefined && market.outcomeLabels[market.winningOutcome] && (
+            <div className="flex items-center gap-2 mt-2 p-2 rounded-lg bg-emerald-500/10 border border-emerald-500/20">
+              <div className="w-5 h-5 rounded-full bg-emerald-500/20 flex items-center justify-center">
+                <svg className="w-3 h-3 text-emerald-400" fill="currentColor" viewBox="0 0 20 20">
+                  <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8 0 01-1.414 0l-4-4a1 1 a1 10 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                </svg>
+              </div>
+              <span className="text-xs font-medium text-emerald-400">Winner: {market.outcomeLabels[market.winningOutcome]}</span>
+            </div>
+          )}
+
+          {/* Cancelled indicator */}
+          {isCancelled && (
+            <div className="flex items-center gap-2 mt-2 p-2 rounded-lg bg-red-500/10 border border-red-500/20">
+              <div className="w-5 h-5 rounded-full bg-red-500/20 flex items-center justify-center">
+                <svg className="w-3 h-3 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" />
+                </svg>
+              </div>
+              <span className="text-xs font-medium text-red-400">Cancelled - Refund Available</span>
+            </div>
+          )}
+
           <p className="text-xs sm:text-sm text-dark-400 line-clamp-2 mt-1.5 mb-3">{market.description}</p>
 
           <ProbabilityBar
