@@ -37,8 +37,6 @@ export default function Header() {
     return () => { document.body.style.overflow = ''; };
   }, [mobileMenuOpen]);
 
-  const showUserNav = !isOwner;
-
   return (
     <>
       <header className="sticky top-0 z-50 w-full border-b border-white/[0.08] bg-dark-950/80 backdrop-blur-xl supports-[backdrop-filter]:bg-dark-950/60 shadow-lg">
@@ -163,36 +161,6 @@ export default function Header() {
         </div>
       )}
     </>
-  );
-}
-
-/* Desktop nav link */
-function NavLink({ to, current, children }: { to: string; current: boolean; children: React.ReactNode }) {
-  return (
-    <Link
-      to={to}
-      className={`px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200 border ${
-        current
-          ? 'bg-primary-500/15 text-white border-primary-500/20'
-          : 'text-dark-400 border-transparent hover:text-white hover:bg-white/[0.06]'
-      }`}
-    >
-      {children}
-    </Link>
-  );
-}
-
-/* Desktop external nav link */
-function ExternalNavLink({ href, children }: { href: string; children: React.ReactNode }) {
-  return (
-    <a
-      href={href}
-      target="_blank"
-      rel="noopener noreferrer"
-      className="px-4 py-2 rounded-lg text-sm font-medium text-dark-400 border-transparent hover:text-white hover:bg-white/[0.06] transition-all duration-200"
-    >
-      {children}
-    </a>
   );
 }
 
