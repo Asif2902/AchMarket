@@ -47,26 +47,6 @@ export default function MarketCard({ data }: Props) {
           {/* Gradient overlay for readability */}
           <div className="absolute inset-0 bg-gradient-to-t from-dark-900/60 via-transparent to-transparent" />
 
-          {/* Resolved/Cancelled overlay */}
-          {isResolved && (
-            <div className="absolute inset-0 bg-emerald-500/10 flex items-center justify-center">
-              <div className="absolute top-3 right-3">
-                <span className="badge bg-emerald-500/90 text-white border-emerald-400 shadow-lg backdrop-blur-sm text-2xs">
-                  Resolved
-                </span>
-              </div>
-            </div>
-          )}
-          {isCancelled && (
-            <div className="absolute inset-0 bg-red-500/10 flex items-center justify-center">
-              <div className="absolute top-3 right-3">
-                <span className="badge bg-red-500/90 text-white border-red-400 shadow-lg backdrop-blur-sm text-2xs">
-                  Cancelled
-                </span>
-              </div>
-            </div>
-          )}
-
           {/* Badges */}
           <div className="absolute top-2.5 left-2.5">
             <span className={`badge ${STAGE_COLORS[data.stage]} backdrop-blur-sm text-2xs`}>
@@ -99,30 +79,6 @@ export default function MarketCard({ data }: Props) {
           }`}>
             {data.title}
           </h3>
-
-          {/* Winner indicator for resolved markets */}
-          {isResolved && data.winningOutcome !== undefined && data.outcomeLabels[data.winningOutcome] && (
-            <div className="flex items-center gap-2 p-2 rounded-lg bg-emerald-500/10 border border-emerald-500/20">
-              <div className="w-6 h-6 rounded-full bg-emerald-500/20 flex items-center justify-center">
-                <svg className="w-3.5 h-3.5 text-emerald-400" fill="currentColor" viewBox="0 0 20 20">
-                  <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
-                </svg>
-              </div>
-              <span className="text-xs font-medium text-emerald-400">Winner: {data.outcomeLabels[data.winningOutcome]}</span>
-            </div>
-          )}
-
-          {/* Cancelled indicator */}
-          {isCancelled && (
-            <div className="flex items-center gap-2 p-2 rounded-lg bg-red-500/10 border border-red-500/20">
-              <div className="w-6 h-6 rounded-full bg-red-500/20 flex items-center justify-center">
-                <svg className="w-3.5 h-3.5 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" />
-                </svg>
-              </div>
-              <span className="text-xs font-medium text-red-400">Market Cancelled - Refund Available</span>
-            </div>
-          )}
 
           {/* Probability display — compact inline version for cards */}
           <div className="flex-1">
