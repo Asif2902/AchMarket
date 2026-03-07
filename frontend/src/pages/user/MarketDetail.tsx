@@ -1424,12 +1424,12 @@ function ProbabilityChart({
                   type="stepAfter"
                   dataKey={label}
                   stroke={isVisible ? CHART_COLORS[i % CHART_COLORS.length] : 'transparent'}
-                  strokeWidth={isVisible ? 2.5 : 0}
+                  strokeWidth={isVisible ? 2 : 0}
                   fill={isVisible ? `url(#prob-gradient-${i})` : 'transparent'}
                   fillOpacity={1}
-                  dot={isVisible ? { r: 3, fill: CHART_COLORS[i % CHART_COLORS.length], strokeWidth: 0 } : false}
+                  dot={false}
                   activeDot={isVisible ? {
-                    r: 5,
+                    r: 4,
                     strokeWidth: 2,
                     stroke: CHART_COLORS[i % CHART_COLORS.length],
                     fill: '#0a0f19',
