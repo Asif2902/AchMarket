@@ -1421,20 +1421,20 @@ function ProbabilityChart({
               return (
                 <Area
                   key={label}
-                  type="monotone"
+                  type="stepAfter"
                   dataKey={label}
                   stroke={isVisible ? CHART_COLORS[i % CHART_COLORS.length] : 'transparent'}
                   strokeWidth={isVisible ? 2.5 : 0}
                   fill={isVisible ? `url(#prob-gradient-${i})` : 'transparent'}
                   fillOpacity={1}
-                  dot={false}
+                  dot={isVisible ? { r: 3, fill: CHART_COLORS[i % CHART_COLORS.length], strokeWidth: 0 } : false}
                   activeDot={isVisible ? {
-                    r: 4,
+                    r: 5,
                     strokeWidth: 2,
                     stroke: CHART_COLORS[i % CHART_COLORS.length],
                     fill: '#0a0f19',
                   } : false}
-                  animationDuration={500}
+                  animationDuration={300}
                 />
               );
             })}
