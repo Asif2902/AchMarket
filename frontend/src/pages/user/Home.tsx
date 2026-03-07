@@ -30,7 +30,7 @@ export default function Home() {
   const [markets, setMarkets] = useState<MarketSummaryData[]>([]);
   const [loading, setLoading] = useState(true);
   const [categoryFilter, setCategoryFilter] = useState('All');
-  const [stageFilter, setStageFilter] = useState(-1);
+  const [stageFilter, setStageFilter] = useState(0);
   const [sortBy, setSortBy] = useState('newest');
   const [searchQuery, setSearchQuery] = useState('');
   const [page, setPage] = useState(0);

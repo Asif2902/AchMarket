@@ -41,55 +41,24 @@ export default function Header() {
     return () => { document.body.style.overflow = ''; };
   }, [mobileMenuOpen]);
 
-  const navLinks = [
-    { to: '/', label: 'Markets', match: (p: string) => p === '/' },
-    { to: '/analytics', label: 'Analytics', match: (p: string) => p === '/analytics' },
-    ...(isConnected ? [{ to: '/portfolio', label: 'Portfolio', match: (p: string) => p === '/portfolio' }] : []),
-  ];
-
   return (
     <>
       <header className="sticky top-0 z-50 w-full border-b border-white/[0.06] bg-dark-950/80 backdrop-blur-xl supports-[backdrop-filter]:bg-dark-950/60 shadow-lg">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex items-center justify-between h-16">
-            <div className="flex items-center gap-8">
-              <Link to="/" className="flex items-center gap-2.5 group shrink-0">
-                <img
-                  src="/img/logos/achswap-logo.png"
-                  alt="Achswap"
-                  className="h-8 w-8 rounded-lg object-cover shadow-lg shadow-primary-500/25 group-hover:shadow-primary-500/40 transition-shadow duration-300"
-                />
-                <div className="flex flex-col leading-tight">
-                  <span className="text-lg font-bold text-white tracking-tight leading-none">
-                    <span className="text-gradient">Ach</span>Market
-                  </span>
-                  <span className="text-2xs text-dark-500 leading-none mt-0.5">by Achswap</span>
-                </div>
-              </Link>
-
-              <nav className="hidden lg:flex items-center gap-1">
-                {navLinks.map(link => (
-                  <Link
-                    key={link.to}
-                    to={link.to}
-                    className={`nav-link ${link.match(location.pathname) ? 'nav-link-active' : ''}`}
-                  >
-                    {link.label}
-                  </Link>
-                ))}
-                <a
-                  href="https://app.achswapfi.xyz"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="nav-link flex items-center gap-1.5"
-                >
-                  Swap
-                  <svg className="w-3 h-3 opacity-50" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
-                  </svg>
-                </a>
-              </nav>
-            </div>
+            <Link to="/" className="flex items-center gap-2.5 group shrink-0">
+              <img
+                src="/img/logos/achswap-logo.png"
+                alt="Achswap"
+                className="h-8 w-8 rounded-lg object-cover shadow-lg shadow-primary-500/25 group-hover:shadow-primary-500/40 transition-shadow duration-300"
+              />
+              <div className="flex flex-col leading-tight">
+                <span className="text-lg font-bold text-white tracking-tight leading-none">
+                  <span className="text-gradient">Ach</span>Market
+                </span>
+                <span className="text-2xs text-dark-500 leading-none mt-0.5">by Achswap</span>
+              </div>
+            </Link>
 
             <div className="flex items-center gap-2">
               {isConnected && isOwner && (
@@ -100,7 +69,7 @@ export default function Header() {
               <ConnectButton showBalance={false} />
               <button
                 onClick={() => setMobileMenuOpen(true)}
-                className="lg:hidden w-9 h-9 rounded-lg bg-dark-800/50 border border-white/[0.08] flex items-center justify-center text-dark-300 hover:bg-dark-800/70 hover:text-white transition-all duration-200"
+                className="w-9 h-9 rounded-lg bg-dark-800/50 border border-white/[0.08] flex items-center justify-center text-dark-300 hover:bg-dark-800/70 hover:text-white transition-all duration-200"
                 aria-label="Open menu"
               >
                 <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
