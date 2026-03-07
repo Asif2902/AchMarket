@@ -80,6 +80,7 @@ export default function MarketDetail() {
   const [poolBalance, setPoolBalance] = useState<bigint>(0n);
   const [showMainFrame, setShowMainFrame] = useState(false);
   const [hoveredImage, setHoveredImage] = useState<number | null>(null);
+  const [aboutExpanded, setAboutExpanded] = useState(true);
 
   const fetchAll = useCallback(async () => {
     if (marketId === null) return;
@@ -456,11 +457,11 @@ export default function MarketDetail() {
         </div>
       </div>
 
-      {/* Content */}
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8">
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* Left column */}
-          <div className="lg:col-span-2 space-y-5">
+      {/* Two-column layout */}
+      <div className="max-w-[1600px] mx-auto lg:px-4">
+        <div className="lg:grid lg:grid-cols-[1fr_380px] lg:gap-6">
+          {/* Left Column — Market Info (scrollable) */}
+          <div className="space-y-4 lg:space-y-5 p-4 lg:p-0 pb-28 lg:pb-0">
             {/* Quick stats */}
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
               <MiniStat label="Volume" value={`${formatUSDC(accurateVolume ?? detail.totalVolumeWei)}`} suffix="USDC" icon={<UsdcIcon size={14} />} />
@@ -498,6 +499,29 @@ export default function MarketDetail() {
                     </div>
                   </div>
                 </div>
+              </div>
+            )}
+
+            {/* Trigger Expiry */}
+            {isActive && tradingEnded && !inGracePeriod && isConnected && isCorrectNetwork && (
+              <div className="card p-5 text-center space-y-3">
+                <div className="w-10 h-10 rounded-xl bg-red-500/10 flex items-center justify-center mx-auto">
+                  <svg className="w-5 h-5 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
+                  </svg>
+                </div>
+                <p className="text-sm text-red-400 font-semibold">Grace period expired</p>
+                <p className="text-xs text-dark-400 leading-relaxed">
+                  This market was not resolved within the 3-day grace period. Trigger expiry to enable refunds.
+                </p>
+                <button onClick={handleTriggerExpiry} disabled={txPending} className="w-full btn-primary py-3 text-sm font-semibold">
+                  {txPending ? 'Processing...' : 'Trigger Expiry'}
+                </button>
+                {txMessage && (
+                  <div className={`p-3 rounded-xl text-xs ${txMessage.type === 'success' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : 'bg-red-500/10 text-red-400 border border-red-500/20'}`}>
+                    {txMessage.text}
+                  </div>
+                )}
               </div>
             )}
 
@@ -724,15 +748,7 @@ export default function MarketDetail() {
               );
             })()}
 
-            {/* Description */}
-            {detail.description && (
-              <div className="card p-5">
-                <h2 className="text-sm font-semibold text-dark-300 uppercase tracking-wider mb-3">About</h2>
-                <p className="text-sm text-dark-300 leading-relaxed whitespace-pre-wrap">{detail.description}</p>
-              </div>
-            )}
-
-            {/* Probability history chart — Polymarket-style */}
+            {/* Probability history chart */}
             {probHistory.length > 0 && (
               <ProbabilityChart
                 history={probHistory}
@@ -741,7 +757,36 @@ export default function MarketDetail() {
               />
             )}
 
-            {/* Outcome Probabilities */}
+            {/* About / Description - collapsible */}
+            {detail.description && (
+              <div className="card overflow-hidden">
+                <button 
+                  onClick={() => setAboutExpanded(!aboutExpanded)}
+                  className="w-full p-5 pb-4 flex items-center justify-between hover:bg-dark-800/30 transition-colors"
+                >
+                  <h2 className="text-sm font-semibold text-dark-300 uppercase tracking-wider">About</h2>
+                  <svg 
+                    className={`w-4 h-4 text-dark-500 transition-transform ${aboutExpanded ? 'rotate-180' : ''}`} 
+                    fill="none" 
+                    viewBox="0 0 24 24" 
+                    stroke="currentColor" 
+                    strokeWidth={2}
+                  >
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+                  </svg>
+                </button>
+                {aboutExpanded && (
+                  <div className="px-5 pb-5">
+                    <p className="text-sm text-dark-300 leading-relaxed whitespace-pre-wrap">{detail.description}</p>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* Right Column — Trade Panel (sticky) */}
+          <div className="lg:sticky lg:top-4 lg:self-start space-y-4 p-4 lg:p-0 lg:space-y-5">
+            {/* Outcome Probabilities Card */}
             <div className="card p-5">
               <h2 className="text-sm font-semibold text-dark-300 uppercase tracking-wider mb-4">Outcome Probabilities</h2>
               <ProbabilityBar
@@ -766,11 +811,8 @@ export default function MarketDetail() {
                 })}
               </div>
             </div>
-          </div>
 
-          {/* Right column — sticky on desktop */}
-          <div className="space-y-5 lg:sticky lg:top-20 lg:self-start">
-            {/* Trade panel */}
+            {/* Trade Panel */}
             {isActive && !tradingEnded && isConnected && isCorrectNetwork && (
               <div className="card p-5">
                 <h3 className="text-sm font-semibold text-dark-300 uppercase tracking-wider mb-4">Trade</h3>
@@ -972,29 +1014,6 @@ export default function MarketDetail() {
               </div>
             )}
 
-            {/* Trigger Expiry */}
-            {isActive && tradingEnded && !inGracePeriod && isConnected && isCorrectNetwork && (
-              <div className="card p-5 text-center space-y-3">
-                <div className="w-10 h-10 rounded-xl bg-red-500/10 flex items-center justify-center mx-auto">
-                  <svg className="w-5 h-5 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
-                  </svg>
-                </div>
-                <p className="text-sm text-red-400 font-semibold">Grace period expired</p>
-                <p className="text-xs text-dark-400 leading-relaxed">
-                  This market was not resolved within the 3-day grace period. Trigger expiry to enable refunds.
-                </p>
-                <button onClick={handleTriggerExpiry} disabled={txPending} className="w-full btn-primary py-3 text-sm font-semibold">
-                  {txPending ? 'Processing...' : 'Trigger Expiry'}
-                </button>
-                {txMessage && (
-                  <div className={`p-3 rounded-xl text-xs ${txMessage.type === 'success' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : 'bg-red-500/10 text-red-400 border border-red-500/20'}`}>
-                    {txMessage.text}
-                  </div>
-                )}
-              </div>
-            )}
-
             {/* User Position */}
             {userInfo && isConnected && (
               <div className="card p-5">
@@ -1058,6 +1077,60 @@ export default function MarketDetail() {
           </div>
         </div>
       </div>
+
+      {/* Mobile Trade Panel - Fixed to bottom */}
+      {isActive && !tradingEnded && isConnected && isCorrectNetwork && (
+        <div className="lg:hidden fixed bottom-0 left-0 right-0 bg-dark-900/95 backdrop-blur-lg border-t border-white/[0.06] p-4 z-50">
+          <div className="flex items-center gap-3">
+            <div className="flex-1">
+              <div className="text-xs text-dark-500 mb-1">{detail.outcomeLabels[selectedOutcome]}</div>
+              <div className="flex gap-1">
+                <button
+                  onClick={() => setTradeTab('buy')}
+                  className={`flex-1 py-2 rounded-lg text-xs font-semibold transition-all ${
+                    tradeTab === 'buy' ? 'bg-emerald-600 text-white' : 'bg-dark-800 text-dark-400'
+                  }`}
+                >
+                  Buy
+                </button>
+                <button
+                  onClick={() => setTradeTab('sell')}
+                  className={`flex-1 py-2 rounded-lg text-xs font-semibold transition-all ${
+                    tradeTab === 'sell' ? 'bg-red-600 text-white' : 'bg-dark-800 text-dark-400'
+                  }`}
+                >
+                  Sell
+                </button>
+              </div>
+            </div>
+            <div className="flex-1">
+              <input
+                type="number"
+                value={shareAmount}
+                onChange={(e) => setShareAmount(e.target.value)}
+                placeholder={tradeTab === 'buy' ? 'Amount (USDC)' : 'Shares'}
+                className="input-field text-sm w-full"
+              />
+            </div>
+            <button
+              onClick={tradeTab === 'buy' ? handleBuy : handleSell}
+              disabled={txPending || !shareAmount || parseFloat(shareAmount) <= 0}
+              className={`py-3 px-6 rounded-xl font-semibold text-sm transition-all ${
+                tradeTab === 'buy' ? 'bg-emerald-600' : 'bg-red-600'
+              } disabled:opacity-50`}
+            >
+              {txPending ? '...' : tradeTab === 'buy' ? 'Buy' : 'Sell'}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Mobile Connect Wallet Prompt */}
+      {isActive && !tradingEnded && !isConnected && (
+        <div className="lg:hidden fixed bottom-0 left-0 right-0 bg-dark-900/95 backdrop-blur-lg border-t border-white/[0.06] p-4 z-50 text-center">
+          <p className="text-sm text-dark-400 font-medium">Connect wallet to trade</p>
+        </div>
+      )}
     </div>
   );
 }
