@@ -2,6 +2,7 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { WalletProvider, useWallet } from './context/WalletContext';
 import Header from './components/Header';
 import Footer from './components/Footer';
+import ToastContainer from './components/Toast';
 import Home from './pages/user/Home';
 import MarketDetail from './pages/user/MarketDetail';
 import Portfolio from './pages/user/Portfolio';
@@ -61,6 +62,7 @@ export default function App() {
             <AppRoutes />
           </main>
           <Footer />
+          <ToastContainer />
         </div>
       </WalletProvider>
     </BrowserRouter>

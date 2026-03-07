@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { ethers } from 'ethers';
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
@@ -12,10 +12,12 @@ import { PageLoader } from '../../components/LoadingSpinner';
 import UsdcIcon from '../../components/UsdcIcon';
 import { fetchTradeEvents, computeVolumeFromEvents } from '../../services/blockscout';
 import {
-  formatUSDC, formatWad, formatProbability, probToPercent, formatDate,
+  formatUSDC, formatCompactUSDC, formatWad, formatProbability, probToPercent, formatDate,
   applyBuySlippage, applySellSlippage, parseContractError, resolveImageUri,
   parseMarketSlug, parseProofLinks
 } from '../../utils/format';
+import { showToast } from '../../components/Toast';
+import { NETWORK } from '../../config/network';
 
 interface MarketDetailData {
   market: string;
@@ -75,28 +77,29 @@ export default function MarketDetail() {
   const [estimatedShares, setEstimatedShares] = useState<number | null>(null);
   const [previewCost, setPreviewCost] = useState<bigint | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
+  const [previewKey, setPreviewKey] = useState('');
   const [txPending, setTxPending] = useState(false);
   const [txMessage, setTxMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [poolBalance, setPoolBalance] = useState<bigint>(0n);
   const [showMainFrame, setShowMainFrame] = useState(false);
   const [hoveredImage, setHoveredImage] = useState<number | null>(null);
   const [aboutExpanded, setAboutExpanded] = useState(true);
+  const [refreshTrigger, setRefreshTrigger] = useState(0);
+  const [userBalance, setUserBalance] = useState<bigint | null>(null);
+  const hasLoadedOnce = useRef(false);
 
   const fetchAll = useCallback(async () => {
     if (marketId === null) return;
-    try {
-      setLoading(true);
+
+    const attemptFetch = async (): Promise<void> => {
       const factory = new ethers.Contract(FACTORY_ADDRESS, FACTORY_ABI, readProvider);
       const lens = new ethers.Contract(LENS_ADDRESS, LENS_ABI, readProvider);
       const addr = await factory.markets(BigInt(marketId));
       if (!addr || addr === ethers.ZeroAddress) {
-        setError('Market not found');
-        setLoading(false);
-        return;
+        throw new Error('Market not found');
       }
       setMarketAddress(addr);
 
-      // Core data — must succeed
       const d = await lens.getMarketDetail(addr);
 
       const parsed: MarketDetailData = {
@@ -112,8 +115,8 @@ export default function MarketDetail() {
         cancelReason: d.cancelReason || '', cancelProofUri: d.cancelProofUri || '',
       };
       setDetail(parsed);
+      setError(null);
 
-      // Auxiliary data — non-critical, fetch in parallel and handle failures individually
       const [bal, uInfo] = await Promise.all([
         readProvider.getBalance(addr).catch(() => parsed.totalVolumeWei),
         userAddress
@@ -130,11 +133,30 @@ export default function MarketDetail() {
           canRedeem: uInfo._canRedeem, canRefund: uInfo._canRefund,
         });
       }
-    } catch (err) {
-      console.error('Failed to fetch market:', err);
-      setError('Failed to load market details');
-    } finally {
-      setLoading(false);
+    };
+
+    if (!hasLoadedOnce.current) setLoading(true);
+
+    const maxAttempts = 4;
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        await attemptFetch();
+        hasLoadedOnce.current = true;
+        setLoading(false);
+        return;
+      } catch (err) {
+        console.error(`Market fetch attempt ${attempt}/${maxAttempts} failed:`, err);
+        const isNotFound = err instanceof Error && err.message === 'Market not found';
+        if (isNotFound || attempt === maxAttempts) {
+          setError(isNotFound ? 'Market not found' : 'Failed to load market details. The RPC may be slow — try again.');
+          hasLoadedOnce.current = true;
+          setLoading(false);
+          return;
+        }
+        const delay = Math.min(1000 * Math.pow(2, attempt - 1), 4000);
+        console.log(`Retrying in ${delay}ms...`);
+        await new Promise(r => setTimeout(r, delay));
+      }
     }
   }, [marketId, userAddress, readProvider]);
 
@@ -306,39 +328,59 @@ export default function MarketDetail() {
   useEffect(() => { fetchAll(); }, [fetchAll]);
 
   useEffect(() => {
+    if (!userAddress || !isConnected) { setUserBalance(null); return; }
+    let cancelled = false;
+    const fetchBalance = async () => {
+      try {
+        const bal = await readProvider.getBalance(userAddress);
+        if (!cancelled) setUserBalance(bal);
+      } catch { /* ignore */ }
+    };
+    fetchBalance();
+    const interval = setInterval(fetchBalance, 30000);
+    return () => { cancelled = true; clearInterval(interval); };
+  }, [userAddress, isConnected, readProvider, refreshTrigger]);
+
+  useEffect(() => {
     if (detail && marketAddress) {
       fetchProbHistory(marketAddress, detail);
     }
-  }, [detail?.market]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [detail?.market, refreshTrigger]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const currentInputKey = `${tradeTab}:${selectedOutcome}:${shareAmount}`;
 
   // Preview
   useEffect(() => {
+    const inputKey = currentInputKey;
+    setPreviewLoading(true);
     const timer = setTimeout(async () => {
       if (!shareAmount || parseFloat(shareAmount) <= 0) {
         setPreviewCost(null);
         setEstimatedShares(null);
+        setPreviewKey('');
+        setPreviewLoading(false);
         return;
       }
       if (tradeTab === 'buy') {
-        if (!detail) { setEstimatedShares(null); return; }
-        setPreviewLoading(true);
+        if (!detail) { setEstimatedShares(null); setPreviewLoading(false); return; }
         try {
           const budgetUSDC = parseFloat(shareAmount);
           const shares = findSharesForCost(detail.totalSharesWad, detail.bWad, selectedOutcome, budgetUSDC);
           setEstimatedShares(shares);
           setPreviewCost(null);
+          setPreviewKey(inputKey);
         } finally {
           setPreviewLoading(false);
         }
       } else {
-        if (!marketAddress) { setPreviewCost(null); return; }
+        if (!marketAddress) { setPreviewCost(null); setPreviewLoading(false); return; }
         try {
-          setPreviewLoading(true);
           const market = new ethers.Contract(marketAddress, MARKET_ABI, readProvider);
           const sharesWad = ethers.parseEther(shareAmount);
           const proceeds = await market.previewSell(selectedOutcome, sharesWad);
           setPreviewCost(proceeds);
           setEstimatedShares(null);
+          setPreviewKey(inputKey);
         } catch {
           setPreviewCost(null);
         } finally {
@@ -352,45 +394,51 @@ export default function MarketDetail() {
   const handleBuy = async () => {
     if (!signer || !marketAddress || estimatedShares === null || !shareAmount) return;
     setTxPending(true); setTxMessage(null);
+    const outcomeName = detail?.outcomeLabels[selectedOutcome] || `Outcome ${selectedOutcome}`;
     try {
       const market = new ethers.Contract(marketAddress, MARKET_ABI, signer);
       const sharesWad = ethers.parseEther(estimatedShares.toFixed(18));
       const usdcInput = ethers.parseEther(shareAmount);
       const maxCost = applyBuySlippage(usdcInput, slippage);
       const tx = await market.buy(selectedOutcome, sharesWad, maxCost, { value: maxCost });
+      showToast({ type: 'pending', title: `Buying ${outcomeName}...`, message: `${shareAmount} USDC submitted`, txHash: tx.hash });
       setTxMessage({ type: 'success', text: 'Transaction submitted. Waiting for confirmation...' });
       await tx.wait();
+      showToast({ type: 'success', title: `Bought ${outcomeName}`, message: `${shareAmount} USDC for ${estimatedShares.toFixed(2)} shares`, txHash: tx.hash });
       setTxMessage({ type: 'success', text: 'Shares purchased successfully!' });
       setShareAmount(''); setEstimatedShares(null);
-      // Refresh all data after tx confirmation
+      await new Promise(r => setTimeout(r, 1500));
       await refreshData();
-      if (detail) {
-        fetchProbHistory(marketAddress, detail);
-      }
+      setRefreshTrigger(c => c + 1);
     } catch (err) {
-      setTxMessage({ type: 'error', text: parseContractError(err) });
+      const errMsg = parseContractError(err);
+      showToast({ type: 'error', title: `Buy ${outcomeName} Failed`, message: errMsg });
+      setTxMessage({ type: 'error', text: errMsg });
     } finally { setTxPending(false); }
   };
 
   const handleSell = async () => {
     if (!signer || !marketAddress || !previewCost || !shareAmount) return;
     setTxPending(true); setTxMessage(null);
+    const outcomeName = detail?.outcomeLabels[selectedOutcome] || `Outcome ${selectedOutcome}`;
     try {
       const market = new ethers.Contract(marketAddress, MARKET_ABI, signer);
       const sharesWad = ethers.parseEther(shareAmount);
       const minReceive = applySellSlippage(previewCost, slippage);
       const tx = await market.sell(selectedOutcome, sharesWad, minReceive);
+      showToast({ type: 'pending', title: `Selling ${outcomeName}...`, message: `${shareAmount} shares submitted`, txHash: tx.hash });
       setTxMessage({ type: 'success', text: 'Transaction submitted. Waiting for confirmation...' });
       await tx.wait();
+      showToast({ type: 'success', title: `Sold ${outcomeName}`, message: `${shareAmount} shares for ~${formatUSDC(previewCost)} USDC`, txHash: tx.hash });
       setTxMessage({ type: 'success', text: 'Shares sold successfully!' });
       setShareAmount('');
-      // Refresh all data after tx confirmation
+      await new Promise(r => setTimeout(r, 1500));
       await refreshData();
-      if (detail) {
-        fetchProbHistory(marketAddress, detail);
-      }
+      setRefreshTrigger(c => c + 1);
     } catch (err) {
-      setTxMessage({ type: 'error', text: parseContractError(err) });
+      const errMsg = parseContractError(err);
+      showToast({ type: 'error', title: `Sell ${outcomeName} Failed`, message: errMsg });
+      setTxMessage({ type: 'error', text: errMsg });
     } finally { setTxPending(false); }
   };
 
@@ -400,12 +448,17 @@ export default function MarketDetail() {
     try {
       const market = new ethers.Contract(marketAddress, MARKET_ABI, signer);
       const tx = await market.redeem();
+      showToast({ type: 'pending', title: 'Claiming Winnings...', message: 'Transaction submitted', txHash: tx.hash });
       setTxMessage({ type: 'success', text: 'Redeem transaction submitted...' });
       await tx.wait();
+      showToast({ type: 'success', title: 'Winnings Claimed!', message: 'Your winnings have been sent to your wallet', txHash: tx.hash });
       setTxMessage({ type: 'success', text: 'Winnings claimed successfully!' });
+      await new Promise(r => setTimeout(r, 1500));
       await refreshData();
     } catch (err) {
-      setTxMessage({ type: 'error', text: parseContractError(err) });
+      const errMsg = parseContractError(err);
+      showToast({ type: 'error', title: 'Claim Failed', message: errMsg });
+      setTxMessage({ type: 'error', text: errMsg });
     } finally { setTxPending(false); }
   };
 
@@ -415,12 +468,17 @@ export default function MarketDetail() {
     try {
       const market = new ethers.Contract(marketAddress, MARKET_ABI, signer);
       const tx = await market.refund();
+      showToast({ type: 'pending', title: 'Claiming Refund...', message: 'Transaction submitted', txHash: tx.hash });
       setTxMessage({ type: 'success', text: 'Refund transaction submitted...' });
       await tx.wait();
+      showToast({ type: 'success', title: 'Refund Claimed!', message: 'Your deposit has been returned to your wallet', txHash: tx.hash });
       setTxMessage({ type: 'success', text: 'Refund claimed successfully!' });
+      await new Promise(r => setTimeout(r, 1500));
       await refreshData();
     } catch (err) {
-      setTxMessage({ type: 'error', text: parseContractError(err) });
+      const errMsg = parseContractError(err);
+      showToast({ type: 'error', title: 'Refund Failed', message: errMsg });
+      setTxMessage({ type: 'error', text: errMsg });
     } finally { setTxPending(false); }
   };
 
@@ -430,12 +488,17 @@ export default function MarketDetail() {
     try {
       const market = new ethers.Contract(marketAddress, MARKET_ABI, signer);
       const tx = await market.triggerExpiry();
+      showToast({ type: 'pending', title: 'Triggering Expiry...', message: 'Transaction submitted', txHash: tx.hash });
       setTxMessage({ type: 'success', text: 'Expiry transaction submitted...' });
       await tx.wait();
+      showToast({ type: 'success', title: 'Market Expired', message: 'Refunds are now available for all participants', txHash: tx.hash });
       setTxMessage({ type: 'success', text: 'Market expired! Refunds are now available.' });
+      await new Promise(r => setTimeout(r, 1500));
       await refreshData();
     } catch (err) {
-      setTxMessage({ type: 'error', text: parseContractError(err) });
+      const errMsg = parseContractError(err);
+      showToast({ type: 'error', title: 'Expiry Failed', message: errMsg });
+      setTxMessage({ type: 'error', text: errMsg });
     } finally { setTxPending(false); }
   };
 
@@ -449,7 +512,15 @@ export default function MarketDetail() {
           </svg>
         </div>
         <p className="text-red-400 font-medium mb-2">{error || 'Market not found'}</p>
-        <Link to="/" className="text-sm text-primary-400 hover:text-primary-300 transition-colors">Back to Markets</Link>
+        <div className="flex items-center justify-center gap-4 mt-4">
+          <button
+            onClick={() => { hasLoadedOnce.current = false; setError(null); setLoading(true); fetchAll(); }}
+            className="px-4 py-2 rounded-xl bg-primary-600 hover:bg-primary-500 text-white text-sm font-semibold transition-colors"
+          >
+            Try Again
+          </button>
+          <Link to="/" className="text-sm text-primary-400 hover:text-primary-300 transition-colors">Back to Markets</Link>
+        </div>
       </div>
     );
   }
@@ -495,9 +566,9 @@ export default function MarketDetail() {
   return (
     <div className="min-h-screen animate-fade-in">
       {/* Hero Header */}
-      <div className="relative">
-        <ImageWithFallback src={detail.imageUri} alt={detail.title} className="h-48 sm:h-56 lg:h-64 w-full" />
-        <div className="absolute inset-0 bg-gradient-to-t from-dark-950 via-dark-950/40 to-dark-950/20" />
+      <div className="relative overflow-hidden">
+        <ImageWithFallback src={detail.imageUri} alt={detail.title} className="h-52 sm:h-60 lg:h-72 w-full" />
+        <div className="absolute inset-0 bg-gradient-to-t from-dark-950 via-dark-950/60 to-dark-950/10" />
 
         {/* Back button */}
         <div className="absolute top-4 left-4">
@@ -522,13 +593,13 @@ export default function MarketDetail() {
       </div>
 
       {/* Two-column layout */}
-      <div className="max-w-[1600px] mx-auto md:px-4">
+      <div className="max-w-[1600px] mx-auto px-4 pt-5 md:pt-6 pb-8">
         <div className="md:grid md:grid-cols-[1fr_380px] md:gap-6">
           {/* Left Column — Market Info (scrollable) */}
-          <div className="space-y-4 md:space-y-5 p-4 md:p-0">
+          <div className="space-y-4 md:space-y-5">
             {/* Quick stats */}
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-              <MiniStat label="Volume" value={`${formatUSDC(accurateVolume ?? detail.totalVolumeWei)}`} suffix="USDC" icon={<UsdcIcon size={14} />} />
+              <MiniStat label="Volume" value={`${formatCompactUSDC(accurateVolume ?? detail.totalVolumeWei)}`} suffix="USDC" icon={<UsdcIcon size={14} />} />
               <MiniStat label="Traders" value={detail.participants.toString()} />
               <MiniStat label="Created" value={formatDate(detail.createdAt)} small />
               <MiniStat label={isActive ? 'Ends' : 'Ended'} value={formatDate(detail.marketDeadline)} small />
@@ -537,7 +608,12 @@ export default function MarketDetail() {
             {/* Countdown (active) */}
             {isActive && !tradingEnded && (
               <div className="card p-4 flex items-center justify-between">
-                <span className="text-sm text-dark-400 font-medium">Time Remaining</span>
+                <span className="text-xs text-dark-400 font-semibold uppercase tracking-wider flex items-center gap-2">
+                  <svg className="w-3.5 h-3.5 text-primary-400/60" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                  Time Remaining
+                </span>
                 <Countdown deadline={detail.marketDeadline} />
               </div>
             )}
@@ -614,9 +690,26 @@ export default function MarketDetail() {
                               src={resolveImageUri(proof.image)}
                               alt="Resolution proof"
                               className="rounded-lg border border-white/[0.06] max-h-64 w-auto object-contain bg-dark-800 hover:opacity-80 transition-opacity cursor-pointer"
-                              onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
+                              onError={(e) => {
+                                (e.target as HTMLImageElement).style.display = 'none';
+                                const fallback = (e.target as HTMLImageElement).parentElement?.querySelector('.proof-image-fallback');
+                                if (fallback) (fallback as HTMLElement).style.display = 'flex';
+                              }}
                             />
                           </a>
+                          {proof.raw && (
+                            <a
+                              href={resolveImageUri(proof.raw)}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="proof-image-fallback hidden text-sm text-emerald-300 hover:text-emerald-200 items-center gap-2 transition-colors mt-1.5"
+                            >
+                              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                              </svg>
+                              {proof.raw.length > 60 ? proof.raw.slice(0, 60) + '...' : proof.raw}
+                            </a>
+                          )}
                         </div>
                       ) : proof.mainLink ? (
                         <div className="mb-3">
@@ -810,17 +903,18 @@ export default function MarketDetail() {
 
             {/* Resolved pool & fee info */}
             {isResolved && detail.resolvedPoolWei > 0n && (() => {
-              const fee = (detail.resolvedPoolWei * 25n) / 9975n;
+              const grossPool = (detail.resolvedPoolWei * 10000n) / 9975n;
+              const fee = grossPool - detail.resolvedPoolWei;
               return (
                 <div className="card p-4">
                   <div className="grid grid-cols-2 gap-4">
                     <div>
                       <span className="text-2xs text-dark-500 font-medium uppercase tracking-wider">Prize Pool (after fee)</span>
-                      <p className="text-base font-bold text-white mt-0.5 flex items-center gap-1.5"><UsdcIcon size={16} />{formatUSDC(detail.resolvedPoolWei)} USDC</p>
+                      <p className="text-base font-bold text-white mt-0.5 flex items-center gap-1.5"><UsdcIcon size={16} />{formatCompactUSDC(detail.resolvedPoolWei)} USDC</p>
                     </div>
                     <div>
                       <span className="text-2xs text-dark-500 font-medium uppercase tracking-wider">Platform Fee (0.25%)</span>
-                      <p className="text-base font-bold text-dark-400 mt-0.5 flex items-center gap-1.5"><UsdcIcon size={16} className="opacity-50" />{formatUSDC(fee)} USDC</p>
+                      <p className="text-base font-bold text-dark-400 mt-0.5 flex items-center gap-1.5"><UsdcIcon size={16} className="opacity-50" />{formatCompactUSDC(fee)} USDC</p>
                     </div>
                   </div>
                 </div>
@@ -843,7 +937,10 @@ export default function MarketDetail() {
                   onClick={() => setAboutExpanded(!aboutExpanded)}
                   className="w-full p-5 pb-4 flex items-center justify-between hover:bg-dark-800/30 transition-colors"
                 >
-                  <h2 className="text-sm font-semibold text-dark-300 uppercase tracking-wider">About</h2>
+                  <h2 className="text-xs font-bold text-dark-300 uppercase tracking-widest flex items-center gap-2">
+                    <span className="w-1 h-3.5 rounded-full bg-primary-500/60"></span>
+                    About
+                  </h2>
                   <svg 
                     className={`w-4 h-4 text-dark-500 transition-transform ${aboutExpanded ? 'rotate-180' : ''}`} 
                     fill="none" 
@@ -864,10 +961,13 @@ export default function MarketDetail() {
           </div>
 
           {/* Right Column — Trade Panel (sticky) */}
-          <div className="md:sticky md:top-4 md:self-start space-y-4 md:space-y-5 p-4 md:p-0">
+          <div className="md:sticky md:top-4 md:self-start space-y-4 md:space-y-5">
             {/* Outcome Probabilities Card */}
             <div className="card p-5">
-              <h2 className="text-sm font-semibold text-dark-300 uppercase tracking-wider mb-4">Outcome Probabilities</h2>
+              <h2 className="text-xs font-bold text-dark-300 uppercase tracking-widest mb-4 flex items-center gap-2">
+                <span className="w-1 h-3.5 rounded-full bg-primary-500/60"></span>
+                Outcome Probabilities
+              </h2>
               <ProbabilityBar
                 labels={detail.outcomeLabels}
                 probabilities={detail.impliedProbabilitiesWad}
@@ -880,9 +980,9 @@ export default function MarketDetail() {
                   const pct = probToPercent(detail.impliedProbabilitiesWad[i]);
                   const isWinner = isResolved && detail.winningOutcome === i;
                   return (
-                    <div key={i} className={`p-3 rounded-xl text-center ${isWinner ? 'bg-emerald-500/10 border border-emerald-500/20' : color.light}`}>
-                      <p className="text-2xs text-dark-400 font-medium mb-1">{label}</p>
-                      <p className={`text-xl sm:text-2xl font-bold tabular-nums ${isWinner ? 'text-emerald-400' : color.text}`}>
+                    <div key={i} className={`p-3.5 rounded-xl text-center transition-all ${isWinner ? 'bg-emerald-500/10 border border-emerald-500/20' : color.light} relative overflow-hidden`}>
+                      <p className="text-2xs text-dark-400 font-semibold uppercase tracking-wider mb-1.5">{label}</p>
+                      <p className={`text-xl sm:text-2xl font-bold tabular-nums leading-none ${isWinner ? 'text-emerald-400' : color.text}`}>
                         {pct.toFixed(1)}%
                       </p>
                     </div>
@@ -894,7 +994,10 @@ export default function MarketDetail() {
             {/* Trade Panel */}
             {isActive && !tradingEnded && isConnected && isCorrectNetwork && (
               <div className="card p-5">
-                <h3 className="text-sm font-semibold text-dark-300 uppercase tracking-wider mb-4">Trade</h3>
+                <h3 className="text-xs font-bold text-dark-300 uppercase tracking-widest mb-4 flex items-center gap-2">
+                  <span className="w-1 h-3.5 rounded-full bg-primary-500/60"></span>
+                  Trade
+                </h3>
 
                 {/* Buy/Sell tabs */}
                 <div className="flex rounded-xl bg-dark-900/60 p-0.5 mb-5 border border-white/[0.06]">
@@ -948,9 +1051,20 @@ export default function MarketDetail() {
                 </div>
 
                 {/* Amount input */}
-                <label className="text-2xs font-semibold text-dark-500 uppercase tracking-wider mb-1.5 flex items-center gap-1.5">
-                  {tradeTab === 'buy' ? <><UsdcIcon size={12} />Amount (USDC)</> : 'Shares to Sell'}
-                </label>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="text-2xs font-semibold text-dark-500 uppercase tracking-wider flex items-center gap-1.5">
+                    {tradeTab === 'buy' ? <><UsdcIcon size={12} />Amount (USDC)</> : 'Shares to Sell'}
+                  </label>
+                  {tradeTab === 'buy' && userBalance !== null && (
+                    <span className="text-2xs text-dark-400 font-medium flex items-center gap-1">
+                      <svg className="w-3 h-3 text-dark-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M21 12a2.25 2.25 0 00-2.25-2.25H15a3 3 0 11-6 0H5.25A2.25 2.25 0 003 12m18 0v6a2.25 2.25 0 01-2.25 2.25H5.25A2.25 2.25 0 013 18v-6m18 0V9M3 12V9m18 0a2.25 2.25 0 00-2.25-2.25H5.25A2.25 2.25 0 003 9m18 0V6a2.25 2.25 0 00-2.25-2.25H5.25A2.25 2.25 0 003 6v3" />
+                      </svg>
+                      <span className="tabular-nums">{formatCompactUSDC(userBalance)}</span>
+                      <span className="text-dark-500">USDC</span>
+                    </span>
+                  )}
+                </div>
                 <div className="relative mb-3">
                   <input
                     type="number"
@@ -962,6 +1076,18 @@ export default function MarketDetail() {
                     className="input-field text-sm pr-16"
                   />
                   <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1.5">
+                    {tradeTab === 'buy' && userBalance !== null && userBalance > 0n && (
+                      <button
+                        onClick={() => {
+                          const formatted = ethers.formatEther(userBalance);
+                          const truncated = formatted.includes('.') ? formatted.slice(0, formatted.indexOf('.') + 3) : formatted;
+                          setShareAmount(truncated);
+                        }}
+                        className="px-2 py-0.5 rounded text-2xs font-semibold bg-primary-500/15 text-primary-400 hover:bg-primary-500/25 transition-all"
+                      >
+                        Max
+                      </button>
+                    )}
                     {tradeTab === 'sell' && userInfo && (userInfo.shares[selectedOutcome] || 0n) > 0n && (
                       <button
                         onClick={() => {
@@ -1043,7 +1169,7 @@ export default function MarketDetail() {
                 {/* Submit */}
                 <button
                   onClick={tradeTab === 'buy' ? handleBuy : handleSell}
-                  disabled={txPending || !shareAmount || parseFloat(shareAmount) <= 0 || (tradeTab === 'buy' ? estimatedShares === null : previewCost === null)}
+                  disabled={txPending || !shareAmount || parseFloat(shareAmount) <= 0 || previewLoading || previewKey !== currentInputKey || (tradeTab === 'buy' ? estimatedShares === null : previewCost === null)}
                   className={`w-full py-3 rounded-xl font-semibold text-sm transition-all active:scale-[0.97] ${
                     tradeTab === 'buy'
                       ? 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-glow-yes disabled:bg-emerald-600/20 disabled:text-emerald-400/40 disabled:shadow-none'
@@ -1096,7 +1222,10 @@ export default function MarketDetail() {
             {/* User Position */}
             {userInfo && isConnected && (
               <div className="card p-5">
-                <h3 className="text-sm font-semibold text-dark-300 uppercase tracking-wider mb-4">Your Position</h3>
+                <h3 className="text-xs font-bold text-dark-300 uppercase tracking-widest mb-4 flex items-center gap-2">
+                  <span className="w-1 h-3.5 rounded-full bg-primary-500/60"></span>
+                  Your Position
+                </h3>
 
                 <div className="space-y-2 mb-4">
                   {detail.outcomeLabels.map((label, i) => {
@@ -1125,7 +1254,7 @@ export default function MarketDetail() {
                 <div className="p-3 rounded-xl bg-dark-900/30 border border-white/[0.06] mb-4">
                   <div className="flex justify-between text-sm">
                     <span className="text-dark-500 font-medium">Net Deposited</span>
-                    <span className="font-bold text-white tabular-nums flex items-center gap-1"><UsdcIcon size={14} />{formatUSDC(userInfo.netDeposited)} USDC</span>
+                    <span className="font-bold text-white tabular-nums flex items-center gap-1"><UsdcIcon size={14} />{formatCompactUSDC(userInfo.netDeposited)} USDC</span>
                   </div>
                 </div>
 
@@ -1212,12 +1341,13 @@ function ProbabilityChart({
       {/* Header */}
       <div className="p-5 pb-0">
         <div className="flex items-center justify-between mb-3">
-          <div className="flex items-center gap-2">
-            <svg className="w-4 h-4 text-dark-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+          <h2 className="text-xs font-bold text-dark-300 uppercase tracking-widest flex items-center gap-2">
+            <span className="w-1 h-3.5 rounded-full bg-primary-500/60"></span>
+            <svg className="w-3.5 h-3.5 text-dark-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 013 19.875v-6.75zM9.75 8.625c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V8.625zM16.5 4.125c0-.621.504-1.125 1.125-1.125h2.25C20.496 3 21 3.504 21 4.125v15.75c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V4.125z" />
             </svg>
-            <h2 className="text-sm font-semibold text-dark-300 uppercase tracking-wider">Price History</h2>
-          </div>
+            Price History
+          </h2>
           {/* Time range selector */}
           <div className="flex items-center rounded-lg bg-dark-900/60 p-0.5 border border-white/[0.06]">
             {TIME_RANGES.map(range => (
@@ -1367,7 +1497,7 @@ function ProbabilityChart({
               return (
                 <Area
                   key={label}
-                  type="stepAfter"
+                  type="monotone"
                   dataKey={label}
                   stroke={isVisible ? CHART_COLORS[i % CHART_COLORS.length] : 'transparent'}
                   strokeWidth={isVisible ? 2 : 0}
@@ -1405,12 +1535,12 @@ function ProbabilityChart({
 
 function MiniStat({ label, value, suffix, small, icon }: { label: string; value: string; suffix?: string; small?: boolean; icon?: React.ReactNode }) {
   return (
-    <div className="card p-3">
-      <span className="text-2xs text-dark-500 font-medium uppercase tracking-wider">{label}</span>
-      <div className="flex items-center gap-1 mt-0.5">
+    <div className="card p-3.5">
+      <span className="text-2xs text-dark-400 font-semibold uppercase tracking-wider">{label}</span>
+      <div className="flex items-center gap-1.5 mt-1">
         {icon}
-        <span className={`font-bold text-white tabular-nums ${small ? 'text-xs' : 'text-sm'}`}>{value}</span>
-        {suffix && <span className="text-2xs text-dark-500">{suffix}</span>}
+        <span className={`font-bold text-white tabular-nums leading-none ${small ? 'text-xs' : 'text-sm'}`}>{value}</span>
+        {suffix && <span className="text-2xs text-dark-400 font-medium">{suffix}</span>}
       </div>
     </div>
   );

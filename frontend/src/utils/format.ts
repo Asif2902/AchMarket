@@ -20,9 +20,12 @@ export function formatUSDC(weiValue: bigint | string, decimals = 4): string {
 export function formatCompact(num: number): string {
   if (num >= 1e12) return (num / 1e12).toFixed(1).replace(/\.0$/, '') + 'T';
   if (num >= 1e9) return (num / 1e9).toFixed(1).replace(/\.0$/, '') + 'B';
-  if (num >= 1e6) return (num / 1e6).toFixed(1).replace(/\.0$/, '') + 'M';
-  if (num >= 1e3) return (num / 1e3).toFixed(1).replace(/\.0$/, '') + 'K';
-  return num.toFixed(0);
+  if (num >= 1e6) return (num / 1e6).toFixed(2).replace(/\.?0+$/, '') + 'M';
+  if (num >= 1e4) return (num / 1e3).toFixed(1).replace(/\.0$/, '') + 'K';
+  if (num >= 1e3) return (num / 1e3).toFixed(2).replace(/\.?0+$/, '') + 'K';
+  if (num >= 1) return num.toLocaleString('en-US', { maximumFractionDigits: 2 });
+  if (num >= 0.01) return num.toFixed(2);
+  return num.toFixed(4);
 }
 
 /**
@@ -253,29 +256,33 @@ export interface ProofLink {
  * - First link: always treated as image
  * - Second link: always treated as main proof link
  * - Third+ links: format "type:url" where type is "image" or "link"
+ *
+ * For single-part legacy proofs (no "||" separator), the value is stored
+ * in `raw` so callers can render a clickable fallback when the image fails.
  */
 export function parseProofLinks(proofUri: string): {
   image: string | null;
   mainLink: string | null;
+  raw: string | null;
   extraLinks: ProofLink[];
 } {
   if (!proofUri) {
-    return { image: null, mainLink: null, extraLinks: [] };
+    return { image: null, mainLink: null, raw: null, extraLinks: [] };
   }
 
   const parts = proofUri.split('||').map(p => p.trim()).filter(p => p.length > 0);
   
   if (parts.length === 0) {
-    return { image: null, mainLink: null, extraLinks: [] };
+    return { image: null, mainLink: null, raw: null, extraLinks: [] };
   }
 
   const image = parts[0] || null;
   const mainLink = parts[1] || null;
+  const raw = parts.length === 1 ? parts[0] : null;
   
   const extraLinks: ProofLink[] = [];
   for (let i = 2; i < parts.length; i++) {
     const part = parts[i];
-    // Check if it has a type prefix like "image:url" or "link:url"
     const colonIndex = part.indexOf(':');
     if (colonIndex > 0) {
       const type = part.slice(0, colonIndex).toLowerCase();
@@ -288,14 +295,12 @@ export function parseProofLinks(proofUri: string): {
           });
         }
       } else {
-        // Not a known type prefix, treat the original part (including colon) as a link URL
         extraLinks.push({
           url: part,
           type: 'link',
         });
       }
     } else {
-      // No type prefix, treat as link
       extraLinks.push({
         url: part,
         type: 'link',
@@ -303,5 +308,5 @@ export function parseProofLinks(proofUri: string): {
     }
   }
 
-  return { image, mainLink, extraLinks };
+  return { image, mainLink, raw, extraLinks };
 }

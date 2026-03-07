@@ -4,7 +4,7 @@ import { useWallet } from '../../context/WalletContext';
 import { FACTORY_ADDRESS, LENS_ADDRESS, STAGE } from '../../config/network';
 import { FACTORY_ABI, LENS_ABI, MARKET_ABI } from '../../config/abis';
 import { PageLoader } from '../../components/LoadingSpinner';
-import { formatUSDC } from '../../utils/format';
+import { formatUSDC, formatCompactUSDC } from '../../utils/format';
 
 interface FeeEvent {
   market: string;
@@ -55,9 +55,10 @@ export default function FeeManagement() {
           resolvedCount++;
 
           if (resolvedPoolWei > 0n) {
-            const fee = (resolvedPoolWei * 25n) / 9975n;
+            const grossPool = (resolvedPoolWei * 10000n) / 9975n;
+            const fee = grossPool - resolvedPoolWei;
             feesSum += fee;
-            resolvedVol += resolvedPoolWei + fee;
+            resolvedVol += grossPool;
             events.push({
               market: s.market,
               title: s.title,
@@ -104,7 +105,7 @@ export default function FeeManagement() {
           <div className="w-10 h-10 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center mx-auto mb-3">
             <svg className="w-5 h-5 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
           </div>
-          <p className="text-2xl sm:text-3xl font-bold text-white tabular-nums">{formatUSDC(totalFeesCollected)}</p>
+          <p className="text-2xl sm:text-3xl font-bold text-white tabular-nums">{formatCompactUSDC(totalFeesCollected)}</p>
           <p className="text-xs text-dark-400 mt-1">Total Fees Collected</p>
         </div>
         <div className="card p-5 text-center">
@@ -147,10 +148,10 @@ export default function FeeManagement() {
                       <p className="text-2xs text-dark-500 font-mono mt-0.5">{evt.market.slice(0, 10)}...{evt.market.slice(-6)}</p>
                     </td>
                     <td className="py-3.5 pr-4 text-right">
-                      <span className="text-white font-semibold tabular-nums">{formatUSDC(evt.resolvedPoolWei)}</span>
+                      <span className="text-white font-semibold tabular-nums">{formatCompactUSDC(evt.resolvedPoolWei)}</span>
                     </td>
                     <td className="py-3.5 text-right">
-                      <span className="text-emerald-400 font-semibold tabular-nums">{formatUSDC(evt.amount)}</span>
+                      <span className="text-emerald-400 font-semibold tabular-nums">{formatCompactUSDC(evt.amount)}</span>
                     </td>
                   </tr>
                 ))}
@@ -169,7 +170,7 @@ export default function FeeManagement() {
               </div>
               <span className="text-xs text-dark-400 font-medium uppercase tracking-wider">Total Resolved Volume</span>
             </div>
-            <p className="text-xl font-bold text-white tabular-nums">{formatUSDC(totalResolvedVolume)} USDC</p>
+            <p className="text-xl font-bold text-white tabular-nums">{formatCompactUSDC(totalResolvedVolume)} USDC</p>
           </div>
           <div className="card p-5">
             <div className="flex items-center gap-3 mb-2">
@@ -179,7 +180,7 @@ export default function FeeManagement() {
               <span className="text-xs text-dark-400 font-medium uppercase tracking-wider">Avg Fee per Market</span>
             </div>
             <p className="text-xl font-bold text-white tabular-nums">
-              {totalResolved > 0 ? formatUSDC(totalFeesCollected / BigInt(totalResolved)) : '0'} USDC
+              {totalResolved > 0 ? formatCompactUSDC(totalFeesCollected / BigInt(totalResolved)) : '0'} USDC
             </p>
           </div>
         </div>

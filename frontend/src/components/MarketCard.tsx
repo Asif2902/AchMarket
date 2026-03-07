@@ -3,7 +3,7 @@ import ImageWithFallback from './ImageWithFallback';
 import ProbabilityBar from './ProbabilityBar';
 import Countdown from './Countdown';
 import UsdcIcon from './UsdcIcon';
-import { formatUSDC, makeMarketSlug } from '../utils/format';
+import { formatCompactUSDC, makeMarketSlug } from '../utils/format';
 import { STAGE, STAGE_LABELS, STAGE_COLORS } from '../config/network';
 
 export interface MarketSummaryData {
@@ -63,7 +63,7 @@ export default function MarketCard({ data }: Props) {
           <div className="absolute bottom-2.5 left-2.5 right-2.5 flex items-center justify-between">
             <span className="text-2xs font-medium text-white/80 backdrop-blur-sm bg-dark-900/50 px-2 py-0.5 rounded-md flex items-center gap-1">
               <UsdcIcon size={12} />
-              {formatUSDC(data.totalVolumeWei)} USDC
+              {formatCompactUSDC(data.totalVolumeWei)} USDC
             </span>
             {isActive && (
               <Countdown deadline={data.marketDeadline} compact className="text-2xs font-medium text-white/80 backdrop-blur-sm bg-dark-900/50 px-2 py-0.5 rounded-md" />

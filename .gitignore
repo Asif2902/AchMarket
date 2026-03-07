@@ -8,6 +8,7 @@ frontend/dist/
 .env
 .env.local
 .env.*.local
+frontend/.env
 
 # IDE
 .vscode/
@@ -27,3 +28,11 @@ typechain-types/
 # Logs
 *.log
 npm-debug.log*
+
+# Replit
+.replit
+replit.nix
+replit.md
+.cache/
+attached_assets/
+.local/
