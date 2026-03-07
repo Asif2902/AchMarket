@@ -80,6 +80,7 @@ export default function MarketDetail() {
   const [previewKey, setPreviewKey] = useState('');
   const [txPending, setTxPending] = useState(false);
   const [txMessage, setTxMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const txMessageTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [poolBalance, setPoolBalance] = useState<bigint>(0n);
   const [showMainFrame, setShowMainFrame] = useState(false);
   const [hoveredImage, setHoveredImage] = useState<number | null>(null);
@@ -87,6 +88,16 @@ export default function MarketDetail() {
   const [refreshTrigger, setRefreshTrigger] = useState(0);
   const [userBalance, setUserBalance] = useState<bigint | null>(null);
   const hasLoadedOnce = useRef(false);
+
+  useEffect(() => {
+    if (txMessage) {
+      if (txMessageTimer.current) clearTimeout(txMessageTimer.current);
+      txMessageTimer.current = setTimeout(() => setTxMessage(null), 5000);
+    }
+    return () => {
+      if (txMessageTimer.current) clearTimeout(txMessageTimer.current);
+    };
+  }, [txMessage]);
 
   const fetchAll = useCallback(async () => {
     if (marketId === null) return;
@@ -565,36 +576,33 @@ export default function MarketDetail() {
 
   return (
     <div className="min-h-screen animate-fade-in">
-      {/* Hero Header */}
       <div className="relative overflow-hidden">
-        <ImageWithFallback src={detail.imageUri} alt={detail.title} className="h-52 sm:h-60 lg:h-72 w-full" />
-        <div className="absolute inset-0 bg-gradient-to-t from-dark-950 via-dark-950/60 to-dark-950/10" />
+        <ImageWithFallback src={detail.imageUri} alt={detail.title} className="h-48 sm:h-56 lg:h-64 w-full" />
+        <div className="absolute inset-0 bg-gradient-to-t from-dark-950 via-dark-950/50 to-dark-950/5" />
 
-        {/* Back button */}
-        <div className="absolute top-4 left-4">
-          <Link to="/" className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-dark-900/70 backdrop-blur-sm border border-white/[0.1] text-sm text-dark-200 hover:text-white transition-colors">
-            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+        <div className="absolute top-4 left-4 right-4 flex items-center justify-between">
+          <Link to="/" className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-dark-900/70 backdrop-blur-sm border border-white/[0.1] text-sm text-dark-200 hover:text-white transition-colors group">
+            <svg className="w-3.5 h-3.5 group-hover:-translate-x-0.5 transition-transform" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
             </svg>
             Markets
           </Link>
+          <div className="flex items-center gap-2">
+            <span className={`badge ${STAGE_COLORS[detail.stage]} backdrop-blur-sm`}>{STAGE_LABELS[detail.stage]}</span>
+            <span className="badge bg-dark-900/70 text-dark-200 border-white/[0.1] backdrop-blur-sm">{detail.category}</span>
+          </div>
         </div>
 
-        {/* Title overlay */}
         <div className="absolute bottom-0 left-0 right-0 p-4 sm:p-6 lg:p-8">
           <div className="max-w-7xl mx-auto">
-            <div className="flex flex-wrap items-center gap-2 mb-2">
-              <span className={`badge ${STAGE_COLORS[detail.stage]} backdrop-blur-sm`}>{STAGE_LABELS[detail.stage]}</span>
-              <span className="badge bg-dark-900/70 text-dark-200 border-white/[0.1] backdrop-blur-sm">{detail.category}</span>
-            </div>
-            <h1 className="text-xl sm:text-2xl lg:text-3xl font-bold text-white leading-tight max-w-3xl">{detail.title}</h1>
+            <h1 className="text-xl sm:text-2xl lg:text-3xl font-bold text-white leading-tight max-w-3xl drop-shadow-lg">{detail.title}</h1>
           </div>
         </div>
       </div>
 
       {/* Two-column layout */}
       <div className="max-w-[1600px] mx-auto px-4 pt-5 md:pt-6 pb-8">
-        <div className="md:grid md:grid-cols-[1fr_380px] md:gap-6">
+        <div className="flex flex-col gap-5 md:grid md:grid-cols-[1fr_380px] md:gap-6">
           {/* Left Column — Market Info (scrollable) */}
           <div className="space-y-4 md:space-y-5">
             {/* Quick stats */}
@@ -937,10 +945,7 @@ export default function MarketDetail() {
                   onClick={() => setAboutExpanded(!aboutExpanded)}
                   className="w-full p-5 pb-4 flex items-center justify-between hover:bg-dark-800/30 transition-colors"
                 >
-                  <h2 className="text-xs font-bold text-dark-300 uppercase tracking-widest flex items-center gap-2">
-                    <span className="w-1 h-3.5 rounded-full bg-primary-500/60"></span>
-                    About
-                  </h2>
+                  <h2 className="section-header">About</h2>
                   <svg 
                     className={`w-4 h-4 text-dark-500 transition-transform ${aboutExpanded ? 'rotate-180' : ''}`} 
                     fill="none" 
@@ -964,10 +969,7 @@ export default function MarketDetail() {
           <div className="md:sticky md:top-4 md:self-start space-y-4 md:space-y-5">
             {/* Outcome Probabilities Card */}
             <div className="card p-5">
-              <h2 className="text-xs font-bold text-dark-300 uppercase tracking-widest mb-4 flex items-center gap-2">
-                <span className="w-1 h-3.5 rounded-full bg-primary-500/60"></span>
-                Outcome Probabilities
-              </h2>
+              <h2 className="section-header mb-4">Outcome Probabilities</h2>
               <ProbabilityBar
                 labels={detail.outcomeLabels}
                 probabilities={detail.impliedProbabilitiesWad}
@@ -994,10 +996,7 @@ export default function MarketDetail() {
             {/* Trade Panel */}
             {isActive && !tradingEnded && isConnected && isCorrectNetwork && (
               <div className="card p-5">
-                <h3 className="text-xs font-bold text-dark-300 uppercase tracking-widest mb-4 flex items-center gap-2">
-                  <span className="w-1 h-3.5 rounded-full bg-primary-500/60"></span>
-                  Trade
-                </h3>
+                <h3 className="section-header mb-4">Trade</h3>
 
                 {/* Buy/Sell tabs */}
                 <div className="flex rounded-xl bg-dark-900/60 p-0.5 mb-5 border border-white/[0.06]">
@@ -1222,10 +1221,7 @@ export default function MarketDetail() {
             {/* User Position */}
             {userInfo && isConnected && (
               <div className="card p-5">
-                <h3 className="text-xs font-bold text-dark-300 uppercase tracking-widest mb-4 flex items-center gap-2">
-                  <span className="w-1 h-3.5 rounded-full bg-primary-500/60"></span>
-                  Your Position
-                </h3>
+                <h3 className="section-header mb-4">Your Position</h3>
 
                 <div className="space-y-2 mb-4">
                   {detail.outcomeLabels.map((label, i) => {
@@ -1341,13 +1337,7 @@ function ProbabilityChart({
       {/* Header */}
       <div className="p-5 pb-0">
         <div className="flex items-center justify-between mb-3">
-          <h2 className="text-xs font-bold text-dark-300 uppercase tracking-widest flex items-center gap-2">
-            <span className="w-1 h-3.5 rounded-full bg-primary-500/60"></span>
-            <svg className="w-3.5 h-3.5 text-dark-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 013 19.875v-6.75zM9.75 8.625c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V8.625zM16.5 4.125c0-.621.504-1.125 1.125-1.125h2.25C20.496 3 21 3.504 21 4.125v15.75c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V4.125z" />
-            </svg>
-            Price History
-          </h2>
+          <h2 className="section-header">Price History</h2>
           {/* Time range selector */}
           <div className="flex items-center rounded-lg bg-dark-900/60 p-0.5 border border-white/[0.06]">
             {TIME_RANGES.map(range => (

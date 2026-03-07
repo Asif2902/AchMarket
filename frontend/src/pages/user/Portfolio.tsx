@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import { ethers } from 'ethers';
 import { useWallet } from '../../context/WalletContext';
@@ -31,6 +31,17 @@ export default function Portfolio() {
   const [loading, setLoading] = useState(true);
   const [txPending, setTxPending] = useState<string | null>(null);
   const [txMsg, setTxMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const txMsgTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    if (txMsg) {
+      if (txMsgTimer.current) clearTimeout(txMsgTimer.current);
+      txMsgTimer.current = setTimeout(() => setTxMsg(null), 5000);
+    }
+    return () => {
+      if (txMsgTimer.current) clearTimeout(txMsgTimer.current);
+    };
+  }, [txMsg]);
 
   useEffect(() => {
     if (!address) return;

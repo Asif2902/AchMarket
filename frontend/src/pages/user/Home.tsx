@@ -6,6 +6,8 @@ import { FACTORY_ABI, LENS_ABI } from '../../config/abis';
 import MarketCard, { MarketSummaryData } from '../../components/MarketCard';
 import { SkeletonCard } from '../../components/LoadingSpinner';
 import EmptyState from '../../components/EmptyState';
+import UsdcIcon from '../../components/UsdcIcon';
+import { formatCompactUSDC } from '../../utils/format';
 
 const CATEGORIES = ['All', 'Crypto', 'Sports', 'Politics', 'Entertainment', 'Science', 'Other'];
 const SORT_OPTIONS = [
@@ -95,9 +97,12 @@ export default function Home() {
   const totalPages = Math.ceil(filtered.length / PAGE_SIZE);
   const paginated = filtered.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
 
+  const activeCount = markets.filter(m => m.stage === STAGE.Active).length;
+  const totalVolume = markets.reduce((acc, m) => acc + m.totalVolumeWei, 0n);
+
   return (
     <div className="min-h-screen">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8 space-y-6">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8 space-y-5">
         <div className="space-y-3">
           <div className="flex flex-col sm:flex-row gap-2.5">
             <div className="relative flex-1">
@@ -179,7 +184,7 @@ export default function Home() {
           <>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-5">
               {paginated.map((market, i) => (
-                <div key={market.market} className="animate-fade-in-up" style={{ animationDelay: `${i * 50}ms`, animationFillMode: 'both' }}>
+                <div key={market.market} className="animate-fade-in-up" style={{ animationDelay: `${i * 60}ms`, animationFillMode: 'both' }}>
                   <MarketCard data={market} />
                 </div>
               ))}

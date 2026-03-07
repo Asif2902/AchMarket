@@ -10,12 +10,10 @@ export default function Header() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
-  // Close mobile menu on route change
   useEffect(() => {
     setMobileMenuOpen(false);
   }, [location.pathname]);
 
-  // Close mobile menu on outside click
   useEffect(() => {
     if (!mobileMenuOpen) return;
     function handleClick(e: MouseEvent) {
@@ -27,7 +25,6 @@ export default function Header() {
     return () => document.removeEventListener('mousedown', handleClick);
   }, [mobileMenuOpen]);
 
-  // Prevent body scroll when menu is open
   useEffect(() => {
     if (mobileMenuOpen) {
       document.body.style.overflow = 'hidden';
@@ -37,27 +34,56 @@ export default function Header() {
     return () => { document.body.style.overflow = ''; };
   }, [mobileMenuOpen]);
 
+  const navLinks = [
+    { to: '/', label: 'Markets', match: (p: string) => p === '/' },
+    { to: '/analytics', label: 'Analytics', match: (p: string) => p === '/analytics' },
+    ...(isConnected ? [{ to: '/portfolio', label: 'Portfolio', match: (p: string) => p === '/portfolio' }] : []),
+  ];
+
   return (
     <>
-      <header className="sticky top-0 z-50 w-full border-b border-white/[0.08] bg-dark-950/80 backdrop-blur-xl supports-[backdrop-filter]:bg-dark-950/60 shadow-lg">
+      <header className="sticky top-0 z-50 w-full border-b border-white/[0.06] bg-dark-950/80 backdrop-blur-xl supports-[backdrop-filter]:bg-dark-950/60 shadow-lg">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex items-center justify-between h-16">
-            {/* Logo */}
-            <Link to="/" className="flex items-center gap-2.5 group shrink-0">
-              <img
-                src="/img/logos/achswap-logo.png"
-                alt="Achswap"
-                className="h-8 w-8 rounded-lg object-cover shadow-lg shadow-primary-500/25 group-hover:shadow-primary-500/40 transition-shadow duration-300"
-              />
-              <div className="flex flex-col leading-tight">
-                <span className="text-lg font-bold text-white tracking-tight leading-none">
-                  <span className="text-gradient">Ach</span>Market
-                </span>
-                <span className="text-2xs text-dark-500 leading-none mt-0.5">by Achswap</span>
-              </div>
-            </Link>
+            <div className="flex items-center gap-8">
+              <Link to="/" className="flex items-center gap-2.5 group shrink-0">
+                <img
+                  src="/img/logos/achswap-logo.png"
+                  alt="Achswap"
+                  className="h-8 w-8 rounded-lg object-cover shadow-lg shadow-primary-500/25 group-hover:shadow-primary-500/40 transition-shadow duration-300"
+                />
+                <div className="flex flex-col leading-tight">
+                  <span className="text-lg font-bold text-white tracking-tight leading-none">
+                    <span className="text-gradient">Ach</span>Market
+                  </span>
+                  <span className="text-2xs text-dark-500 leading-none mt-0.5">by Achswap</span>
+                </div>
+              </Link>
 
-            {/* Right side */}
+              <nav className="hidden lg:flex items-center gap-1">
+                {navLinks.map(link => (
+                  <Link
+                    key={link.to}
+                    to={link.to}
+                    className={`nav-link ${link.match(location.pathname) ? 'nav-link-active' : ''}`}
+                  >
+                    {link.label}
+                  </Link>
+                ))}
+                <a
+                  href="https://app.achswapfi.xyz"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="nav-link flex items-center gap-1.5"
+                >
+                  Swap
+                  <svg className="w-3 h-3 opacity-50" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                  </svg>
+                </a>
+              </nav>
+            </div>
+
             <div className="flex items-center gap-2">
               {isConnected && isOwner && (
                 <span className="hidden sm:inline-flex badge bg-primary-500/15 text-primary-400 border-primary-500/25 text-2xs">
@@ -67,7 +93,7 @@ export default function Header() {
               <ConnectButton showBalance={false} />
               <button
                 onClick={() => setMobileMenuOpen(true)}
-                className="w-9 h-9 rounded-lg bg-dark-800/50 border border-white/[0.08] flex items-center justify-center text-dark-300 hover:bg-dark-800/70 hover:text-white transition-all duration-200"
+                className="lg:hidden w-9 h-9 rounded-lg bg-dark-800/50 border border-white/[0.08] flex items-center justify-center text-dark-300 hover:bg-dark-800/70 hover:text-white transition-all duration-200"
                 aria-label="Open menu"
               >
                 <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -79,7 +105,6 @@ export default function Header() {
         </div>
       </header>
 
-      {/* Drawer — navigation */}
       {mobileMenuOpen && (
         <div className="mobile-overlay" onClick={() => setMobileMenuOpen(false)}>
           <div
@@ -87,7 +112,6 @@ export default function Header() {
             className="mobile-drawer"
             onClick={(e) => e.stopPropagation()}
           >
-            {/* Drawer Header */}
             <div className="flex items-center justify-between p-4 border-b border-white/[0.08]">
               <div className="flex items-center gap-2.5">
                 <img
@@ -112,7 +136,6 @@ export default function Header() {
               </button>
             </div>
 
-            {/* Navigation */}
             <nav className="p-3 space-y-1">
               <MobileNavLink to="/" current={location.pathname === '/'} icon={
                 <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
@@ -137,6 +160,11 @@ export default function Header() {
                 Portfolio
               </MobileNavLink>
             )}
+
+              <div className="my-2 border-t border-white/[0.06]" />
+
+              <p className="px-4 py-2 text-2xs font-semibold text-dark-500 uppercase tracking-wider">Ecosystem</p>
+
               <MobileExternalLink href="https://app.achswapfi.xyz" icon={
                 <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M7.5 21L3 16.5m0 0L7.5 12M3 16.5h13.5m0-13.5L21 7.5m0 0L16.5 12M21 7.5H7.5" />
@@ -157,6 +185,13 @@ export default function Header() {
                 Docs
               </MobileExternalLink>
             </nav>
+
+            <div className="mt-auto p-4 border-t border-white/[0.06]">
+              <div className="flex items-center gap-2">
+                <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse-soft" />
+                <span className="text-2xs text-dark-500 font-mono">ARC Testnet</span>
+              </div>
+            </div>
           </div>
         </div>
       )}
@@ -164,7 +199,6 @@ export default function Header() {
   );
 }
 
-/* Mobile nav link */
 function MobileNavLink({ to, current, children, icon }: { to: string; current: boolean; children: React.ReactNode; icon: React.ReactNode }) {
   return (
     <Link
@@ -181,7 +215,6 @@ function MobileNavLink({ to, current, children, icon }: { to: string; current: b
   );
 }
 
-/* Mobile external nav link */
 function MobileExternalLink({ href, children, icon }: { href: string; children: React.ReactNode; icon: React.ReactNode }) {
   return (
     <a
@@ -191,7 +224,10 @@ function MobileExternalLink({ href, children, icon }: { href: string; children: 
       className="flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium text-dark-300 border-transparent hover:text-white hover:bg-white/[0.06] transition-all duration-200"
     >
       {icon}
-      {children}
+      <span className="flex-1">{children}</span>
+      <svg className="w-3.5 h-3.5 text-dark-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+      </svg>
     </a>
   );
 }
