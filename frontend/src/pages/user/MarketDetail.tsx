@@ -247,6 +247,62 @@ export default function MarketDetail() {
     }
   }, []);
 
+  // Background polling - refresh BlockScout data every 15 seconds
+  useEffect(() => {
+    if (!marketAddress || !detail) return;
+    
+    const pollInterval = setInterval(async () => {
+      try {
+        const events = await fetchTradeEvents(marketAddress);
+        const newVolume = computeVolumeFromEvents(events);
+        setAccurateVolume(newVolume);
+        
+        // Re-compute probability history from fresh events
+        const outcomeCount = detail.outcomeLabels.length;
+        const bWad = detail.bWad;
+        const shares = new Array(outcomeCount).fill(0n);
+        const history: ProbHistoryPoint[] = [];
+
+        const uniformProb = 100 / outcomeCount;
+        const initialPoint: ProbHistoryPoint = { time: detail.createdAt };
+        detail.outcomeLabels.forEach((label) => {
+          initialPoint[label] = Number(uniformProb.toFixed(1));
+        });
+        history.push(initialPoint);
+
+        for (const event of events) {
+          if (event.type === 'buy') {
+            shares[event.outcomeIndex] = shares[event.outcomeIndex] + event.sharesWad;
+          } else {
+            shares[event.outcomeIndex] = shares[event.outcomeIndex] - event.sharesWad;
+          }
+          const probs = computeProbabilities(shares, bWad);
+          const point: ProbHistoryPoint = { time: event.timestamp };
+          detail.outcomeLabels.forEach((label, idx) => {
+            point[label] = Number((probs[idx] * 100).toFixed(1));
+          });
+          history.push(point);
+        }
+
+        const nowTs = Math.floor(Date.now() / 1000);
+        const currentProbs = computeProbabilities(detail.totalSharesWad, bWad);
+        const nowPoint: ProbHistoryPoint = { time: nowTs };
+        detail.outcomeLabels.forEach((label, idx) => {
+          nowPoint[label] = Number((currentProbs[idx] * 100).toFixed(1));
+        });
+        if (history.length === 0 || nowTs > history[history.length - 1].time) {
+          history.push(nowPoint);
+        }
+
+        setProbHistory(history);
+      } catch (err) {
+        console.error('Background poll failed:', err);
+      }
+    }, 15000);
+
+    return () => clearInterval(pollInterval);
+  }, [marketAddress, detail?.market, detail?.outcomeLabels, detail?.totalSharesWad, detail?.bWad, detail?.createdAt]);
+
   useEffect(() => { fetchAll(); }, [fetchAll]);
 
   useEffect(() => {
@@ -306,7 +362,11 @@ export default function MarketDetail() {
       await tx.wait();
       setTxMessage({ type: 'success', text: 'Shares purchased successfully!' });
       setShareAmount(''); setEstimatedShares(null);
-      refreshData();
+      // Refresh all data after tx confirmation
+      await refreshData();
+      if (detail) {
+        fetchProbHistory(marketAddress, detail);
+      }
     } catch (err) {
       setTxMessage({ type: 'error', text: parseContractError(err) });
     } finally { setTxPending(false); }
@@ -324,7 +384,11 @@ export default function MarketDetail() {
       await tx.wait();
       setTxMessage({ type: 'success', text: 'Shares sold successfully!' });
       setShareAmount('');
-      refreshData();
+      // Refresh all data after tx confirmation
+      await refreshData();
+      if (detail) {
+        fetchProbHistory(marketAddress, detail);
+      }
     } catch (err) {
       setTxMessage({ type: 'error', text: parseContractError(err) });
     } finally { setTxPending(false); }
@@ -339,7 +403,7 @@ export default function MarketDetail() {
       setTxMessage({ type: 'success', text: 'Redeem transaction submitted...' });
       await tx.wait();
       setTxMessage({ type: 'success', text: 'Winnings claimed successfully!' });
-      refreshData();
+      await refreshData();
     } catch (err) {
       setTxMessage({ type: 'error', text: parseContractError(err) });
     } finally { setTxPending(false); }
@@ -354,7 +418,7 @@ export default function MarketDetail() {
       setTxMessage({ type: 'success', text: 'Refund transaction submitted...' });
       await tx.wait();
       setTxMessage({ type: 'success', text: 'Refund claimed successfully!' });
-      refreshData();
+      await refreshData();
     } catch (err) {
       setTxMessage({ type: 'error', text: parseContractError(err) });
     } finally { setTxPending(false); }
@@ -369,7 +433,7 @@ export default function MarketDetail() {
       setTxMessage({ type: 'success', text: 'Expiry transaction submitted...' });
       await tx.wait();
       setTxMessage({ type: 'success', text: 'Market expired! Refunds are now available.' });
-      refreshData();
+      await refreshData();
     } catch (err) {
       setTxMessage({ type: 'error', text: parseContractError(err) });
     } finally { setTxPending(false); }
@@ -542,7 +606,7 @@ export default function MarketDetail() {
                       </p>
                       
                       {/* Image proof */}
-                      {proof.image && (
+                      {proof.image ? (
                         <div className="mb-3">
                           <p className="text-2xs font-medium text-emerald-500/70 uppercase tracking-wider mb-1.5">Proof Image</p>
                           <a href={resolveImageUri(proof.image)} target="_blank" rel="noopener noreferrer">
@@ -554,7 +618,22 @@ export default function MarketDetail() {
                             />
                           </a>
                         </div>
-                      )}
+                      ) : proof.mainLink ? (
+                        <div className="mb-3">
+                          <p className="text-2xs font-medium text-emerald-500/70 uppercase tracking-wider mb-1.5">Proof Link</p>
+                          <a
+                            href={resolveImageUri(proof.mainLink)}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-sm text-emerald-300 hover:text-emerald-200 inline-flex items-center gap-2 transition-colors"
+                          >
+                            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                            </svg>
+                            Open Proof
+                          </a>
+                        </div>
+                      ) : null}
                       
                       {/* Main link with frame toggle */}
                       {proof.mainLink ? (() => {
@@ -1114,7 +1193,7 @@ export default function MarketDetail() {
             </div>
             <button
               onClick={tradeTab === 'buy' ? handleBuy : handleSell}
-              disabled={txPending || !shareAmount || parseFloat(shareAmount) <= 0}
+              disabled={txPending || !shareAmount || parseFloat(shareAmount) <= 0 || (tradeTab === 'buy' ? estimatedShares === null : previewCost === null)}
               className={`py-3 px-6 rounded-xl font-semibold text-sm transition-all ${
                 tradeTab === 'buy' ? 'bg-emerald-600' : 'bg-red-600'
               } disabled:opacity-50`}
@@ -1342,7 +1421,7 @@ function ProbabilityChart({
               return (
                 <Area
                   key={label}
-                  type="stepAfter"
+                  type="monotone"
                   dataKey={label}
                   stroke={isVisible ? CHART_COLORS[i % CHART_COLORS.length] : 'transparent'}
                   strokeWidth={isVisible ? 2.5 : 0}
