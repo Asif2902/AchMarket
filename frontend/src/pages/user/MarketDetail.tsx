@@ -522,10 +522,10 @@ export default function MarketDetail() {
       </div>
 
       {/* Two-column layout */}
-      <div className="max-w-[1600px] mx-auto lg:px-4">
-        <div className="lg:grid lg:grid-cols-[1fr_380px] lg:gap-6">
+      <div className="max-w-[1600px] mx-auto md:px-4">
+        <div className="md:grid md:grid-cols-[1fr_380px] md:gap-6">
           {/* Left Column — Market Info (scrollable) */}
-          <div className="space-y-4 lg:space-y-5 p-4 lg:p-0 pb-28 lg:pb-0">
+          <div className="space-y-4 md:space-y-5 p-4 md:p-0">
             {/* Quick stats */}
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
               <MiniStat label="Volume" value={`${formatUSDC(accurateVolume ?? detail.totalVolumeWei)}`} suffix="USDC" icon={<UsdcIcon size={14} />} />
@@ -864,7 +864,7 @@ export default function MarketDetail() {
           </div>
 
           {/* Right Column — Trade Panel (sticky) */}
-          <div className="lg:sticky lg:top-4 lg:self-start space-y-4 p-4 lg:p-0 lg:space-y-5">
+          <div className="md:sticky md:top-4 md:self-start space-y-4 md:space-y-5 p-4 md:p-0">
             {/* Outcome Probabilities Card */}
             <div className="card p-5">
               <h2 className="text-sm font-semibold text-dark-300 uppercase tracking-wider mb-4">Outcome Probabilities</h2>
@@ -1156,60 +1156,6 @@ export default function MarketDetail() {
           </div>
         </div>
       </div>
-
-      {/* Mobile Trade Panel - Fixed to bottom */}
-      {isActive && !tradingEnded && isConnected && isCorrectNetwork && (
-        <div className="lg:hidden fixed bottom-0 left-0 right-0 bg-dark-900/95 backdrop-blur-lg border-t border-white/[0.06] p-4 z-50">
-          <div className="flex items-center gap-3">
-            <div className="flex-1">
-              <div className="text-xs text-dark-500 mb-1">{detail.outcomeLabels[selectedOutcome]}</div>
-              <div className="flex gap-1">
-                <button
-                  onClick={() => setTradeTab('buy')}
-                  className={`flex-1 py-2 rounded-lg text-xs font-semibold transition-all ${
-                    tradeTab === 'buy' ? 'bg-emerald-600 text-white' : 'bg-dark-800 text-dark-400'
-                  }`}
-                >
-                  Buy
-                </button>
-                <button
-                  onClick={() => setTradeTab('sell')}
-                  className={`flex-1 py-2 rounded-lg text-xs font-semibold transition-all ${
-                    tradeTab === 'sell' ? 'bg-red-600 text-white' : 'bg-dark-800 text-dark-400'
-                  }`}
-                >
-                  Sell
-                </button>
-              </div>
-            </div>
-            <div className="flex-1">
-              <input
-                type="number"
-                value={shareAmount}
-                onChange={(e) => setShareAmount(e.target.value)}
-                placeholder={tradeTab === 'buy' ? 'Amount (USDC)' : 'Shares'}
-                className="input-field text-sm w-full"
-              />
-            </div>
-            <button
-              onClick={tradeTab === 'buy' ? handleBuy : handleSell}
-              disabled={txPending || !shareAmount || parseFloat(shareAmount) <= 0 || (tradeTab === 'buy' ? estimatedShares === null : previewCost === null)}
-              className={`py-3 px-6 rounded-xl font-semibold text-sm transition-all ${
-                tradeTab === 'buy' ? 'bg-emerald-600' : 'bg-red-600'
-              } disabled:opacity-50`}
-            >
-              {txPending ? '...' : tradeTab === 'buy' ? 'Buy' : 'Sell'}
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* Mobile Connect Wallet Prompt */}
-      {isActive && !tradingEnded && !isConnected && (
-        <div className="lg:hidden fixed bottom-0 left-0 right-0 bg-dark-900/95 backdrop-blur-lg border-t border-white/[0.06] p-4 z-50 text-center">
-          <p className="text-sm text-dark-400 font-medium">Connect wallet to trade</p>
-        </div>
-      )}
     </div>
   );
 }
