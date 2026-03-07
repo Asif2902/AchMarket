@@ -153,9 +153,9 @@ export default function Home() {
             <p className="text-xs text-dark-500 font-medium">
               {filtered.length} market{filtered.length !== 1 ? 's' : ''} found
             </p>
-            {(searchQuery || categoryFilter !== 'All') && (
+            {(searchQuery || categoryFilter !== 'All' || stageFilter !== 0) && (
               <button
-                onClick={() => { setSearchQuery(''); setCategoryFilter('All'); setPage(0); }}
+                onClick={() => { setSearchQuery(''); setCategoryFilter('All'); setStageFilter(0); setPage(0); }}
                 className="text-xs text-primary-400 hover:text-primary-300 font-medium transition-colors"
               >
                 Clear filters

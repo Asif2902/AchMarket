@@ -47,16 +47,6 @@ export default {
         accent: {
           DEFAULT: 'hsl(var(--accent) / <alpha-value>)',
           foreground: 'hsl(var(--accent-foreground) / <alpha-value>)',
-        },
-        destructive: {
-          DEFAULT: 'hsl(var(--destructive) / <alpha-value>)',
-          foreground: 'hsl(var(--destructive-foreground) / <alpha-value>)',
-        },
-        ring: 'hsl(var(--ring) / <alpha-value>)',
-        success: 'hsl(142 76% 36% / <alpha-value>)',
-        warning: 'hsl(38 92% 50% / <alpha-value>)',
-        verified: 'hsl(210 95% 48% / <alpha-value>)',
-        accent: {
           cyan: '#22d3ee',
           teal: '#2dd4bf',
           emerald: '#34d399',

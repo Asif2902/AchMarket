@@ -387,17 +387,30 @@ export function ResolveModal({ market, onClose, onResolved }: ResolveModalProps)
           <div className="p-3 rounded-xl bg-primary-500/5 border border-primary-500/15 mb-4">
             <p className="text-xs font-medium text-primary-400 mb-2">Preview ({proofUri.split('||').length} items):</p>
             <div className="space-y-1">
-              {proofUri.split('||').map((link, i) => (
-                <a 
-                  key={i} 
-                  href={link.trim()} 
-                  target="_blank" 
-                  rel="noopener noreferrer" 
-                  className="text-xs text-primary-300 hover:text-primary-200 underline break-all block"
-                >
-                  {i + 1}. {link.trim()}
-                </a>
-              ))}
+              {proofUri.split('||').map((link, i) => {
+                const trimmed = link.trim();
+                const colonIndex = trimmed.indexOf(':');
+                let displayText = trimmed;
+                let href = trimmed;
+                if (colonIndex > 0) {
+                  const prefix = trimmed.slice(0, colonIndex).toLowerCase();
+                  if (prefix === 'image' || prefix === 'link') {
+                    displayText = trimmed.slice(colonIndex + 1).trim();
+                    href = displayText;
+                  }
+                }
+                return (
+                  <a 
+                    key={i} 
+                    href={href} 
+                    target="_blank" 
+                    rel="noopener noreferrer" 
+                    className="text-xs text-primary-300 hover:text-primary-200 underline break-all block"
+                  >
+                    {i + 1}. {displayText}
+                  </a>
+                );
+              })}
             </div>
           </div>
         )}

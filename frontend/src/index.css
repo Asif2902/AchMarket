@@ -124,15 +124,18 @@
      ═══════════════════════════════════════ */
   .card {
     @apply backdrop-blur-sm border rounded-xl shadow-card;
+
     background: hsl(var(--card) / 1);
     border-color: hsl(var(--card-border) / 1);
     background-image: linear-gradient(135deg, rgba(255, 255, 255, 0.03) 0%, rgba(255, 255, 255, 0) 100%);
   }
   .card-hover {
     @apply card transition-all duration-300 cursor-pointer;
+
   }
   .card-hover:hover {
     @apply shadow-card-hover;
+
     border-color: hsl(var(--primary) / 0.2);
     transform: translateY(-4px);
     background-image: linear-gradient(135deg, hsl(var(--primary) / 0.04) 0%, rgba(255, 255, 255, 0.01) 100%);
@@ -150,7 +153,7 @@
   .glass-subtle {
     background: hsl(var(--muted) / 0.3);
     backdrop-filter: blur(12px);
-    border: hsl(var(--border) / 0.06);
+    border: 1px solid hsl(var(--border) / 0.06);
   }
 
   /* ═══════════════════════════════════════
@@ -162,7 +165,7 @@
            active:scale-[0.98] shadow-glow-sm;
     background: hsl(var(--primary) / 1);
     color: hsl(var(--primary-foreground) / 1);
-    border: hsl(var(--primary) / 0.2);
+    border: 1px solid hsl(var(--primary) / 0.2);
   }
   .btn-primary:hover:not(:disabled) {
     @apply shadow-glow;
@@ -359,16 +362,16 @@
     @apply inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium
            transition-all duration-200 cursor-pointer select-none;
     background: hsl(var(--muted) / 0.6);
-    border: hsl(var(--border) / 0.08);
+    border: 1px solid hsl(var(--border) / 0.08);
     color: hsl(var(--muted-foreground) / 1);
   }
   .chip:hover {
-    border: hsl(var(--border) / 0.15);
+    border: 1px solid hsl(var(--border) / 0.15);
     @apply text-white;
   }
   .chip-active {
     background: hsl(var(--primary) / 0.2);
-    border: hsl(var(--primary) / 0.3);
+    border: 1px solid hsl(var(--primary) / 0.3);
     color: hsl(var(--primary) / 1);
   }
 
@@ -416,7 +419,7 @@
   }
   .mobile-drawer {
     @apply fixed top-0 right-0 bottom-0 z-50 w-72 shadow-elevated overflow-y-auto;
-    border-left: hsl(var(--border) / 0.08);
+    border-left: 1px solid hsl(var(--border) / 0.08);
     background: linear-gradient(145deg, hsl(var(--card)) 0%, hsl(var(--background)) 100%);
     animation: slideInRight 0.3s ease-out;
   }

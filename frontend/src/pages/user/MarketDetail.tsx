@@ -592,6 +592,7 @@ export default function MarketDetail() {
                               src={resolveImageUri(mainLinkStr)}
                               className="w-full h-64 rounded-lg border border-white/[0.06] bg-dark-900"
                               title="Main proof"
+                              sandbox="allow-same-origin allow-forms"
                             />
                           ) : (
                             <a
@@ -638,11 +639,10 @@ export default function MarketDetail() {
                                     </a>
                                     {hoveredImage === i && (
                                       <div className="absolute z-10 bottom-full left-0 mb-2">
-                                        <img
+                                        <ImageWithFallback
                                           src={resolveImageUri(link.url)}
                                           alt={`Proof ${i + 1}`}
                                           className="w-48 h-auto rounded-lg border border-white/[0.12] shadow-xl bg-dark-800"
-                                          onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
                                         />
                                       </div>
                                     )}

@@ -142,18 +142,35 @@ export function truncateAddress(address: string): string {
 }
 
 /**
- * Convert IPFS URI to a gateway URL.
+ * Convert IPFS URI to a gateway URL with scheme validation.
  */
 export function resolveImageUri(uri: string): string {
   if (!uri) return '';
+  
+  // Handle IPFS URIs
   if (uri.startsWith('ipfs://')) {
     const hash = uri.replace('ipfs://', '');
     return `https://gateway.pinata.cloud/ipfs/${hash}`;
   }
+  
+  // Handle raw IPFS hashes
   if (uri.startsWith('Qm') || uri.startsWith('bafy')) {
     return `https://gateway.pinata.cloud/ipfs/${uri}`;
   }
-  return uri;
+  
+  // Validate URL schemes for security
+  try {
+    const url = new URL(uri);
+    const allowedSchemes = ['https:', 'http:'];
+    if (!allowedSchemes.includes(url.protocol)) {
+      console.warn('Blocked unsafe URL scheme:', url.protocol);
+      return '';
+    }
+    return uri;
+  } catch {
+    // If it's not a valid URL, return as-is (could be a path or other string)
+    return uri;
+  }
 }
 
 /**
@@ -263,10 +280,18 @@ export function parseProofLinks(proofUri: string): {
     if (colonIndex > 0) {
       const type = part.slice(0, colonIndex).toLowerCase();
       const url = part.slice(colonIndex + 1).trim();
-      if ((type === 'image' || type === 'link') && url) {
+      if (type === 'image' || type === 'link') {
+        if (url) {
+          extraLinks.push({
+            url,
+            type: type as 'image' | 'link',
+          });
+        }
+      } else {
+        // Not a known type prefix, treat the original part (including colon) as a link URL
         extraLinks.push({
-          url,
-          type: type as 'image' | 'link',
+          url: part,
+          type: 'link',
         });
       }
     } else {

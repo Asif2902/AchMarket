@@ -28,6 +28,7 @@ function AppRoutes() {
           <Route path="resolved" element={<ResolvedMarkets />} />
           <Route path="cancelled" element={<CancelledMarkets />} />
           <Route path="fees" element={<FeeManagement />} />
+          <Route path="analytics" element={<Analytics />} />
         </Route>
         {/* Owner can also view market details */}
         <Route path="/market/:slug" element={<MarketDetail />} />

@@ -36,13 +36,24 @@ export default function FeeManagement() {
         let resolvedVol = 0n;
         const events: FeeEvent[] = [];
 
-        for (const s of summaries) {
-          if (Number(s.stage) !== STAGE.Resolved) continue;
+        const resolvedSummaries = summaries.filter((s: { stage: bigint }) => Number(s.stage) === STAGE.Resolved);
+        
+        const results = await Promise.allSettled(
+          resolvedSummaries.map(async (s: { market: string; title: string }) => {
+            const marketContract = new ethers.Contract(s.market, MARKET_ABI, readProvider);
+            const resolvedPoolWei = await marketContract.resolvedPoolWei();
+            return { s, resolvedPoolWei };
+          })
+        );
+
+        for (const result of results) {
+          if (result.status !== 'fulfilled') {
+            console.warn('Failed to fetch market data:', result.reason);
+            continue;
+          }
+          const { s, resolvedPoolWei } = result.value;
           resolvedCount++;
 
-          const marketContract = new ethers.Contract(s.market, MARKET_ABI, readProvider);
-          const resolvedPoolWei = await marketContract.resolvedPoolWei();
-          
           if (resolvedPoolWei > 0n) {
             const fee = (resolvedPoolWei * 25n) / 9975n;
             feesSum += fee;
@@ -108,7 +119,7 @@ export default function FeeManagement() {
       <div className="card p-5 sm:p-6">
         <h2 className="text-base font-semibold text-white mb-4 flex items-center gap-2">
           <svg className="w-4 h-4 text-dark-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" /></svg>
-          Fee Collection History
+          Resolved Market Fees
         </h2>
         {feeEvents.length === 0 ? (
           <div className="text-center py-8">

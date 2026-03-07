@@ -1,9 +1,8 @@
 import { useState, useEffect, useCallback } from 'react';
 import { ethers } from 'ethers';
 import { useWallet } from '../../context/WalletContext';
-import { FACTORY_ADDRESS, LENS_ADDRESS, STAGE } from '../../config/network';
-import { FACTORY_ABI, LENS_ABI } from '../../config/abis';
-import { SkeletonCard } from '../../components/LoadingSpinner';
+import { LENS_ADDRESS } from '../../config/network';
+import { LENS_ABI } from '../../config/abis';
 import EmptyState from '../../components/EmptyState';
 import UsdcIcon from '../../components/UsdcIcon';
 import { formatUSDC, formatCompact, formatCompactUSDC } from '../../utils/format';
