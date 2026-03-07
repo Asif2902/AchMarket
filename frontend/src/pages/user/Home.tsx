@@ -178,7 +178,7 @@ export default function Home() {
         ) : paginated.length === 0 ? (
           <EmptyState
             title="No markets found"
-            description={searchQuery || categoryFilter !== 'All'
+            description={searchQuery || categoryFilter !== 'All' || stageFilter !== 0
               ? "Try adjusting your filters or search query."
               : "No prediction markets have been created yet. Check back soon!"}
           />

@@ -106,6 +106,13 @@ export default function MarketDetail() {
   useEffect(() => {
     if (marketId !== prevMarketIdRef.current) {
       prevMarketIdRef.current = marketId;
+      if (marketId === null) {
+        setLoading(false);
+        setError('Invalid market link');
+        setDetail(null);
+        setMarketAddress(null);
+        return;
+      }
       hasLoadedOnce.current = false;
       setLoading(true);
       setDetail(null);
@@ -114,6 +121,11 @@ export default function MarketDetail() {
       setError(null);
       setProbHistory([]);
       setAccurateVolume(null);
+      setSelectedOutcome(0);
+      setShareAmount('');
+      setEstimatedShares(null);
+      setPreviewCost(null);
+      setPreviewKey('');
     }
   }, [marketId]);
 
@@ -313,14 +325,16 @@ export default function MarketDetail() {
   useEffect(() => {
     if (!marketAddress || !detail) return;
 
+    let cancelled = false;
     let pollInFlight = false;
     let timeoutId: ReturnType<typeof setTimeout>;
 
     const poll = async () => {
-      if (pollInFlight) return;
+      if (pollInFlight || cancelled) return;
       pollInFlight = true;
       try {
         const events = await fetchTradeEvents(marketAddress);
+        if (cancelled) return;
         const newVolume = computeVolumeFromEvents(events);
         setAccurateVolume(newVolume);
 
@@ -360,18 +374,21 @@ export default function MarketDetail() {
           history.push(nowPoint);
         }
 
-        setProbHistory(history);
+        if (!cancelled) setProbHistory(history);
       } catch (err) {
         console.error('Background poll failed:', err);
       } finally {
         pollInFlight = false;
       }
-      timeoutId = setTimeout(poll, 15000);
+      if (!cancelled) timeoutId = setTimeout(poll, 15000);
     };
 
     timeoutId = setTimeout(poll, 15000);
 
-    return () => clearTimeout(timeoutId);
+    return () => {
+      cancelled = true;
+      clearTimeout(timeoutId);
+    };
   }, [marketAddress, detail?.market, detail?.outcomeLabels, detail?.totalSharesWad, detail?.bWad, detail?.createdAt]);
 
   useEffect(() => { fetchAll(); }, [fetchAll]);
