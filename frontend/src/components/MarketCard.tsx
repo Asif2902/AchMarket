@@ -31,10 +31,11 @@ export default function MarketCard({ data }: Props) {
   const isResolved = data.stage === STAGE.Resolved;
   const isCancelled = data.stage === STAGE.Cancelled || data.stage === STAGE.Expired;
 
-  const leadingIdx = data.impliedProbabilitiesWad.length > 0
+  const hasOutcomes = data.impliedProbabilitiesWad.length > 0;
+  const leadingIdx = hasOutcomes
     ? data.impliedProbabilitiesWad.reduce((best, p, i) => p > data.impliedProbabilitiesWad[best] ? i : best, 0)
     : 0;
-  const leadingPct = probToPercent(data.impliedProbabilitiesWad[leadingIdx]);
+  const leadingPct = hasOutcomes ? probToPercent(data.impliedProbabilitiesWad[leadingIdx]) : 0;
   const leadingColor = getOutcomeColor(leadingIdx);
 
   return (

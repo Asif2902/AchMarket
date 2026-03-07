@@ -21,8 +21,15 @@ export default function Header() {
         setMobileMenuOpen(false);
       }
     }
+    function handleKeyDown(e: KeyboardEvent) {
+      if (e.key === 'Escape') setMobileMenuOpen(false);
+    }
     document.addEventListener('mousedown', handleClick);
-    return () => document.removeEventListener('mousedown', handleClick);
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', handleClick);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
   }, [mobileMenuOpen]);
 
   useEffect(() => {
@@ -110,6 +117,8 @@ export default function Header() {
           <div
             ref={menuRef}
             className="mobile-drawer"
+            role="dialog"
+            aria-modal="true"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-center justify-between p-4 border-b border-white/[0.08]">
@@ -128,6 +137,7 @@ export default function Header() {
               </div>
               <button
                 onClick={() => setMobileMenuOpen(false)}
+                aria-label="Close menu"
                 className="w-8 h-8 rounded-lg bg-dark-800/60 flex items-center justify-center text-dark-400 hover:text-white transition-colors"
               >
                 <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>

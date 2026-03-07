@@ -88,19 +88,39 @@ export default function MarketDetail() {
   const [refreshTrigger, setRefreshTrigger] = useState(0);
   const [userBalance, setUserBalance] = useState<bigint | null>(null);
   const hasLoadedOnce = useRef(false);
+  const requestSeqRef = useRef(0);
+  const prevMarketIdRef = useRef<number | null>(null);
 
   useEffect(() => {
     if (txMessage) {
       if (txMessageTimer.current) clearTimeout(txMessageTimer.current);
-      txMessageTimer.current = setTimeout(() => setTxMessage(null), 5000);
+      if (txMessage.type !== 'error') {
+        txMessageTimer.current = setTimeout(() => setTxMessage(null), 5000);
+      }
     }
     return () => {
       if (txMessageTimer.current) clearTimeout(txMessageTimer.current);
     };
   }, [txMessage]);
 
+  useEffect(() => {
+    if (marketId !== prevMarketIdRef.current) {
+      prevMarketIdRef.current = marketId;
+      hasLoadedOnce.current = false;
+      setLoading(true);
+      setDetail(null);
+      setUserInfo(null);
+      setMarketAddress(null);
+      setError(null);
+      setProbHistory([]);
+      setAccurateVolume(null);
+    }
+  }, [marketId]);
+
   const fetchAll = useCallback(async () => {
     if (marketId === null) return;
+
+    const seq = ++requestSeqRef.current;
 
     const attemptFetch = async (): Promise<void> => {
       const factory = new ethers.Contract(FACTORY_ADDRESS, FACTORY_ABI, readProvider);
@@ -109,9 +129,11 @@ export default function MarketDetail() {
       if (!addr || addr === ethers.ZeroAddress) {
         throw new Error('Market not found');
       }
+      if (seq !== requestSeqRef.current) return;
       setMarketAddress(addr);
 
       const d = await lens.getMarketDetail(addr);
+      if (seq !== requestSeqRef.current) return;
 
       const parsed: MarketDetailData = {
         market: d.market, title: d.title, description: d.description,
@@ -134,6 +156,7 @@ export default function MarketDetail() {
           ? new ethers.Contract(addr, MARKET_ABI, readProvider).getUserInfo(userAddress).catch(() => null)
           : Promise.resolve(null),
       ]);
+      if (seq !== requestSeqRef.current) return;
 
       setPoolBalance(bal);
 
@@ -143,6 +166,8 @@ export default function MarketDetail() {
           redeemed: uInfo._redeemed, refunded: uInfo._refunded,
           canRedeem: uInfo._canRedeem, canRefund: uInfo._canRefund,
         });
+      } else {
+        setUserInfo(null);
       }
     };
 
@@ -150,12 +175,15 @@ export default function MarketDetail() {
 
     const maxAttempts = 4;
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      if (seq !== requestSeqRef.current) return;
       try {
         await attemptFetch();
+        if (seq !== requestSeqRef.current) return;
         hasLoadedOnce.current = true;
         setLoading(false);
         return;
       } catch (err) {
+        if (seq !== requestSeqRef.current) return;
         console.error(`Market fetch attempt ${attempt}/${maxAttempts} failed:`, err);
         const isNotFound = err instanceof Error && err.message === 'Market not found';
         if (isNotFound || attempt === maxAttempts) {
@@ -206,6 +234,8 @@ export default function MarketDetail() {
           redeemed: uInfo._redeemed, refunded: uInfo._refunded,
           canRedeem: uInfo._canRedeem, canRefund: uInfo._canRefund,
         });
+      } else {
+        setUserInfo(null);
       }
     } catch (err) {
       console.error('Failed to refresh market data:', err);
@@ -280,17 +310,20 @@ export default function MarketDetail() {
     }
   }, []);
 
-  // Background polling - refresh BlockScout data every 15 seconds
   useEffect(() => {
     if (!marketAddress || !detail) return;
-    
-    const pollInterval = setInterval(async () => {
+
+    let pollInFlight = false;
+    let timeoutId: ReturnType<typeof setTimeout>;
+
+    const poll = async () => {
+      if (pollInFlight) return;
+      pollInFlight = true;
       try {
         const events = await fetchTradeEvents(marketAddress);
         const newVolume = computeVolumeFromEvents(events);
         setAccurateVolume(newVolume);
-        
-        // Re-compute probability history from fresh events
+
         const outcomeCount = detail.outcomeLabels.length;
         const bWad = detail.bWad;
         const shares = new Array(outcomeCount).fill(0n);
@@ -330,10 +363,15 @@ export default function MarketDetail() {
         setProbHistory(history);
       } catch (err) {
         console.error('Background poll failed:', err);
+      } finally {
+        pollInFlight = false;
       }
-    }, 15000);
+      timeoutId = setTimeout(poll, 15000);
+    };
 
-    return () => clearInterval(pollInterval);
+    timeoutId = setTimeout(poll, 15000);
+
+    return () => clearTimeout(timeoutId);
   }, [marketAddress, detail?.market, detail?.outcomeLabels, detail?.totalSharesWad, detail?.bWad, detail?.createdAt]);
 
   useEffect(() => { fetchAll(); }, [fetchAll]);
@@ -700,7 +738,8 @@ export default function MarketDetail() {
                               className="rounded-lg border border-white/[0.06] max-h-64 w-auto object-contain bg-dark-800 hover:opacity-80 transition-opacity cursor-pointer"
                               onError={(e) => {
                                 (e.target as HTMLImageElement).style.display = 'none';
-                                const fallback = (e.target as HTMLImageElement).parentElement?.querySelector('.proof-image-fallback');
+                                const wrapper = (e.target as HTMLImageElement).parentElement?.parentElement;
+                                const fallback = wrapper?.querySelector('.proof-image-fallback');
                                 if (fallback) (fallback as HTMLElement).style.display = 'flex';
                               }}
                             />
@@ -1078,7 +1117,9 @@ export default function MarketDetail() {
                     {tradeTab === 'buy' && userBalance !== null && userBalance > 0n && (
                       <button
                         onClick={() => {
-                          const formatted = ethers.formatEther(userBalance);
+                          const gasBufferWei = ethers.parseEther('0.01');
+                          const maxSpendable = userBalance > gasBufferWei ? userBalance - gasBufferWei : 0n;
+                          const formatted = ethers.formatEther(maxSpendable);
                           const truncated = formatted.includes('.') ? formatted.slice(0, formatted.indexOf('.') + 3) : formatted;
                           setShareAmount(truncated);
                         }}

@@ -36,7 +36,9 @@ export default function Portfolio() {
   useEffect(() => {
     if (txMsg) {
       if (txMsgTimer.current) clearTimeout(txMsgTimer.current);
-      txMsgTimer.current = setTimeout(() => setTxMsg(null), 5000);
+      if (txMsg.type !== 'error') {
+        txMsgTimer.current = setTimeout(() => setTxMsg(null), 5000);
+      }
     }
     return () => {
       if (txMsgTimer.current) clearTimeout(txMsgTimer.current);

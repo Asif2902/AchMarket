@@ -1,3 +1,5 @@
+import { NETWORK } from '../config/network';
+
 const ACH_SWAP_URL = 'https://achswapfi.xyz';
 
 export default function Footer() {
@@ -39,7 +41,7 @@ export default function Footer() {
           <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-dark-900/40 border border-white/[0.06]">
             <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse-soft" />
             <span className="text-2xs text-dark-400 font-mono">ARC Testnet</span>
-            <span className="text-2xs text-dark-600 font-mono">5042002</span>
+            <span className="text-2xs text-dark-600 font-mono">{NETWORK.chainId}</span>
           </div>
         </div>
       </div>
