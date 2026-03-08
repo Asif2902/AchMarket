@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import { ethers } from 'ethers';
 import { useWallet } from '../../context/WalletContext';
@@ -7,7 +7,7 @@ import { FACTORY_ABI, LENS_ABI, MARKET_ABI } from '../../config/abis';
 import { PageLoader } from '../../components/LoadingSpinner';
 import EmptyState from '../../components/EmptyState';
 import UsdcIcon from '../../components/UsdcIcon';
-import { formatUSDC, formatWad, parseContractError, makeMarketSlug } from '../../utils/format';
+import { formatUSDC, formatCompactUSDC, formatWad, parseContractError, makeMarketSlug } from '../../utils/format';
 import { getOutcomeColor } from '../../components/ProbabilityBar';
 
 interface Position {
@@ -31,6 +31,19 @@ export default function Portfolio() {
   const [loading, setLoading] = useState(true);
   const [txPending, setTxPending] = useState<string | null>(null);
   const [txMsg, setTxMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const txMsgTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    if (txMsg) {
+      if (txMsgTimer.current) clearTimeout(txMsgTimer.current);
+      if (txMsg.type !== 'error') {
+        txMsgTimer.current = setTimeout(() => setTxMsg(null), 5000);
+      }
+    }
+    return () => {
+      if (txMsgTimer.current) clearTimeout(txMsgTimer.current);
+    };
+  }, [txMsg]);
 
   useEffect(() => {
     if (!address) return;
@@ -164,7 +177,7 @@ export default function Portfolio() {
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
           <div className="card p-3.5 col-span-2 sm:col-span-1">
             <span className="text-2xs text-dark-500 font-medium uppercase tracking-wider">Total Deposited</span>
-            <p className="text-base sm:text-lg font-bold text-white mt-0.5 tabular-nums flex items-center gap-1.5 truncate"><UsdcIcon size={16} />{formatUSDC(totalDeposited)} <span className="text-2xs text-dark-500">USDC</span></p>
+            <p className="text-base sm:text-lg font-bold text-white mt-0.5 tabular-nums flex items-center gap-1.5 truncate"><UsdcIcon size={16} />{formatCompactUSDC(totalDeposited)} <span className="text-2xs text-dark-500">USDC</span></p>
           </div>
           <div className="card p-3.5">
             <span className="text-2xs text-dark-500 font-medium uppercase tracking-wider">Active</span>

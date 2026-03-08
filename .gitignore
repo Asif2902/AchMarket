@@ -27,3 +27,6 @@ typechain-types/
 # Logs
 *.log
 npm-debug.log*
+
+# TypeScript
+*.tsbuildinfo

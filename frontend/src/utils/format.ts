@@ -15,6 +15,30 @@ export function formatUSDC(weiValue: bigint | string, decimals = 4): string {
 }
 
 /**
+ * Format a number to compact form (K, M, B, T)
+ */
+export function formatCompact(num: number): string {
+  if (num >= 1e12) return (num / 1e12).toFixed(1).replace(/\.0$/, '') + 'T';
+  if (num >= 1e9) return (num / 1e9).toFixed(1).replace(/\.0$/, '') + 'B';
+  if (num >= 1e6) return (num / 1e6).toFixed(2).replace(/\.?0+$/, '') + 'M';
+  if (num >= 1e4) return (num / 1e3).toFixed(1).replace(/\.0$/, '') + 'K';
+  if (num >= 1e3) return (num / 1e3).toFixed(2).replace(/\.?0+$/, '') + 'K';
+  if (num >= 1) return num.toLocaleString('en-US', { maximumFractionDigits: 2 });
+  if (num >= 0.01) return num.toFixed(2);
+  return num.toFixed(4);
+}
+
+/**
+ * Format a bigint wei value to compact USDC (K, M, B, T)
+ */
+export function formatCompactUSDC(weiValue: bigint | string): string {
+  const formatted = ethers.formatEther(weiValue);
+  const num = parseFloat(formatted);
+  if (num === 0) return '0';
+  return formatCompact(num);
+}
+
+/**
  * Format a WAD value (1e18 = 1.0) to a human-readable number.
  */
 export function formatWad(wadValue: bigint | string, decimals = 2): string {
@@ -121,18 +145,35 @@ export function truncateAddress(address: string): string {
 }
 
 /**
- * Convert IPFS URI to a gateway URL.
+ * Convert IPFS URI to a gateway URL with scheme validation.
  */
 export function resolveImageUri(uri: string): string {
   if (!uri) return '';
+  
+  // Handle IPFS URIs
   if (uri.startsWith('ipfs://')) {
     const hash = uri.replace('ipfs://', '');
     return `https://gateway.pinata.cloud/ipfs/${hash}`;
   }
+  
+  // Handle raw IPFS hashes
   if (uri.startsWith('Qm') || uri.startsWith('bafy')) {
     return `https://gateway.pinata.cloud/ipfs/${uri}`;
   }
-  return uri;
+  
+  // Validate URL schemes for security
+  try {
+    const url = new URL(uri);
+    const allowedSchemes = ['https:', 'http:'];
+    if (!allowedSchemes.includes(url.protocol)) {
+      console.warn('Blocked unsafe URL scheme:', url.protocol);
+      return '';
+    }
+    return uri;
+  } catch {
+    // If it's not a valid URL, return as-is (could be a path or other string)
+    return uri;
+  }
 }
 
 /**
@@ -201,4 +242,71 @@ export function parseContractError(error: unknown): string {
     }
   }
   return 'An unexpected error occurred';
+}
+
+export interface ProofLink {
+  url: string;
+  type: 'image' | 'link';
+  label?: string;
+}
+
+/**
+ * Parse proofUri string into structured proof links.
+ * Format: "image_url || main_link_url || extra_link_type:url || ..."
+ * - First link: always treated as image
+ * - Second link: always treated as main proof link
+ * - Third+ links: format "type:url" where type is "image" or "link"
+ *
+ * For single-part legacy proofs (no "||" separator), the value is stored
+ * in `raw` so callers can render a clickable fallback when the image fails.
+ */
+export function parseProofLinks(proofUri: string): {
+  image: string | null;
+  mainLink: string | null;
+  raw: string | null;
+  extraLinks: ProofLink[];
+} {
+  if (!proofUri) {
+    return { image: null, mainLink: null, raw: null, extraLinks: [] };
+  }
+
+  const parts = proofUri.split('||').map(p => p.trim()).filter(p => p.length > 0);
+  
+  if (parts.length === 0) {
+    return { image: null, mainLink: null, raw: null, extraLinks: [] };
+  }
+
+  const image = parts[0] || null;
+  const mainLink = parts[1] || null;
+  const raw = parts.length === 1 ? parts[0] : null;
+  
+  const extraLinks: ProofLink[] = [];
+  for (let i = 2; i < parts.length; i++) {
+    const part = parts[i];
+    const colonIndex = part.indexOf(':');
+    if (colonIndex > 0) {
+      const type = part.slice(0, colonIndex).toLowerCase();
+      const url = part.slice(colonIndex + 1).trim();
+      if (type === 'image' || type === 'link') {
+        if (url) {
+          extraLinks.push({
+            url,
+            type: type as 'image' | 'link',
+          });
+        }
+      } else {
+        extraLinks.push({
+          url: part,
+          type: 'link',
+        });
+      }
+    } else {
+      extraLinks.push({
+        url: part,
+        type: 'link',
+      });
+    }
+  }
+
+  return { image, mainLink, raw, extraLinks };
 }

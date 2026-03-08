@@ -2,7 +2,7 @@ import { STAGE } from '../../config/network';
 import { PageLoader } from '../../components/LoadingSpinner';
 import EmptyState from '../../components/EmptyState';
 import { useOwnerMarkets, OwnerMarketCard } from './OwnerMarketUtils';
-import { resolveImageUri } from '../../utils/format';
+import { resolveImageUri, parseProofLinks } from '../../utils/format';
 
 export default function ResolvedMarkets() {
   const { markets, loading } = useOwnerMarkets();
@@ -31,32 +31,62 @@ export default function ResolvedMarkets() {
         />
       ) : (
         <div className="space-y-4">
-          {resolved.map((m, i) => (
-            <div key={m.market} className="animate-fade-in" style={{ animationDelay: `${i * 60}ms` }}>
-              <OwnerMarketCard
-                market={m}
-                actions={
-                  <div className="flex items-center gap-3">
-                    <span className="text-xs text-dark-400 flex items-center gap-1.5">
-                      <svg className="w-3.5 h-3.5 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
-                      Winner: <span className="text-emerald-400 font-medium">{m.outcomeLabels[m.winningOutcome]}</span>
-                    </span>
-                    {m.proofUri && (
-                      <a
-                        href={resolveImageUri(m.proofUri)}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="flex items-center gap-1.5 text-xs text-primary-400 hover:text-primary-300 font-medium transition-colors"
-                      >
-                        <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg>
-                        View Proof
-                      </a>
-                    )}
-                  </div>
-                }
-              />
-            </div>
-          ))}
+          {resolved.map((m, i) => {
+            const proof = parseProofLinks(m.proofUri);
+            return (
+              <div key={m.market} className="animate-fade-in" style={{ animationDelay: `${i * 60}ms` }}>
+                <OwnerMarketCard
+                  market={m}
+                  actions={
+                    <div className="flex flex-wrap items-center gap-3">
+                      <span className="text-xs text-dark-400 flex items-center gap-1.5">
+                        <svg className="w-3.5 h-3.5 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
+                        Winner: <span className="text-emerald-400 font-medium">{m.outcomeLabels[m.winningOutcome]}</span>
+                      </span>
+                      {proof.image && (
+                        <a
+                          href={resolveImageUri(proof.image)}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="flex items-center gap-1.5 text-xs text-primary-400 hover:text-primary-300 font-medium transition-colors"
+                        >
+                          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
+                          Proof Image
+                        </a>
+                      )}
+                      {proof.mainLink && (
+                        <a
+                          href={resolveImageUri(proof.mainLink)}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="flex items-center gap-1.5 text-xs text-primary-400 hover:text-primary-300 font-medium transition-colors"
+                        >
+                          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg>
+                          Main Link
+                        </a>
+                      )}
+                      {proof.extraLinks.map((link, idx) => (
+                        <a
+                          key={idx}
+                          href={resolveImageUri(link.url)}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="flex items-center gap-1.5 text-xs text-primary-400 hover:text-primary-300 font-medium transition-colors"
+                        >
+                          {link.type === 'image' ? (
+                            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
+                          ) : (
+                            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" /></svg>
+                          )}
+                          {link.type === 'image' ? `Img ${idx + 1}` : `Link ${idx + 1}`}
+                        </a>
+                      ))}
+                    </div>
+                  }
+                />
+              </div>
+            );
+          })}
         </div>
       )}
     </div>

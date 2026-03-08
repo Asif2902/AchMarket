@@ -2,9 +2,11 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { WalletProvider, useWallet } from './context/WalletContext';
 import Header from './components/Header';
 import Footer from './components/Footer';
+import ToastContainer from './components/Toast';
 import Home from './pages/user/Home';
 import MarketDetail from './pages/user/MarketDetail';
 import Portfolio from './pages/user/Portfolio';
+import Analytics from './pages/user/Analytics';
 import OwnerLayout from './pages/owner/OwnerLayout';
 import CreateMarket from './pages/owner/CreateMarket';
 import ActiveMarkets from './pages/owner/ActiveMarkets';
@@ -27,6 +29,7 @@ function AppRoutes() {
           <Route path="resolved" element={<ResolvedMarkets />} />
           <Route path="cancelled" element={<CancelledMarkets />} />
           <Route path="fees" element={<FeeManagement />} />
+          <Route path="analytics" element={<Analytics />} />
         </Route>
         {/* Owner can also view market details */}
         <Route path="/market/:slug" element={<MarketDetail />} />
@@ -41,6 +44,7 @@ function AppRoutes() {
   return (
     <Routes>
       <Route path="/" element={<Home />} />
+      <Route path="/analytics" element={<Analytics />} />
       <Route path="/market/:slug" element={<MarketDetail />} />
       <Route path="/portfolio" element={<Portfolio />} />
       <Route path="*" element={<Navigate to="/" replace />} />
@@ -58,6 +62,7 @@ export default function App() {
             <AppRoutes />
           </main>
           <Footer />
+          <ToastContainer />
         </div>
       </WalletProvider>
     </BrowserRouter>
