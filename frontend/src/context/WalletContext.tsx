@@ -26,6 +26,9 @@ interface WalletState {
 const readProvider = new ethers.JsonRpcProvider(NETWORK.rpcUrl, {
   chainId: NETWORK.chainId,
   name: NETWORK.name,
+}, {
+  staticNetwork: true,
+  batchMaxCount: 1,
 });
 
 const WalletContext = createContext<WalletState>({

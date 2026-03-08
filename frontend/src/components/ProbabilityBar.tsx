@@ -23,9 +23,8 @@ interface Props {
 
 export default function ProbabilityBar({ labels, probabilities, winningOutcome, isResolved, compact }: Props) {
   if (compact) {
-    /* Compact: just show labels with percentages inline */
     return (
-      <div className="space-y-1.5">
+      <div className="space-y-2">
         {labels.map((label, i) => {
           const pct = probToPercent(probabilities[i]);
           const color = getOutcomeColor(i);
@@ -44,7 +43,13 @@ export default function ProbabilityBar({ labels, probabilities, winningOutcome, 
                   {label}
                 </span>
               </div>
-              <span className={`text-xs font-bold tabular-nums ${color.text}`}>{pct.toFixed(1)}%</span>
+              <div className="w-16 h-1 rounded-full bg-dark-800/60 overflow-hidden shrink-0">
+                <div
+                  className={`h-full rounded-full bg-gradient-to-r ${color.gradient} transition-all duration-700 ease-out`}
+                  style={{ width: `${Math.max(pct, 2)}%` }}
+                />
+              </div>
+              <span className={`text-xs font-bold tabular-nums ${color.text} w-12 text-right`}>{pct.toFixed(1)}%</span>
             </div>
           );
         })}
@@ -52,7 +57,6 @@ export default function ProbabilityBar({ labels, probabilities, winningOutcome, 
     );
   }
 
-  /* Full: labels + bar */
   return (
     <div className="space-y-3">
       {labels.map((label, i) => {

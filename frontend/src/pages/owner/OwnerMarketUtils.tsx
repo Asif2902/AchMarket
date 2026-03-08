@@ -8,7 +8,7 @@ import ProbabilityBar from '../../components/ProbabilityBar';
 import Countdown from '../../components/Countdown';
 import { PageLoader } from '../../components/LoadingSpinner';
 import EmptyState from '../../components/EmptyState';
-import { formatUSDC, formatDate, formatTimeAgo, parseContractError, resolveImageUri } from '../../utils/format';
+import { formatCompactUSDC, formatDate, formatTimeAgo, parseContractError, resolveImageUri } from '../../utils/format';
 import { fetchAllMarketVolumes } from '../../services/blockscout';
 
 export interface OwnerMarketData {
@@ -108,13 +108,23 @@ interface OwnerCardProps {
 
 export function OwnerMarketCard({ market, actions, urgentBadge }: OwnerCardProps) {
   const isActive = market.stage === STAGE.Active;
+  const isResolved = market.stage === STAGE.Resolved;
+  const isCancelled = market.stage === STAGE.Cancelled || market.stage === STAGE.Expired;
 
   return (
-    <div className="card overflow-hidden animate-fade-in">
+    <div className={`card overflow-hidden animate-fade-in transition-all duration-300 ${
+      isResolved ? 'ring-2 ring-emerald-500/30' : isCancelled ? 'ring-2 ring-red-500/20' : ''
+    }`}>
       <div className="flex flex-col sm:flex-row">
         {/* Image */}
         <div className="relative w-full sm:w-48 h-36 sm:h-auto flex-shrink-0 overflow-hidden">
-          <ImageWithFallback src={market.imageUri} alt={market.title} className="w-full h-full" />
+          <ImageWithFallback 
+            src={market.imageUri} 
+            alt={market.title} 
+            className={`w-full h-full transition-all duration-300 ${
+              isCancelled ? 'grayscale-[0.5] opacity-70' : ''
+            }`} 
+          />
           <div className="absolute inset-0 bg-gradient-to-r from-transparent to-dark-800/20 hidden sm:block" />
           <div className="absolute inset-0 bg-gradient-to-t from-dark-900/60 to-transparent sm:hidden" />
           {/* Mobile badges overlay */}
@@ -141,7 +151,10 @@ export function OwnerMarketCard({ market, actions, urgentBadge }: OwnerCardProps
             )}
           </div>
 
-          <h3 className="font-semibold text-white leading-tight text-sm sm:text-base">{market.title}</h3>
+          <h3 className={`font-semibold leading-tight text-sm sm:text-base ${
+            isResolved ? 'text-emerald-400' : isCancelled ? 'text-red-400/80' : 'text-white'
+          }`}>{market.title}</h3>
+          
           <p className="text-xs sm:text-sm text-dark-400 line-clamp-2 mt-1.5 mb-3">{market.description}</p>
 
           <ProbabilityBar
@@ -156,7 +169,7 @@ export function OwnerMarketCard({ market, actions, urgentBadge }: OwnerCardProps
           <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 mt-3 text-xs text-dark-400">
             <span className="flex items-center gap-1">
               <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-              {formatUSDC(market.totalVolumeWei)} USDC
+              {formatCompactUSDC(market.totalVolumeWei)} USDC
             </span>
             <span className="flex items-center gap-1">
               <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
@@ -194,22 +207,49 @@ interface ResolveModalProps {
   onResolved: () => void;
 }
 
+interface ExtraLink {
+  type: 'image' | 'link';
+  url: string;
+}
+
 export function ResolveModal({ market, onClose, onResolved }: ResolveModalProps) {
   const { signer } = useWallet();
   const [selectedOutcome, setSelectedOutcome] = useState<number | null>(null);
-  const [proofUri, setProofUri] = useState('');
+  const [imageProof, setImageProof] = useState('');
+  const [mainLink, setMainLink] = useState('');
+  const [extraLinks, setExtraLinks] = useState<ExtraLink[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const canSubmit = selectedOutcome !== null && proofUri.trim().length > 0 && !submitting;
+  const proofUri = [
+    imageProof.trim(),
+    mainLink.trim(),
+    ...extraLinks.filter(l => l.url.trim()).map(l => `${l.type}:${l.url.trim()}`)
+  ].filter(Boolean).join(' || ');
+
+  const canSubmit = selectedOutcome !== null && imageProof.trim().length > 0 && !submitting;
+
+  const addExtraLink = () => {
+    setExtraLinks([...extraLinks, { type: 'link', url: '' }]);
+  };
+
+  const removeExtraLink = (index: number) => {
+    setExtraLinks(extraLinks.filter((_, i) => i !== index));
+  };
+
+  const updateExtraLink = (index: number, field: 'type' | 'url', value: string) => {
+    const updated = [...extraLinks];
+    updated[index] = { ...updated[index], [field]: value };
+    setExtraLinks(updated);
+  };
 
   const handleSubmit = async () => {
-    if (!signer || selectedOutcome === null || !proofUri.trim()) return;
+    if (!signer || selectedOutcome === null || !proofUri) return;
     setSubmitting(true);
     setError(null);
     try {
       const marketContract = new ethers.Contract(market.market, MARKET_ABI, signer);
-      const tx = await marketContract.resolve(selectedOutcome, proofUri.trim());
+      const tx = await marketContract.resolve(selectedOutcome, proofUri);
       await tx.wait();
       onResolved();
     } catch (err) {
@@ -274,24 +314,104 @@ export function ResolveModal({ market, onClose, onResolved }: ResolveModalProps)
         </div>
 
         {/* Proof URI */}
-        <label className="label">Resolution Proof URL *</label>
-        <input
-          type="text"
-          value={proofUri}
-          onChange={e => setProofUri(e.target.value)}
-          placeholder="https://... (news article, tweet, IPFS link)"
-          className="input-field mb-2"
-        />
-        <p className="text-xs text-dark-500 mb-4">
-          This proof link will be displayed publicly to all users.
-        </p>
+        <label className="label">Resolution Proof *</label>
+        <div className="space-y-3 mb-4">
+          {/* Image Proof - Required */}
+          <div>
+            <span className="text-xs text-dark-400 mb-1.5 block">Image Proof <span className="text-red-400">*</span></span>
+            <input
+              type="text"
+              value={imageProof}
+              onChange={e => setImageProof(e.target.value)}
+              placeholder="https://... (screenshot, image URL)"
+              className="input-field"
+            />
+          </div>
 
-        {proofUri.trim() && (
-          <div className="p-3 rounded-xl bg-primary-500/5 border border-primary-500/15 mb-6 flex items-start gap-2">
-            <svg className="w-4 h-4 text-primary-400 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" /></svg>
-            <a href={proofUri} target="_blank" rel="noopener noreferrer" className="text-sm text-primary-400 hover:text-primary-300 underline break-all">
-              {proofUri}
-            </a>
+          {/* Main Link - Optional */}
+          <div>
+            <span className="text-xs text-dark-400 mb-1.5 block">Main Proof Link (optional)</span>
+            <input
+              type="text"
+              value={mainLink}
+              onChange={e => setMainLink(e.target.value)}
+              placeholder="https://... (tweet, news article, website)"
+              className="input-field"
+            />
+          </div>
+
+          {/* Extra Links */}
+          {extraLinks.map((link, index) => (
+            <div key={index} className="flex items-center gap-2">
+              <select
+                value={link.type}
+                onChange={e => updateExtraLink(index, 'type', e.target.value)}
+                className="select-field w-24 flex-shrink-0"
+              >
+                <option value="link">Link</option>
+                <option value="image">Image</option>
+              </select>
+              <input
+                type="text"
+                value={link.url}
+                onChange={e => updateExtraLink(index, 'url', e.target.value)}
+                placeholder="https://..."
+                className="input-field flex-1"
+              />
+              <button
+                type="button"
+                onClick={() => removeExtraLink(index)}
+                className="w-8 h-8 rounded-lg bg-red-500/10 border border-red-500/20 flex items-center justify-center text-red-400 hover:bg-red-500/20 transition-colors flex-shrink-0"
+              >
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+          ))}
+
+          <button
+            type="button"
+            onClick={addExtraLink}
+            className="text-xs text-primary-400 hover:text-primary-300 font-medium flex items-center gap-1"
+          >
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
+            </svg>
+            Add Extra Link
+          </button>
+        </div>
+
+        {/* Preview */}
+        {proofUri && (
+          <div className="p-3 rounded-xl bg-primary-500/5 border border-primary-500/15 mb-4">
+            <p className="text-xs font-medium text-primary-400 mb-2">Preview ({proofUri.split('||').length} items):</p>
+            <div className="space-y-1">
+              {proofUri.split('||').map((link, i) => {
+                const trimmed = link.trim();
+                const colonIndex = trimmed.indexOf(':');
+                let displayText = trimmed;
+                let href = trimmed;
+                if (colonIndex > 0) {
+                  const prefix = trimmed.slice(0, colonIndex).toLowerCase();
+                  if (prefix === 'image' || prefix === 'link') {
+                    displayText = trimmed.slice(colonIndex + 1).trim();
+                    href = displayText;
+                  }
+                }
+                return (
+                  <a 
+                    key={i} 
+                    href={href} 
+                    target="_blank" 
+                    rel="noopener noreferrer" 
+                    className="text-xs text-primary-300 hover:text-primary-200 underline break-all block"
+                  >
+                    {i + 1}. {displayText}
+                  </a>
+                );
+              })}
+            </div>
           </div>
         )}
 

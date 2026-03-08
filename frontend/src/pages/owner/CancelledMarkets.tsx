@@ -2,7 +2,7 @@ import { STAGE } from '../../config/network';
 import { PageLoader } from '../../components/LoadingSpinner';
 import EmptyState from '../../components/EmptyState';
 import { useOwnerMarkets, OwnerMarketCard } from './OwnerMarketUtils';
-import { formatUSDC } from '../../utils/format';
+import { formatCompactUSDC } from '../../utils/format';
 import { resolveImageUri } from '../../utils/format';
 
 export default function CancelledMarkets() {
@@ -41,7 +41,7 @@ export default function CancelledMarkets() {
                     <div className="flex items-center gap-3 text-xs">
                       <span className="flex items-center gap-1.5 text-dark-400">
                         <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6" /></svg>
-                        Refundable: <span className="text-white font-medium tabular-nums">{formatUSDC(m.totalVolumeWei)} USDC</span>
+                        Refundable: <span className="text-white font-medium tabular-nums">{formatCompactUSDC(m.totalVolumeWei)} USDC</span>
                       </span>
                     </div>
                     {(m.cancelReason || m.cancelProofUri) && (

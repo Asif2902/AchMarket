@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { ethers } from 'ethers';
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
@@ -12,10 +12,12 @@ import { PageLoader } from '../../components/LoadingSpinner';
 import UsdcIcon from '../../components/UsdcIcon';
 import { fetchTradeEvents, computeVolumeFromEvents } from '../../services/blockscout';
 import {
-  formatUSDC, formatWad, formatProbability, probToPercent, formatDate,
+  formatUSDC, formatCompactUSDC, formatWad, formatProbability, probToPercent, formatDate,
   applyBuySlippage, applySellSlippage, parseContractError, resolveImageUri,
-  parseMarketSlug
+  parseMarketSlug, parseProofLinks
 } from '../../utils/format';
+import { showToast } from '../../components/Toast';
+import { NETWORK } from '../../config/network';
 
 interface MarketDetailData {
   market: string;
@@ -75,26 +77,75 @@ export default function MarketDetail() {
   const [estimatedShares, setEstimatedShares] = useState<number | null>(null);
   const [previewCost, setPreviewCost] = useState<bigint | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
+  const [previewKey, setPreviewKey] = useState('');
   const [txPending, setTxPending] = useState(false);
   const [txMessage, setTxMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const txMessageTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [poolBalance, setPoolBalance] = useState<bigint>(0n);
+  const [showMainFrame, setShowMainFrame] = useState(false);
+  const [hoveredImage, setHoveredImage] = useState<number | null>(null);
+  const [aboutExpanded, setAboutExpanded] = useState(true);
+  const [refreshTrigger, setRefreshTrigger] = useState(0);
+  const [userBalance, setUserBalance] = useState<bigint | null>(null);
+  const hasLoadedOnce = useRef(false);
+  const requestSeqRef = useRef(0);
+  const prevMarketIdRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (txMessage) {
+      if (txMessageTimer.current) clearTimeout(txMessageTimer.current);
+      if (txMessage.type !== 'error') {
+        txMessageTimer.current = setTimeout(() => setTxMessage(null), 5000);
+      }
+    }
+    return () => {
+      if (txMessageTimer.current) clearTimeout(txMessageTimer.current);
+    };
+  }, [txMessage]);
+
+  useEffect(() => {
+    if (marketId !== prevMarketIdRef.current) {
+      prevMarketIdRef.current = marketId;
+      if (marketId === null) {
+        setLoading(false);
+        setError('Invalid market link');
+        setDetail(null);
+        setMarketAddress(null);
+        return;
+      }
+      hasLoadedOnce.current = false;
+      setLoading(true);
+      setDetail(null);
+      setUserInfo(null);
+      setMarketAddress(null);
+      setError(null);
+      setProbHistory([]);
+      setAccurateVolume(null);
+      setSelectedOutcome(0);
+      setShareAmount('');
+      setEstimatedShares(null);
+      setPreviewCost(null);
+      setPreviewKey('');
+    }
+  }, [marketId]);
 
   const fetchAll = useCallback(async () => {
     if (marketId === null) return;
-    try {
-      setLoading(true);
+
+    const seq = ++requestSeqRef.current;
+
+    const attemptFetch = async (): Promise<void> => {
       const factory = new ethers.Contract(FACTORY_ADDRESS, FACTORY_ABI, readProvider);
       const lens = new ethers.Contract(LENS_ADDRESS, LENS_ABI, readProvider);
       const addr = await factory.markets(BigInt(marketId));
       if (!addr || addr === ethers.ZeroAddress) {
-        setError('Market not found');
-        setLoading(false);
-        return;
+        throw new Error('Market not found');
       }
+      if (seq !== requestSeqRef.current) return;
       setMarketAddress(addr);
 
-      // Core data — must succeed
       const d = await lens.getMarketDetail(addr);
+      if (seq !== requestSeqRef.current) return;
 
       const parsed: MarketDetailData = {
         market: d.market, title: d.title, description: d.description,
@@ -109,14 +160,15 @@ export default function MarketDetail() {
         cancelReason: d.cancelReason || '', cancelProofUri: d.cancelProofUri || '',
       };
       setDetail(parsed);
+      setError(null);
 
-      // Auxiliary data — non-critical, fetch in parallel and handle failures individually
       const [bal, uInfo] = await Promise.all([
         readProvider.getBalance(addr).catch(() => parsed.totalVolumeWei),
         userAddress
           ? new ethers.Contract(addr, MARKET_ABI, readProvider).getUserInfo(userAddress).catch(() => null)
           : Promise.resolve(null),
       ]);
+      if (seq !== requestSeqRef.current) return;
 
       setPoolBalance(bal);
 
@@ -126,12 +178,36 @@ export default function MarketDetail() {
           redeemed: uInfo._redeemed, refunded: uInfo._refunded,
           canRedeem: uInfo._canRedeem, canRefund: uInfo._canRefund,
         });
+      } else {
+        setUserInfo(null);
       }
-    } catch (err) {
-      console.error('Failed to fetch market:', err);
-      setError('Failed to load market details');
-    } finally {
-      setLoading(false);
+    };
+
+    if (!hasLoadedOnce.current) setLoading(true);
+
+    const maxAttempts = 4;
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      if (seq !== requestSeqRef.current) return;
+      try {
+        await attemptFetch();
+        if (seq !== requestSeqRef.current) return;
+        hasLoadedOnce.current = true;
+        setLoading(false);
+        return;
+      } catch (err) {
+        if (seq !== requestSeqRef.current) return;
+        console.error(`Market fetch attempt ${attempt}/${maxAttempts} failed:`, err);
+        const isNotFound = err instanceof Error && err.message === 'Market not found';
+        if (isNotFound || attempt === maxAttempts) {
+          setError(isNotFound ? 'Market not found' : 'Failed to load market details. The RPC may be slow — try again.');
+          hasLoadedOnce.current = true;
+          setLoading(false);
+          return;
+        }
+        const delay = Math.min(1000 * Math.pow(2, attempt - 1), 4000);
+        console.log(`Retrying in ${delay}ms...`);
+        await new Promise(r => setTimeout(r, delay));
+      }
     }
   }, [marketId, userAddress, readProvider]);
 
@@ -170,6 +246,8 @@ export default function MarketDetail() {
           redeemed: uInfo._redeemed, refunded: uInfo._refunded,
           canRedeem: uInfo._canRedeem, canRefund: uInfo._canRefund,
         });
+      } else {
+        setUserInfo(null);
       }
     } catch (err) {
       console.error('Failed to refresh market data:', err);
@@ -244,42 +322,131 @@ export default function MarketDetail() {
     }
   }, []);
 
+  useEffect(() => {
+    if (!marketAddress || !detail) return;
+
+    let cancelled = false;
+    let pollInFlight = false;
+    let timeoutId: ReturnType<typeof setTimeout>;
+
+    const poll = async () => {
+      if (pollInFlight || cancelled) return;
+      pollInFlight = true;
+      try {
+        const events = await fetchTradeEvents(marketAddress);
+        if (cancelled) return;
+        const newVolume = computeVolumeFromEvents(events);
+        setAccurateVolume(newVolume);
+
+        const outcomeCount = detail.outcomeLabels.length;
+        const bWad = detail.bWad;
+        const shares = new Array(outcomeCount).fill(0n);
+        const history: ProbHistoryPoint[] = [];
+
+        const uniformProb = 100 / outcomeCount;
+        const initialPoint: ProbHistoryPoint = { time: detail.createdAt };
+        detail.outcomeLabels.forEach((label) => {
+          initialPoint[label] = Number(uniformProb.toFixed(1));
+        });
+        history.push(initialPoint);
+
+        for (const event of events) {
+          if (event.type === 'buy') {
+            shares[event.outcomeIndex] = shares[event.outcomeIndex] + event.sharesWad;
+          } else {
+            shares[event.outcomeIndex] = shares[event.outcomeIndex] - event.sharesWad;
+          }
+          const probs = computeProbabilities(shares, bWad);
+          const point: ProbHistoryPoint = { time: event.timestamp };
+          detail.outcomeLabels.forEach((label, idx) => {
+            point[label] = Number((probs[idx] * 100).toFixed(1));
+          });
+          history.push(point);
+        }
+
+        const nowTs = Math.floor(Date.now() / 1000);
+        const currentProbs = computeProbabilities(detail.totalSharesWad, bWad);
+        const nowPoint: ProbHistoryPoint = { time: nowTs };
+        detail.outcomeLabels.forEach((label, idx) => {
+          nowPoint[label] = Number((currentProbs[idx] * 100).toFixed(1));
+        });
+        if (history.length === 0 || nowTs > history[history.length - 1].time) {
+          history.push(nowPoint);
+        }
+
+        if (!cancelled) setProbHistory(history);
+      } catch (err) {
+        console.error('Background poll failed:', err);
+      } finally {
+        pollInFlight = false;
+      }
+      if (!cancelled) timeoutId = setTimeout(poll, 15000);
+    };
+
+    timeoutId = setTimeout(poll, 15000);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timeoutId);
+    };
+  }, [marketAddress, detail?.market, detail?.outcomeLabels, detail?.totalSharesWad, detail?.bWad, detail?.createdAt]);
+
   useEffect(() => { fetchAll(); }, [fetchAll]);
+
+  useEffect(() => {
+    if (!userAddress || !isConnected) { setUserBalance(null); return; }
+    let cancelled = false;
+    const fetchBalance = async () => {
+      try {
+        const bal = await readProvider.getBalance(userAddress);
+        if (!cancelled) setUserBalance(bal);
+      } catch { /* ignore */ }
+    };
+    fetchBalance();
+    const interval = setInterval(fetchBalance, 30000);
+    return () => { cancelled = true; clearInterval(interval); };
+  }, [userAddress, isConnected, readProvider, refreshTrigger]);
 
   useEffect(() => {
     if (detail && marketAddress) {
       fetchProbHistory(marketAddress, detail);
     }
-  }, [detail?.market]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [detail?.market, refreshTrigger]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const currentInputKey = `${tradeTab}:${selectedOutcome}:${shareAmount}`;
 
   // Preview
   useEffect(() => {
+    const inputKey = currentInputKey;
+    setPreviewLoading(true);
     const timer = setTimeout(async () => {
       if (!shareAmount || parseFloat(shareAmount) <= 0) {
         setPreviewCost(null);
         setEstimatedShares(null);
+        setPreviewKey('');
+        setPreviewLoading(false);
         return;
       }
       if (tradeTab === 'buy') {
-        if (!detail) { setEstimatedShares(null); return; }
-        setPreviewLoading(true);
+        if (!detail) { setEstimatedShares(null); setPreviewLoading(false); return; }
         try {
           const budgetUSDC = parseFloat(shareAmount);
           const shares = findSharesForCost(detail.totalSharesWad, detail.bWad, selectedOutcome, budgetUSDC);
           setEstimatedShares(shares);
           setPreviewCost(null);
+          setPreviewKey(inputKey);
         } finally {
           setPreviewLoading(false);
         }
       } else {
-        if (!marketAddress) { setPreviewCost(null); return; }
+        if (!marketAddress) { setPreviewCost(null); setPreviewLoading(false); return; }
         try {
-          setPreviewLoading(true);
           const market = new ethers.Contract(marketAddress, MARKET_ABI, readProvider);
           const sharesWad = ethers.parseEther(shareAmount);
           const proceeds = await market.previewSell(selectedOutcome, sharesWad);
           setPreviewCost(proceeds);
           setEstimatedShares(null);
+          setPreviewKey(inputKey);
         } catch {
           setPreviewCost(null);
         } finally {
@@ -293,37 +460,51 @@ export default function MarketDetail() {
   const handleBuy = async () => {
     if (!signer || !marketAddress || estimatedShares === null || !shareAmount) return;
     setTxPending(true); setTxMessage(null);
+    const outcomeName = detail?.outcomeLabels[selectedOutcome] || `Outcome ${selectedOutcome}`;
     try {
       const market = new ethers.Contract(marketAddress, MARKET_ABI, signer);
       const sharesWad = ethers.parseEther(estimatedShares.toFixed(18));
       const usdcInput = ethers.parseEther(shareAmount);
       const maxCost = applyBuySlippage(usdcInput, slippage);
       const tx = await market.buy(selectedOutcome, sharesWad, maxCost, { value: maxCost });
+      showToast({ type: 'pending', title: `Buying ${outcomeName}...`, message: `${shareAmount} USDC submitted`, txHash: tx.hash });
       setTxMessage({ type: 'success', text: 'Transaction submitted. Waiting for confirmation...' });
       await tx.wait();
+      showToast({ type: 'success', title: `Bought ${outcomeName}`, message: `${shareAmount} USDC for ${estimatedShares.toFixed(2)} shares`, txHash: tx.hash });
       setTxMessage({ type: 'success', text: 'Shares purchased successfully!' });
       setShareAmount(''); setEstimatedShares(null);
-      refreshData();
+      await new Promise(r => setTimeout(r, 1500));
+      await refreshData();
+      setRefreshTrigger(c => c + 1);
     } catch (err) {
-      setTxMessage({ type: 'error', text: parseContractError(err) });
+      const errMsg = parseContractError(err);
+      showToast({ type: 'error', title: `Buy ${outcomeName} Failed`, message: errMsg });
+      setTxMessage({ type: 'error', text: errMsg });
     } finally { setTxPending(false); }
   };
 
   const handleSell = async () => {
     if (!signer || !marketAddress || !previewCost || !shareAmount) return;
     setTxPending(true); setTxMessage(null);
+    const outcomeName = detail?.outcomeLabels[selectedOutcome] || `Outcome ${selectedOutcome}`;
     try {
       const market = new ethers.Contract(marketAddress, MARKET_ABI, signer);
       const sharesWad = ethers.parseEther(shareAmount);
       const minReceive = applySellSlippage(previewCost, slippage);
       const tx = await market.sell(selectedOutcome, sharesWad, minReceive);
+      showToast({ type: 'pending', title: `Selling ${outcomeName}...`, message: `${shareAmount} shares submitted`, txHash: tx.hash });
       setTxMessage({ type: 'success', text: 'Transaction submitted. Waiting for confirmation...' });
       await tx.wait();
+      showToast({ type: 'success', title: `Sold ${outcomeName}`, message: `${shareAmount} shares for ~${formatUSDC(previewCost)} USDC`, txHash: tx.hash });
       setTxMessage({ type: 'success', text: 'Shares sold successfully!' });
       setShareAmount('');
-      refreshData();
+      await new Promise(r => setTimeout(r, 1500));
+      await refreshData();
+      setRefreshTrigger(c => c + 1);
     } catch (err) {
-      setTxMessage({ type: 'error', text: parseContractError(err) });
+      const errMsg = parseContractError(err);
+      showToast({ type: 'error', title: `Sell ${outcomeName} Failed`, message: errMsg });
+      setTxMessage({ type: 'error', text: errMsg });
     } finally { setTxPending(false); }
   };
 
@@ -333,12 +514,17 @@ export default function MarketDetail() {
     try {
       const market = new ethers.Contract(marketAddress, MARKET_ABI, signer);
       const tx = await market.redeem();
+      showToast({ type: 'pending', title: 'Claiming Winnings...', message: 'Transaction submitted', txHash: tx.hash });
       setTxMessage({ type: 'success', text: 'Redeem transaction submitted...' });
       await tx.wait();
+      showToast({ type: 'success', title: 'Winnings Claimed!', message: 'Your winnings have been sent to your wallet', txHash: tx.hash });
       setTxMessage({ type: 'success', text: 'Winnings claimed successfully!' });
-      refreshData();
+      await new Promise(r => setTimeout(r, 1500));
+      await refreshData();
     } catch (err) {
-      setTxMessage({ type: 'error', text: parseContractError(err) });
+      const errMsg = parseContractError(err);
+      showToast({ type: 'error', title: 'Claim Failed', message: errMsg });
+      setTxMessage({ type: 'error', text: errMsg });
     } finally { setTxPending(false); }
   };
 
@@ -348,12 +534,17 @@ export default function MarketDetail() {
     try {
       const market = new ethers.Contract(marketAddress, MARKET_ABI, signer);
       const tx = await market.refund();
+      showToast({ type: 'pending', title: 'Claiming Refund...', message: 'Transaction submitted', txHash: tx.hash });
       setTxMessage({ type: 'success', text: 'Refund transaction submitted...' });
       await tx.wait();
+      showToast({ type: 'success', title: 'Refund Claimed!', message: 'Your deposit has been returned to your wallet', txHash: tx.hash });
       setTxMessage({ type: 'success', text: 'Refund claimed successfully!' });
-      refreshData();
+      await new Promise(r => setTimeout(r, 1500));
+      await refreshData();
     } catch (err) {
-      setTxMessage({ type: 'error', text: parseContractError(err) });
+      const errMsg = parseContractError(err);
+      showToast({ type: 'error', title: 'Refund Failed', message: errMsg });
+      setTxMessage({ type: 'error', text: errMsg });
     } finally { setTxPending(false); }
   };
 
@@ -363,12 +554,17 @@ export default function MarketDetail() {
     try {
       const market = new ethers.Contract(marketAddress, MARKET_ABI, signer);
       const tx = await market.triggerExpiry();
+      showToast({ type: 'pending', title: 'Triggering Expiry...', message: 'Transaction submitted', txHash: tx.hash });
       setTxMessage({ type: 'success', text: 'Expiry transaction submitted...' });
       await tx.wait();
+      showToast({ type: 'success', title: 'Market Expired', message: 'Refunds are now available for all participants', txHash: tx.hash });
       setTxMessage({ type: 'success', text: 'Market expired! Refunds are now available.' });
-      refreshData();
+      await new Promise(r => setTimeout(r, 1500));
+      await refreshData();
     } catch (err) {
-      setTxMessage({ type: 'error', text: parseContractError(err) });
+      const errMsg = parseContractError(err);
+      showToast({ type: 'error', title: 'Expiry Failed', message: errMsg });
+      setTxMessage({ type: 'error', text: errMsg });
     } finally { setTxPending(false); }
   };
 
@@ -382,7 +578,15 @@ export default function MarketDetail() {
           </svg>
         </div>
         <p className="text-red-400 font-medium mb-2">{error || 'Market not found'}</p>
-        <Link to="/" className="text-sm text-primary-400 hover:text-primary-300 transition-colors">Back to Markets</Link>
+        <div className="flex items-center justify-center gap-4 mt-4">
+          <button
+            onClick={() => { hasLoadedOnce.current = false; setError(null); setLoading(true); fetchAll(); }}
+            className="px-4 py-2 rounded-xl bg-primary-600 hover:bg-primary-500 text-white text-sm font-semibold transition-colors"
+          >
+            Try Again
+          </button>
+          <Link to="/" className="text-sm text-primary-400 hover:text-primary-300 transition-colors">Back to Markets</Link>
+        </div>
       </div>
     );
   }
@@ -427,41 +631,38 @@ export default function MarketDetail() {
 
   return (
     <div className="min-h-screen animate-fade-in">
-      {/* Hero Header */}
-      <div className="relative">
+      <div className="relative overflow-hidden">
         <ImageWithFallback src={detail.imageUri} alt={detail.title} className="h-48 sm:h-56 lg:h-64 w-full" />
-        <div className="absolute inset-0 bg-gradient-to-t from-dark-950 via-dark-950/40 to-dark-950/20" />
+        <div className="absolute inset-0 bg-gradient-to-t from-dark-950 via-dark-950/50 to-dark-950/5" />
 
-        {/* Back button */}
-        <div className="absolute top-4 left-4">
-          <Link to="/" className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-dark-900/70 backdrop-blur-sm border border-white/[0.1] text-sm text-dark-200 hover:text-white transition-colors">
-            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+        <div className="absolute top-4 left-4 right-4 flex items-center justify-between">
+          <Link to="/" className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-dark-900/70 backdrop-blur-sm border border-white/[0.1] text-sm text-dark-200 hover:text-white transition-colors group">
+            <svg className="w-3.5 h-3.5 group-hover:-translate-x-0.5 transition-transform" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
             </svg>
             Markets
           </Link>
+          <div className="flex items-center gap-2">
+            <span className={`badge ${STAGE_COLORS[detail.stage]} backdrop-blur-sm`}>{STAGE_LABELS[detail.stage]}</span>
+            <span className="badge bg-dark-900/70 text-dark-200 border-white/[0.1] backdrop-blur-sm">{detail.category}</span>
+          </div>
         </div>
 
-        {/* Title overlay */}
         <div className="absolute bottom-0 left-0 right-0 p-4 sm:p-6 lg:p-8">
           <div className="max-w-7xl mx-auto">
-            <div className="flex flex-wrap items-center gap-2 mb-2">
-              <span className={`badge ${STAGE_COLORS[detail.stage]} backdrop-blur-sm`}>{STAGE_LABELS[detail.stage]}</span>
-              <span className="badge bg-dark-900/70 text-dark-200 border-white/[0.1] backdrop-blur-sm">{detail.category}</span>
-            </div>
-            <h1 className="text-xl sm:text-2xl lg:text-3xl font-bold text-white leading-tight max-w-3xl">{detail.title}</h1>
+            <h1 className="text-xl sm:text-2xl lg:text-3xl font-bold text-white leading-tight max-w-3xl drop-shadow-lg">{detail.title}</h1>
           </div>
         </div>
       </div>
 
-      {/* Content */}
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8">
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* Left column */}
-          <div className="lg:col-span-2 space-y-5">
+      {/* Two-column layout */}
+      <div className="max-w-[1600px] mx-auto px-4 pt-5 md:pt-6 pb-8">
+        <div className="flex flex-col gap-5 md:grid md:grid-cols-[1fr_380px] md:gap-6">
+          {/* Left Column — Market Info (scrollable) */}
+          <div className="space-y-4 md:space-y-5">
             {/* Quick stats */}
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-              <MiniStat label="Volume" value={`${formatUSDC(accurateVolume ?? detail.totalVolumeWei)}`} suffix="USDC" icon={<UsdcIcon size={14} />} />
+              <MiniStat label="Volume" value={`${formatCompactUSDC(accurateVolume ?? detail.totalVolumeWei)}`} suffix="USDC" icon={<UsdcIcon size={14} />} />
               <MiniStat label="Traders" value={detail.participants.toString()} />
               <MiniStat label="Created" value={formatDate(detail.createdAt)} small />
               <MiniStat label={isActive ? 'Ends' : 'Ended'} value={formatDate(detail.marketDeadline)} small />
@@ -470,7 +671,12 @@ export default function MarketDetail() {
             {/* Countdown (active) */}
             {isActive && !tradingEnded && (
               <div className="card p-4 flex items-center justify-between">
-                <span className="text-sm text-dark-400 font-medium">Time Remaining</span>
+                <span className="text-xs text-dark-400 font-semibold uppercase tracking-wider flex items-center gap-2">
+                  <svg className="w-3.5 h-3.5 text-primary-400/60" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                  Time Remaining
+                </span>
                 <Countdown deadline={detail.marketDeadline} />
               </div>
             )}
@@ -499,34 +705,228 @@ export default function MarketDetail() {
               </div>
             )}
 
-            {/* Resolution proof */}
-            {isResolved && detail.proofUri && (
-              <div className="card border-emerald-500/20 bg-emerald-500/5 p-4">
-                <div className="flex items-start gap-3">
-                  <div className="w-8 h-8 rounded-lg bg-emerald-500/15 flex items-center justify-center shrink-0 mt-0.5">
-                    <svg className="w-4 h-4 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                    </svg>
-                  </div>
-                  <div className="flex-1">
-                    <p className="text-sm font-semibold text-emerald-400">
-                      Resolved: {detail.outcomeLabels[detail.winningOutcome]} wins
-                    </p>
-                    <a
-                      href={resolveImageUri(detail.proofUri)}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-xs text-emerald-300/70 hover:text-emerald-300 transition-colors mt-1 inline-flex items-center gap-1"
-                    >
-                      View Resolution Proof
-                      <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
-                      </svg>
-                    </a>
-                  </div>
+            {/* Trigger Expiry */}
+            {isActive && tradingEnded && !inGracePeriod && isConnected && isCorrectNetwork && (
+              <div className="card p-5 text-center space-y-3">
+                <div className="w-10 h-10 rounded-xl bg-red-500/10 flex items-center justify-center mx-auto">
+                  <svg className="w-5 h-5 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
+                  </svg>
                 </div>
+                <p className="text-sm text-red-400 font-semibold">Grace period expired</p>
+                <p className="text-xs text-dark-400 leading-relaxed">
+                  This market was not resolved within the 3-day grace period. Trigger expiry to enable refunds.
+                </p>
+                <button onClick={handleTriggerExpiry} disabled={txPending} className="w-full btn-primary py-3 text-sm font-semibold">
+                  {txPending ? 'Processing...' : 'Trigger Expiry'}
+                </button>
+                {txMessage && (
+                  <div className={`p-3 rounded-xl text-xs ${txMessage.type === 'success' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : 'bg-red-500/10 text-red-400 border border-red-500/20'}`}>
+                    {txMessage.text}
+                  </div>
+                )}
               </div>
             )}
+
+            {/* Resolution proof */}
+            {isResolved && detail.proofUri && (() => {
+              const proof = parseProofLinks(detail.proofUri);
+              return (
+                <div className="card border-emerald-500/20 bg-emerald-500/5 p-4">
+                  <div className="flex items-start gap-3">
+                    <div className="w-8 h-8 rounded-lg bg-emerald-500/15 flex items-center justify-center shrink-0 mt-0.5">
+                      <svg className="w-4 h-4 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                      </svg>
+                    </div>
+                    <div className="flex-1">
+                      <p className="text-sm font-semibold text-emerald-400 mb-2">
+                        Resolved: {detail.outcomeLabels[detail.winningOutcome]} wins
+                      </p>
+                      
+                      {/* Image proof */}
+                      {proof.image ? (
+                        <div className="mb-3">
+                          <p className="text-2xs font-medium text-emerald-500/70 uppercase tracking-wider mb-1.5">Proof Image</p>
+                          <a href={resolveImageUri(proof.image)} target="_blank" rel="noopener noreferrer">
+                            <img
+                              src={resolveImageUri(proof.image)}
+                              alt="Resolution proof"
+                              className="rounded-lg border border-white/[0.06] max-h-64 w-auto object-contain bg-dark-800 hover:opacity-80 transition-opacity cursor-pointer"
+                              onError={(e) => {
+                                (e.target as HTMLImageElement).style.display = 'none';
+                                const wrapper = (e.target as HTMLImageElement).parentElement?.parentElement;
+                                const fallback = wrapper?.querySelector('.proof-image-fallback');
+                                if (fallback) (fallback as HTMLElement).style.display = 'flex';
+                              }}
+                            />
+                          </a>
+                          {proof.raw && (
+                            <a
+                              href={resolveImageUri(proof.raw)}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="proof-image-fallback hidden text-sm text-emerald-300 hover:text-emerald-200 items-center gap-2 transition-colors mt-1.5"
+                            >
+                              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                              </svg>
+                              {proof.raw.length > 60 ? proof.raw.slice(0, 60) + '...' : proof.raw}
+                            </a>
+                          )}
+                        </div>
+                      ) : proof.mainLink ? (
+                        <div className="mb-3">
+                          <p className="text-2xs font-medium text-emerald-500/70 uppercase tracking-wider mb-1.5">Proof Link</p>
+                          <a
+                            href={resolveImageUri(proof.mainLink)}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-sm text-emerald-300 hover:text-emerald-200 inline-flex items-center gap-2 transition-colors"
+                          >
+                            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                            </svg>
+                            Open Proof
+                          </a>
+                        </div>
+                      ) : null}
+                      
+                      {/* Main link with frame toggle */}
+                      {proof.mainLink ? (() => {
+                        const mainLinkStr = proof.mainLink;
+                        const isUnsupportedFrame = (url: string) => {
+                          const lower = url.toLowerCase();
+                          return lower.includes('twitter.com') || 
+                                 lower.includes('x.com') || 
+                                 lower.includes('facebook.com') ||
+                                 lower.includes('instagram.com') ||
+                                 lower.includes('linkedin.com') ||
+                                 lower.includes('tiktok.com');
+                        };
+                        const unsupported = isUnsupportedFrame(mainLinkStr);
+                        return (
+                        <div className="mb-3">
+                          <div className="flex items-center gap-2 mb-1.5">
+                            <p className="text-2xs font-medium text-emerald-500/70 uppercase tracking-wider">Main Proof</p>
+                            {unsupported ? (
+                              <span className="text-2xs text-dark-500">(embed not supported)</span>
+                            ) : (
+                              <button
+                                onClick={() => setShowMainFrame(!showMainFrame)}
+                                className="text-xs text-emerald-400 hover:text-emerald-300 flex items-center gap-1 transition-colors"
+                              >
+                                {showMainFrame ? (
+                                  <>
+                                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                      <path strokeLinecap="round" strokeLinejoin="round" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21" />
+                                    </svg>
+                                    Hide Frame
+                                  </>
+                                ) : (
+                                  <>
+                                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                      <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                                      <path strokeLinecap="round" strokeLinejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                                    </svg>
+                                    Show Frame
+                                  </>
+                                )}
+                              </button>
+                            )}
+                          </div>
+                          {unsupported ? (
+                            <a
+                              href={resolveImageUri(mainLinkStr)}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-xs text-emerald-300/70 hover:text-emerald-300 transition-colors inline-flex items-center gap-1"
+                            >
+                              <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                              </svg>
+                              Open {mainLinkStr.length > 40 ? mainLinkStr.slice(0, 40) + '...' : mainLinkStr}
+                            </a>
+                          ) : showMainFrame ? (
+                            <iframe
+                              src={resolveImageUri(mainLinkStr)}
+                              className="w-full h-64 rounded-lg border border-white/[0.06] bg-dark-900"
+                              title="Main proof"
+                              sandbox="allow-same-origin allow-forms"
+                            />
+                          ) : (
+                            <a
+                              href={resolveImageUri(mainLinkStr)}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-xs text-emerald-300/70 hover:text-emerald-300 transition-colors inline-flex items-center gap-1"
+                            >
+                              <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                              </svg>
+                              {mainLinkStr.length > 40 ? mainLinkStr.slice(0, 40) + '...' : mainLinkStr}
+                            </a>
+                          )}
+                        </div>
+                        );
+                      })() : null}
+                      
+                      {/* Extra links */}
+                      {proof.extraLinks.length > 0 && (
+                        <div className="mt-3 pt-3 border-t border-emerald-500/10">
+                          <p className="text-2xs font-medium text-emerald-500/70 uppercase tracking-wider mb-2">Additional Proofs</p>
+                          <div className="flex flex-wrap gap-3">
+                            {proof.extraLinks.map((link, i) => (
+                              <div key={i} className="relative">
+                                {link.type === 'image' ? (
+                                  <div 
+                                    className="relative"
+                                    onMouseEnter={() => setHoveredImage(i)}
+                                    onMouseLeave={() => setHoveredImage(null)}
+                                  >
+                                    <a 
+                                      href={resolveImageUri(link.url)} 
+                                      target="_blank" 
+                                      rel="noopener noreferrer" 
+                                      className="text-xs text-emerald-300 hover:text-emerald-200 underline"
+                                    >
+                                      <span className="inline-flex items-center gap-1">
+                                        <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                          <path strokeLinecap="round" strokeLinejoin="round" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                                        </svg>
+                                        Image {i + 1}
+                                      </span>
+                                    </a>
+                                    {hoveredImage === i && (
+                                      <div className="absolute z-10 bottom-full left-0 mb-2">
+                                        <ImageWithFallback
+                                          src={resolveImageUri(link.url)}
+                                          alt={`Proof ${i + 1}`}
+                                          className="w-48 h-auto rounded-lg border border-white/[0.12] shadow-xl bg-dark-800"
+                                        />
+                                      </div>
+                                    )}
+                                  </div>
+                                ) : (
+                                  <a href={resolveImageUri(link.url)} target="_blank" rel="noopener noreferrer" className="text-xs text-emerald-300 hover:text-emerald-200 underline">
+                                    <span className="inline-flex items-center gap-1">
+                                      <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                        <path strokeLinecap="round" strokeLinejoin="round" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
+                                      </svg>
+                                      Link {i + 1}
+                                    </span>
+                                  </a>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              );
+            })()}
 
             {/* Cancellation reason & proof */}
             {(isCancelled || isExpired) && (detail.cancelReason || detail.cancelProofUri) && (
@@ -566,30 +966,26 @@ export default function MarketDetail() {
             )}
 
             {/* Resolved pool & fee info */}
-            {isResolved && detail.resolvedPoolWei > 0n && (
-              <div className="card p-4">
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <span className="text-2xs text-dark-500 font-medium uppercase tracking-wider">Prize Pool (after fee)</span>
-                    <p className="text-base font-bold text-white mt-0.5 flex items-center gap-1.5"><UsdcIcon size={16} />{formatUSDC(detail.resolvedPoolWei)} USDC</p>
-                  </div>
-                  <div>
-                    <span className="text-2xs text-dark-500 font-medium uppercase tracking-wider">Platform Fee (0.25%)</span>
-                    <p className="text-base font-bold text-dark-400 mt-0.5 flex items-center gap-1.5"><UsdcIcon size={16} className="opacity-50" />{formatUSDC((detail.totalVolumeWei * 25n) / 10000n)} USDC</p>
+            {isResolved && detail.resolvedPoolWei > 0n && (() => {
+              const grossPool = (detail.resolvedPoolWei * 10000n) / 9975n;
+              const fee = grossPool - detail.resolvedPoolWei;
+              return (
+                <div className="card p-4">
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <span className="text-2xs text-dark-500 font-medium uppercase tracking-wider">Prize Pool (after fee)</span>
+                      <p className="text-base font-bold text-white mt-0.5 flex items-center gap-1.5"><UsdcIcon size={16} />{formatCompactUSDC(detail.resolvedPoolWei)} USDC</p>
+                    </div>
+                    <div>
+                      <span className="text-2xs text-dark-500 font-medium uppercase tracking-wider">Platform Fee (0.25%)</span>
+                      <p className="text-base font-bold text-dark-400 mt-0.5 flex items-center gap-1.5"><UsdcIcon size={16} className="opacity-50" />{formatCompactUSDC(fee)} USDC</p>
+                    </div>
                   </div>
                 </div>
-              </div>
-            )}
+              );
+            })()}
 
-            {/* Description */}
-            {detail.description && (
-              <div className="card p-5">
-                <h2 className="text-sm font-semibold text-dark-300 uppercase tracking-wider mb-3">About</h2>
-                <p className="text-sm text-dark-300 leading-relaxed whitespace-pre-wrap">{detail.description}</p>
-              </div>
-            )}
-
-            {/* Probability history chart — Polymarket-style */}
+            {/* Probability history chart */}
             {probHistory.length > 0 && (
               <ProbabilityChart
                 history={probHistory}
@@ -598,9 +994,38 @@ export default function MarketDetail() {
               />
             )}
 
-            {/* Outcome Probabilities */}
+            {/* About / Description - collapsible */}
+            {detail.description && (
+              <div className="card overflow-hidden">
+                <button 
+                  onClick={() => setAboutExpanded(!aboutExpanded)}
+                  className="w-full p-5 pb-4 flex items-center justify-between hover:bg-dark-800/30 transition-colors"
+                >
+                  <h2 className="section-header">About</h2>
+                  <svg 
+                    className={`w-4 h-4 text-dark-500 transition-transform ${aboutExpanded ? 'rotate-180' : ''}`} 
+                    fill="none" 
+                    viewBox="0 0 24 24" 
+                    stroke="currentColor" 
+                    strokeWidth={2}
+                  >
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+                  </svg>
+                </button>
+                {aboutExpanded && (
+                  <div className="px-5 pb-5">
+                    <p className="text-sm text-dark-300 leading-relaxed whitespace-pre-wrap">{detail.description}</p>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* Right Column — Trade Panel (sticky) */}
+          <div className="md:sticky md:top-4 md:self-start space-y-4 md:space-y-5">
+            {/* Outcome Probabilities Card */}
             <div className="card p-5">
-              <h2 className="text-sm font-semibold text-dark-300 uppercase tracking-wider mb-4">Outcome Probabilities</h2>
+              <h2 className="section-header mb-4">Outcome Probabilities</h2>
               <ProbabilityBar
                 labels={detail.outcomeLabels}
                 probabilities={detail.impliedProbabilitiesWad}
@@ -613,9 +1038,9 @@ export default function MarketDetail() {
                   const pct = probToPercent(detail.impliedProbabilitiesWad[i]);
                   const isWinner = isResolved && detail.winningOutcome === i;
                   return (
-                    <div key={i} className={`p-3 rounded-xl text-center ${isWinner ? 'bg-emerald-500/10 border border-emerald-500/20' : color.light}`}>
-                      <p className="text-2xs text-dark-400 font-medium mb-1">{label}</p>
-                      <p className={`text-xl sm:text-2xl font-bold tabular-nums ${isWinner ? 'text-emerald-400' : color.text}`}>
+                    <div key={i} className={`p-3.5 rounded-xl text-center transition-all ${isWinner ? 'bg-emerald-500/10 border border-emerald-500/20' : color.light} relative overflow-hidden`}>
+                      <p className="text-2xs text-dark-400 font-semibold uppercase tracking-wider mb-1.5">{label}</p>
+                      <p className={`text-xl sm:text-2xl font-bold tabular-nums leading-none ${isWinner ? 'text-emerald-400' : color.text}`}>
                         {pct.toFixed(1)}%
                       </p>
                     </div>
@@ -623,14 +1048,11 @@ export default function MarketDetail() {
                 })}
               </div>
             </div>
-          </div>
 
-          {/* Right column — sticky on desktop */}
-          <div className="space-y-5 lg:sticky lg:top-20 lg:self-start">
-            {/* Trade panel */}
+            {/* Trade Panel */}
             {isActive && !tradingEnded && isConnected && isCorrectNetwork && (
               <div className="card p-5">
-                <h3 className="text-sm font-semibold text-dark-300 uppercase tracking-wider mb-4">Trade</h3>
+                <h3 className="section-header mb-4">Trade</h3>
 
                 {/* Buy/Sell tabs */}
                 <div className="flex rounded-xl bg-dark-900/60 p-0.5 mb-5 border border-white/[0.06]">
@@ -684,9 +1106,20 @@ export default function MarketDetail() {
                 </div>
 
                 {/* Amount input */}
-                <label className="text-2xs font-semibold text-dark-500 uppercase tracking-wider mb-1.5 flex items-center gap-1.5">
-                  {tradeTab === 'buy' ? <><UsdcIcon size={12} />Amount (USDC)</> : 'Shares to Sell'}
-                </label>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="text-2xs font-semibold text-dark-500 uppercase tracking-wider flex items-center gap-1.5">
+                    {tradeTab === 'buy' ? <><UsdcIcon size={12} />Amount (USDC)</> : 'Shares to Sell'}
+                  </label>
+                  {tradeTab === 'buy' && userBalance !== null && (
+                    <span className="text-2xs text-dark-400 font-medium flex items-center gap-1">
+                      <svg className="w-3 h-3 text-dark-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M21 12a2.25 2.25 0 00-2.25-2.25H15a3 3 0 11-6 0H5.25A2.25 2.25 0 003 12m18 0v6a2.25 2.25 0 01-2.25 2.25H5.25A2.25 2.25 0 013 18v-6m18 0V9M3 12V9m18 0a2.25 2.25 0 00-2.25-2.25H5.25A2.25 2.25 0 003 9m18 0V6a2.25 2.25 0 00-2.25-2.25H5.25A2.25 2.25 0 003 6v3" />
+                      </svg>
+                      <span className="tabular-nums">{formatCompactUSDC(userBalance)}</span>
+                      <span className="text-dark-500">USDC</span>
+                    </span>
+                  )}
+                </div>
                 <div className="relative mb-3">
                   <input
                     type="number"
@@ -698,6 +1131,20 @@ export default function MarketDetail() {
                     className="input-field text-sm pr-16"
                   />
                   <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1.5">
+                    {tradeTab === 'buy' && userBalance !== null && userBalance > 0n && (
+                      <button
+                        onClick={() => {
+                          const gasBufferWei = ethers.parseEther('0.01');
+                          const maxSpendable = userBalance > gasBufferWei ? userBalance - gasBufferWei : 0n;
+                          const formatted = ethers.formatEther(maxSpendable);
+                          const truncated = formatted.includes('.') ? formatted.slice(0, formatted.indexOf('.') + 3) : formatted;
+                          setShareAmount(truncated);
+                        }}
+                        className="px-2 py-0.5 rounded text-2xs font-semibold bg-primary-500/15 text-primary-400 hover:bg-primary-500/25 transition-all"
+                      >
+                        Max
+                      </button>
+                    )}
                     {tradeTab === 'sell' && userInfo && (userInfo.shares[selectedOutcome] || 0n) > 0n && (
                       <button
                         onClick={() => {
@@ -779,7 +1226,7 @@ export default function MarketDetail() {
                 {/* Submit */}
                 <button
                   onClick={tradeTab === 'buy' ? handleBuy : handleSell}
-                  disabled={txPending || !shareAmount || parseFloat(shareAmount) <= 0 || (tradeTab === 'buy' ? estimatedShares === null : previewCost === null)}
+                  disabled={txPending || !shareAmount || parseFloat(shareAmount) <= 0 || previewLoading || previewKey !== currentInputKey || (tradeTab === 'buy' ? estimatedShares === null : previewCost === null)}
                   className={`w-full py-3 rounded-xl font-semibold text-sm transition-all active:scale-[0.97] ${
                     tradeTab === 'buy'
                       ? 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-glow-yes disabled:bg-emerald-600/20 disabled:text-emerald-400/40 disabled:shadow-none'
@@ -829,33 +1276,10 @@ export default function MarketDetail() {
               </div>
             )}
 
-            {/* Trigger Expiry */}
-            {isActive && tradingEnded && !inGracePeriod && isConnected && isCorrectNetwork && (
-              <div className="card p-5 text-center space-y-3">
-                <div className="w-10 h-10 rounded-xl bg-red-500/10 flex items-center justify-center mx-auto">
-                  <svg className="w-5 h-5 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
-                  </svg>
-                </div>
-                <p className="text-sm text-red-400 font-semibold">Grace period expired</p>
-                <p className="text-xs text-dark-400 leading-relaxed">
-                  This market was not resolved within the 3-day grace period. Trigger expiry to enable refunds.
-                </p>
-                <button onClick={handleTriggerExpiry} disabled={txPending} className="w-full btn-primary py-3 text-sm font-semibold">
-                  {txPending ? 'Processing...' : 'Trigger Expiry'}
-                </button>
-                {txMessage && (
-                  <div className={`p-3 rounded-xl text-xs ${txMessage.type === 'success' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : 'bg-red-500/10 text-red-400 border border-red-500/20'}`}>
-                    {txMessage.text}
-                  </div>
-                )}
-              </div>
-            )}
-
             {/* User Position */}
             {userInfo && isConnected && (
               <div className="card p-5">
-                <h3 className="text-sm font-semibold text-dark-300 uppercase tracking-wider mb-4">Your Position</h3>
+                <h3 className="section-header mb-4">Your Position</h3>
 
                 <div className="space-y-2 mb-4">
                   {detail.outcomeLabels.map((label, i) => {
@@ -884,7 +1308,7 @@ export default function MarketDetail() {
                 <div className="p-3 rounded-xl bg-dark-900/30 border border-white/[0.06] mb-4">
                   <div className="flex justify-between text-sm">
                     <span className="text-dark-500 font-medium">Net Deposited</span>
-                    <span className="font-bold text-white tabular-nums flex items-center gap-1"><UsdcIcon size={14} />{formatUSDC(userInfo.netDeposited)} USDC</span>
+                    <span className="font-bold text-white tabular-nums flex items-center gap-1"><UsdcIcon size={14} />{formatCompactUSDC(userInfo.netDeposited)} USDC</span>
                   </div>
                 </div>
 
@@ -971,12 +1395,7 @@ function ProbabilityChart({
       {/* Header */}
       <div className="p-5 pb-0">
         <div className="flex items-center justify-between mb-3">
-          <div className="flex items-center gap-2">
-            <svg className="w-4 h-4 text-dark-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 013 19.875v-6.75zM9.75 8.625c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V8.625zM16.5 4.125c0-.621.504-1.125 1.125-1.125h2.25C20.496 3 21 3.504 21 4.125v15.75c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V4.125z" />
-            </svg>
-            <h2 className="text-sm font-semibold text-dark-300 uppercase tracking-wider">Price History</h2>
-          </div>
+          <h2 className="section-header">Price History</h2>
           {/* Time range selector */}
           <div className="flex items-center rounded-lg bg-dark-900/60 p-0.5 border border-white/[0.06]">
             {TIME_RANGES.map(range => (
@@ -1126,10 +1545,10 @@ function ProbabilityChart({
               return (
                 <Area
                   key={label}
-                  type="stepAfter"
+                  type="monotone"
                   dataKey={label}
                   stroke={isVisible ? CHART_COLORS[i % CHART_COLORS.length] : 'transparent'}
-                  strokeWidth={isVisible ? 2.5 : 0}
+                  strokeWidth={isVisible ? 2 : 0}
                   fill={isVisible ? `url(#prob-gradient-${i})` : 'transparent'}
                   fillOpacity={1}
                   dot={false}
@@ -1139,7 +1558,7 @@ function ProbabilityChart({
                     stroke: CHART_COLORS[i % CHART_COLORS.length],
                     fill: '#0a0f19',
                   } : false}
-                  animationDuration={500}
+                  animationDuration={300}
                 />
               );
             })}
@@ -1164,12 +1583,12 @@ function ProbabilityChart({
 
 function MiniStat({ label, value, suffix, small, icon }: { label: string; value: string; suffix?: string; small?: boolean; icon?: React.ReactNode }) {
   return (
-    <div className="card p-3">
-      <span className="text-2xs text-dark-500 font-medium uppercase tracking-wider">{label}</span>
-      <div className="flex items-center gap-1 mt-0.5">
+    <div className="card p-3.5">
+      <span className="text-2xs text-dark-400 font-semibold uppercase tracking-wider">{label}</span>
+      <div className="flex items-center gap-1.5 mt-1">
         {icon}
-        <span className={`font-bold text-white tabular-nums ${small ? 'text-xs' : 'text-sm'}`}>{value}</span>
-        {suffix && <span className="text-2xs text-dark-500">{suffix}</span>}
+        <span className={`font-bold text-white tabular-nums leading-none ${small ? 'text-xs' : 'text-sm'}`}>{value}</span>
+        {suffix && <span className="text-2xs text-dark-400 font-medium">{suffix}</span>}
       </div>
     </div>
   );
