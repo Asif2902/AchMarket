@@ -29,6 +29,9 @@ typechain-types/
 *.log
 npm-debug.log*
 
+# TypeScript
+*.tsbuildinfo
+
 # Replit
 .replit
 replit.nix

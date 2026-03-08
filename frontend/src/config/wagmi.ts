@@ -18,23 +18,30 @@ export const arcTestnet = defineChain({
   },
 });
 
-const walletConnectProjectId = import.meta.env.VITE_WALLETCONNECT_PROJECT_ID || 'placeholder_replace_with_real_id';
+const walletConnectProjectId = import.meta.env.VITE_WALLETCONNECT_PROJECT_ID;
+
+const getWallets = () => {
+  const wallets = [
+    injectedWallet,
+    metaMaskWallet,
+    coinbaseWallet,
+  ];
+  if (walletConnectProjectId) {
+    wallets.push(walletConnectWallet);
+  }
+  return wallets;
+};
 
 const connectors = connectorsForWallets(
   [
     {
       groupName: 'Popular',
-      wallets: [
-        injectedWallet,
-        metaMaskWallet,
-        coinbaseWallet,
-        walletConnectWallet,
-      ],
+      wallets: getWallets(),
     },
   ],
   {
     appName: 'AchMarket',
-    projectId: walletConnectProjectId,
+    projectId: walletConnectProjectId || '',
   }
 );
 

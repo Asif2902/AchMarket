@@ -123,7 +123,8 @@ export default function ToastContainer() {
       if (toast.txHash && toast.type !== 'pending') {
         filtered = prev.filter(t => !(t.txHash === toast.txHash && t.type === 'pending'));
       }
-      return [...filtered.slice(-4), { ...toast, id }];
+      const combined = [...filtered, { ...toast, id }];
+      return combined.slice(-4);
     });
   }, []);
 
