@@ -9,7 +9,7 @@ export default function Footer() {
         <div className="flex flex-col items-center gap-6 sm:gap-8">
           <div className="flex flex-col items-center gap-2 text-center">
             <img
-              src="/img/logos/achswap-logo.png"
+              src="/logo.png"
               alt="Achswap"
               className="w-9 h-9 rounded-xl object-cover shadow-glow-sm"
             />

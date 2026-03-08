@@ -21,7 +21,7 @@ export function PageLoader() {
         <div className="w-12 h-12 border-2 border-dark-700 border-t-primary-500 rounded-full animate-spin" />
         <div className="absolute inset-0 flex items-center justify-center">
           <img
-            src="/img/logos/achswap-logo.png"
+            src="/logo.png"
             alt=""
             className="w-5 h-5 rounded object-cover opacity-60"
           />

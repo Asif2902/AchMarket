@@ -48,7 +48,7 @@ export default function Header() {
           <div className="flex items-center justify-between h-16">
             <Link to="/" className="flex items-center gap-2.5 group shrink-0">
               <img
-                src="/img/logos/achswap-logo.png"
+                src="/logo.png"
                 alt="Achswap"
                 className="h-8 w-8 rounded-lg object-cover shadow-lg shadow-primary-500/25 group-hover:shadow-primary-500/40 transition-shadow duration-300"
               />
@@ -93,7 +93,7 @@ export default function Header() {
             <div className="flex items-center justify-between p-4 border-b border-white/[0.08]">
               <div className="flex items-center gap-2.5">
                 <img
-                  src="/img/logos/achswap-logo.png"
+                  src="/logo.png"
                   alt="Achswap"
                   className="h-7 w-7 rounded-lg object-cover"
                 />
