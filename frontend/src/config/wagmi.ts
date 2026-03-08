@@ -20,6 +20,13 @@ export const arcTestnet = defineChain({
 
 const walletConnectProjectId = import.meta.env.VITE_WALLETCONNECT_PROJECT_ID;
 
+if (!walletConnectProjectId && import.meta.env.DEV) {
+  console.warn(
+    '[wagmi] WalletConnect is disabled due to missing VITE_WALLETCONNECT_PROJECT_ID. ' +
+    'Set it in your frontend .env file to enable WalletConnect wallet support.'
+  );
+}
+
 const getWallets = () => {
   const wallets = [
     injectedWallet,

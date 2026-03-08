@@ -58,7 +58,9 @@ function ToastItem({ toast, onRemove }: { toast: ToastData; onRemove: (id: strin
       className={`relative flex items-start gap-3 p-4 rounded-2xl border backdrop-blur-xl shadow-2xl transition-all duration-300 ${borderColor} bg-dark-900/95 ${
         exiting ? 'opacity-0 translate-x-8' : 'opacity-100 translate-x-0'
       }`}
-      style={{ minWidth: '320px', maxWidth: '420px' }}
+      style={{ width: 'min(92vw, 420px)' }}
+      role={toast.type === 'error' ? 'alert' : 'status'}
+      aria-atomic="true"
     >
       <div className={`w-9 h-9 rounded-xl ${iconBg} flex items-center justify-center shrink-0 mt-0.5`}>
         {toast.type === 'success' && (
@@ -104,6 +106,7 @@ function ToastItem({ toast, onRemove }: { toast: ToastData; onRemove: (id: strin
       <button
         onClick={handleClose}
         className="text-dark-500 hover:text-dark-300 transition-colors p-0.5 rounded-lg hover:bg-white/[0.05] shrink-0"
+        aria-label="Dismiss notification"
       >
         <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
           <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
@@ -140,7 +143,7 @@ export default function ToastContainer() {
   if (toasts.length === 0) return null;
 
   return (
-    <div className="fixed top-4 right-4 z-[9999] flex flex-col gap-3 pointer-events-none">
+    <div className="fixed top-4 right-4 z-[9999] flex flex-col gap-3 pointer-events-none" aria-live="polite" aria-atomic="true">
       {toasts.map(toast => (
         <div key={toast.id} className="pointer-events-auto animate-slide-in-right">
           <ToastItem toast={toast} onRemove={removeToast} />

@@ -8,7 +8,6 @@ frontend/dist/
 .env
 .env.local
 .env.*.local
-frontend/.env
 
 # IDE
 .vscode/
@@ -31,11 +30,3 @@ npm-debug.log*
 
 # TypeScript
 *.tsbuildinfo
-
-# Replit
-.replit
-replit.nix
-replit.md
-.cache/
-attached_assets/
-.local/
