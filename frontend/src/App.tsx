@@ -1,4 +1,5 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { Analytics as VercelAnalytics } from '@vercel/analytics/react';
 import { WalletProvider, useWallet } from './context/WalletContext';
 import Header from './components/Header';
 import Footer from './components/Footer';
@@ -63,6 +64,7 @@ export default function App() {
           </main>
           <Footer />
           <ToastContainer />
+          <VercelAnalytics />
         </div>
       </WalletProvider>
     </BrowserRouter>
