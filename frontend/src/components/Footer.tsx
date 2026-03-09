@@ -1,6 +1,6 @@
 import { NETWORK } from '../config/network';
 
-const ACH_SWAP_URL = 'https://achswapfi.xyz';
+const ACH_SWAP_URL = 'https://achswap.app';
 
 export default function Footer() {
   return (
@@ -33,9 +33,9 @@ export default function Footer() {
 
           <div className="flex items-center gap-4 text-xs text-dark-400">
             <a href={ACH_SWAP_URL} target="_blank" rel="noopener noreferrer" className="hover:text-white transition-colors">Achswap</a>
-            <a href="https://app.achswapfi.xyz" target="_blank" rel="noopener noreferrer" className="hover:text-white transition-colors">Swap</a>
-            <a href="https://app.achswapfi.xyz/bridge" target="_blank" rel="noopener noreferrer" className="hover:text-white transition-colors">Bridge</a>
-            <a href="https://docs.achswapfi.xyz" target="_blank" rel="noopener noreferrer" className="hover:text-white transition-colors">Docs</a>
+            <a href="https://trade.achswap.app" target="_blank" rel="noopener noreferrer" className="hover:text-white transition-colors">Swap</a>
+            <a href="https://trade.achswap.app/bridge" target="_blank" rel="noopener noreferrer" className="hover:text-white transition-colors">Bridge</a>
+            <a href="https://docs.achswap.app" target="_blank" rel="noopener noreferrer" className="hover:text-white transition-colors">Docs</a>
           </div>
 
           <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-dark-900/40 border border-white/[0.06]">
