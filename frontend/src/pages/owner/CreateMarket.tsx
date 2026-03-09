@@ -52,7 +52,7 @@ export default function CreateMarket() {
   const [durationPreset, setDurationPreset] = useState(604800);
   const [customDays, setCustomDays] = useState('');
   const [customHours, setCustomHours] = useState('');
-  const [bValue, setBValue] = useState('100');
+  const [bValue, setBValue] = useState('1000');
   const [showBTooltip, setShowBTooltip] = useState(false);
 
   const [submitting, setSubmitting] = useState(false);
@@ -85,7 +85,7 @@ export default function CreateMarket() {
     outcomes.length >= 2 &&
     outcomes.every(o => o.trim().length > 0) &&
     durationSeconds >= 3600 &&
-    parseFloat(bValue) >= 10;
+    parseFloat(bValue) >= 1000;
 
   // Count completed fields for progress
   const completedSteps = [
@@ -94,7 +94,7 @@ export default function CreateMarket() {
     actualCategory.trim().length > 0,
     outcomes.length >= 2 && outcomes.every(o => o.trim().length > 0),
     durationSeconds >= 3600,
-    parseFloat(bValue) >= 10,
+    parseFloat(bValue) >= 1000,
   ].filter(Boolean).length;
 
   const handleSubmit = async () => {
@@ -401,14 +401,14 @@ export default function CreateMarket() {
                     <p className="font-semibold text-white mb-2">LMSR Liquidity Parameter</p>
                     <p className="text-dark-300 leading-relaxed">Higher values = more stable prices, smaller multipliers. Lower values = more volatile prices, bigger potential returns.</p>
                     <div className="divider my-3" />
-                    <p className="text-dark-400">Rule of thumb: expected total volume / 10. Minimum: 10.</p>
+                    <p className="text-dark-400">Rule of thumb: expected total volume / 10. Minimum: 1000, Maximum: 1,000,000.</p>
                   </div>
                 )}
               </div>
             </div>
             {/* Quick preset buttons */}
             <div className="flex gap-2 mt-3">
-              {[50, 100, 250, 500, 1000].map(v => (
+              {[1000, 2500, 5000, 10000, 50000].map(v => (
                 <button
                   key={v}
                   onClick={() => setBValue(v.toString())}
@@ -538,7 +538,7 @@ export default function CreateMarket() {
                 {[
                   { label: 'Outcomes', value: outcomes.filter(o => o.trim()).length.toString(), ok: outcomes.length >= 2 && outcomes.every(o => o.trim().length > 0) },
                   { label: 'Duration', value: durationSeconds >= 86400 ? `${Math.floor(durationSeconds / 86400)} days` : `${Math.floor(durationSeconds / 3600)} hours`, ok: durationSeconds >= 3600 },
-                  { label: 'Liquidity (b)', value: bValue, ok: parseFloat(bValue) >= 10 },
+                  { label: 'Liquidity (b)', value: bValue, ok: parseFloat(bValue) >= 1000 },
                   { label: 'Expiry', value: durationSeconds >= 3600 ? expiryDate.toLocaleDateString() : '-', ok: durationSeconds >= 3600 },
                 ].map(row => (
                   <div key={row.label} className="flex items-center justify-between">

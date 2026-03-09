@@ -51,7 +51,8 @@ contract PredictionMarketFactory is Ownable {
     uint256 public totalMarkets;
 
     // -- Creation guards ------------------------------------------
-    int256  public minBWad              = 10e18;
+    int256  public minBWad              = 1_000e18;
+    int256  public maxBWad              = 1_000_000e18;
     uint256 public minDuration          = 1 hours;
     uint256 public maxDuration          = 365 days;
 
@@ -82,6 +83,7 @@ contract PredictionMarketFactory is Ownable {
         require(bytes(_category).length    > 0, "Factory: empty category");
         require(_outcomeLabels.length      >= 2, "Factory: need >= 2 outcomes");
         require(_bWad >= minBWad,               "Factory: b too small");
+        require(_bWad <= maxBWad,               "Factory: b too large");
         require(
             _durationSeconds >= minDuration &&
             _durationSeconds <= maxDuration,
@@ -126,6 +128,11 @@ contract PredictionMarketFactory is Ownable {
     function setMinBWad(int256 _min) external onlyOwner {
         require(_min > 0, "Factory: b must be > 0");
         minBWad = _min;
+    }
+
+    function setMaxBWad(int256 _max) external onlyOwner {
+        require(_max > minBWad, "Factory: max must be > min");
+        maxBWad = _max;
     }
 
     function setDurationBounds(uint256 _min, uint256 _max) external onlyOwner {

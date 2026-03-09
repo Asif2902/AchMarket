@@ -35,7 +35,7 @@ library LMSRMath {
     {
         int256 sumExp;
         for (uint256 i = 0; i < q.length; ) {
-            sumExp += expWad((q[i] * WAD) / b);
+            sumExp += expWad((q[i] / b) * WAD + (q[i] % b) * WAD / b);
             unchecked { i++; }
         }
         cost = (b * lnWad(sumExp)) / WAD;
