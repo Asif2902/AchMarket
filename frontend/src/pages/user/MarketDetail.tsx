@@ -14,7 +14,7 @@ import { fetchTradeEvents, computeVolumeFromEvents } from '../../services/blocks
 import {
   formatUSDC, formatCompactUSDC, formatWad, formatProbability, probToPercent, formatDate,
   applyBuySlippage, applySellSlippage, parseContractError, resolveImageUri,
-  parseMarketSlug, parseProofLinks
+  parseMarketSlug, parseProofLinks, getStabilityLevel
 } from '../../utils/format';
 import { showToast } from '../../components/Toast';
 import { NETWORK } from '../../config/network';
@@ -645,6 +645,9 @@ export default function MarketDetail() {
           <div className="flex items-center gap-2">
             <span className={`badge ${STAGE_COLORS[detail.stage]} backdrop-blur-sm`}>{STAGE_LABELS[detail.stage]}</span>
             <span className="badge bg-dark-900/70 text-dark-200 border-white/[0.1] backdrop-blur-sm">{detail.category}</span>
+            {(() => { const stab = getStabilityLevel(detail.bWad); return (
+              <span className={`badge ${stab.bgColor} ${stab.color} border backdrop-blur-sm`}>{stab.label}</span>
+            ); })()}
           </div>
         </div>
 

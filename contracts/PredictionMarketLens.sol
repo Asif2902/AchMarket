@@ -88,6 +88,8 @@ contract PredictionMarketLens {
         // Analytics
         uint256   totalVolumeWei;
         uint256   participants;
+        // LMSR
+        int256    bWad;
     }
 
     /// @notice Paginated market list with live LMSR probabilities.
@@ -140,7 +142,8 @@ contract PredictionMarketLens {
                 winningOutcome:          _winning,
                 marketDeadline:          _deadline,
                 totalVolumeWei:          _vol,
-                participants:            _part
+                participants:            _part,
+                bWad:                    pm.b()
             });
 
             unchecked { i++; }

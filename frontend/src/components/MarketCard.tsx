@@ -3,7 +3,7 @@ import ImageWithFallback from './ImageWithFallback';
 import ProbabilityBar from './ProbabilityBar';
 import Countdown from './Countdown';
 import UsdcIcon from './UsdcIcon';
-import { formatCompactUSDC, makeMarketSlug, probToPercent } from '../utils/format';
+import { formatCompactUSDC, makeMarketSlug, probToPercent, getStabilityLevel } from '../utils/format';
 import { STAGE, STAGE_LABELS, STAGE_COLORS } from '../config/network';
 import { getOutcomeColor } from './ProbabilityBar';
 
@@ -20,6 +20,7 @@ export interface MarketSummaryData {
   marketDeadline: number;
   totalVolumeWei: bigint;
   participants: number;
+  bWad: bigint;
 }
 
 interface Props {
@@ -37,6 +38,7 @@ export default function MarketCard({ data }: Props) {
     : 0;
   const leadingPct = hasOutcomes ? probToPercent(data.impliedProbabilitiesWad[leadingIdx]) : 0;
   const leadingColor = getOutcomeColor(leadingIdx);
+  const stability = getStabilityLevel(data.bWad);
 
   return (
     <Link to={`/market/${makeMarketSlug(data.marketId, data.title)}`} className="block group">
@@ -61,6 +63,9 @@ export default function MarketCard({ data }: Props) {
           <div className="absolute top-2.5 right-2.5">
             <span className="badge bg-dark-900/70 text-dark-200 border-white/[0.1] backdrop-blur-sm text-2xs">
               {data.category}
+            </span>
+            <span className={`badge mt-1.5 block ${stability.bgColor} ${stability.color} border backdrop-blur-sm text-2xs`}>
+              {stability.label}
             </span>
           </div>
 

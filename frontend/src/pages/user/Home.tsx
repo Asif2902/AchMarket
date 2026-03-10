@@ -7,7 +7,7 @@ import MarketCard, { MarketSummaryData } from '../../components/MarketCard';
 import { SkeletonCard } from '../../components/LoadingSpinner';
 import EmptyState from '../../components/EmptyState';
 import UsdcIcon from '../../components/UsdcIcon';
-import { formatCompactUSDC } from '../../utils/format';
+import { formatCompactUSDC, STABILITY_FILTERS, getStabilityLevel } from '../../utils/format';
 
 const CATEGORIES = ['All', 'Crypto', 'Sports', 'Politics', 'Entertainment', 'Science', 'Other'];
 const SORT_OPTIONS = [
@@ -31,6 +31,7 @@ export default function Home() {
   const [loading, setLoading] = useState(true);
   const [categoryFilter, setCategoryFilter] = useState('All');
   const [stageFilter, setStageFilter] = useState(0);
+  const [stabilityFilter, setStabilityFilter] = useState('all');
   const [sortBy, setSortBy] = useState('newest');
   const [searchQuery, setSearchQuery] = useState('');
   const [page, setPage] = useState(0);
@@ -62,6 +63,7 @@ export default function Home() {
         marketDeadline: Number(s.marketDeadline),
         totalVolumeWei: s.totalVolumeWei as bigint,
         participants: Number(s.participants),
+        bWad: s.bWad as bigint,
       }));
 
       setMarkets(parsed);
@@ -81,6 +83,13 @@ export default function Home() {
       if (categoryFilter !== 'All' && m.category.toLowerCase() !== categoryFilter.toLowerCase()) return false;
       if (stageFilter !== -1 && m.stage !== stageFilter) return false;
       if (searchQuery && !m.title.toLowerCase().includes(searchQuery.toLowerCase())) return false;
+      if (stabilityFilter !== 'all') {
+        const sf = STABILITY_FILTERS.find(f => f.value === stabilityFilter);
+        if (sf && sf.min !== undefined && sf.max !== undefined) {
+          const bValue = Number(ethers.formatEther(m.bWad));
+          if (bValue < sf.min || bValue > sf.max) return false;
+        }
+      }
       return true;
     })
     .sort((a, b) => {
@@ -139,6 +148,15 @@ export default function Home() {
                   <option key={sf.value} value={sf.value}>{sf.label}</option>
                 ))}
               </select>
+              <select
+                value={stabilityFilter}
+                onChange={(e) => { setStabilityFilter(e.target.value); setPage(0); }}
+                className="select-field text-sm flex-1 sm:flex-none sm:w-36"
+              >
+                {STABILITY_FILTERS.map((sf) => (
+                  <option key={sf.value} value={sf.value}>{sf.label}</option>
+                ))}
+              </select>
             </div>
           </div>
 
@@ -153,6 +171,18 @@ export default function Home() {
               </button>
             ))}
           </div>
+
+          <div className="flex gap-2 overflow-x-auto scrollbar-hide pb-1 -mx-4 px-4 sm:mx-0 sm:px-0 sm:flex-wrap">
+            {STABILITY_FILTERS.map((sf) => (
+              <button
+                key={sf.value}
+                onClick={() => { setStabilityFilter(sf.value); setPage(0); }}
+                className={`chip whitespace-nowrap shrink-0 ${stabilityFilter === sf.value ? 'chip-active' : ''}`}
+              >
+                {sf.label}
+              </button>
+            ))}
+          </div>
         </div>
 
         {!loading && (
@@ -160,9 +190,9 @@ export default function Home() {
             <p className="text-xs text-dark-500 font-medium">
               {filtered.length} market{filtered.length !== 1 ? 's' : ''} found
             </p>
-            {(searchQuery || categoryFilter !== 'All' || stageFilter !== 0) && (
+            {(searchQuery || categoryFilter !== 'All' || stageFilter !== 0 || stabilityFilter !== 'all') && (
               <button
-                onClick={() => { setSearchQuery(''); setCategoryFilter('All'); setStageFilter(0); setPage(0); }}
+                onClick={() => { setSearchQuery(''); setCategoryFilter('All'); setStageFilter(0); setStabilityFilter('all'); setPage(0); }}
                 className="text-xs text-primary-400 hover:text-primary-300 font-medium transition-colors"
               >
                 Clear filters
