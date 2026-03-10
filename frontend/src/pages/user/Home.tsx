@@ -148,15 +148,6 @@ export default function Home() {
                   <option key={sf.value} value={sf.value}>{sf.label}</option>
                 ))}
               </select>
-              <select
-                value={stabilityFilter}
-                onChange={(e) => { setStabilityFilter(e.target.value); setPage(0); }}
-                className="select-field text-sm flex-1 sm:flex-none sm:w-36"
-              >
-                {STABILITY_FILTERS.map((sf) => (
-                  <option key={sf.value} value={sf.value}>{sf.label}</option>
-                ))}
-              </select>
             </div>
           </div>
 
