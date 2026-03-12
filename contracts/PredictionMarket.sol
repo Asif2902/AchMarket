@@ -26,6 +26,7 @@ contract PredictionMarket is ReentrancyGuard {
 
     enum Stage {
         Active,     // trading open
+        Suspended,  // trading paused, can resume
         Resolved,   // winning outcome set, winners can redeem
         Cancelled,  // admin cancelled, everyone refunded
         Expired     // grace period passed without resolution, everyone refunded
@@ -64,7 +65,10 @@ contract PredictionMarket is ReentrancyGuard {
     );
     event MarketResolved(uint256 winningOutcome, string proofUri);
     event MarketCancelled(string reason, string proofUri);
-    event MarketEdited(string newTitle, string newDescription);
+    event MarketEdited(string newTitle, string newDescription, string newCategory);
+    event MarketSuspended();
+    event MarketResumed();
+    event DeadlineEdited(uint256 newDeadline);
     event Redeemed(address indexed user, uint256 amountWei);
     event Refunded(address indexed user, uint256 amountWei);
     event FeeCollected(address indexed recipient, uint256 amountWei);
@@ -133,6 +137,19 @@ contract PredictionMarket is ReentrancyGuard {
         _;
     }
 
+    modifier onlyTradingAllowed() {
+        _assertTradingAllowed();
+        _;
+    }
+
+    modifier onlyEditable() {
+        require(
+            stage == Stage.Active || stage == Stage.Suspended,
+            "PM: market not editable"
+        );
+        _;
+    }
+
     /*//////////////////////////////////////////////////////////////
                            CONSTRUCTOR
     //////////////////////////////////////////////////////////////*/
@@ -185,7 +202,7 @@ contract PredictionMarket is ReentrancyGuard {
         external
         payable
         nonReentrant
-        onlyActive
+        onlyTradingAllowed
     {
         require(block.timestamp <= marketDeadline, "PM: trading period ended");
         require(outcomeIdx < outcomeCount, "PM: invalid outcome");
@@ -229,7 +246,7 @@ contract PredictionMarket is ReentrancyGuard {
     )
         external
         nonReentrant
-        onlyActive
+        onlyTradingAllowed
     {
         require(block.timestamp <= marketDeadline, "PM: trading period ended");
         require(outcomeIdx < outcomeCount, "PM: invalid outcome");
@@ -280,18 +297,18 @@ contract PredictionMarket is ReentrancyGuard {
                            ADMIN: RESOLVE
     //////////////////////////////////////////////////////////////*/
 
-    /// @notice Admin resolves the market while it is Active.
+    /// @notice Admin resolves the market while it is Active or Suspended.
     function resolve(uint256 _winningOutcome, string calldata _proofUri)
         external
         onlyAdmin
     {
         // Auto-expire if grace period has passed
-        if (stage == Stage.Active && block.timestamp > marketDeadline + RESOLUTION_GRACE_PERIOD) {
+        if ((stage == Stage.Active || stage == Stage.Suspended) && block.timestamp > marketDeadline + RESOLUTION_GRACE_PERIOD) {
             stage = Stage.Expired;
             emit MarketCancelled("Auto-expired after grace period", "");
         }
 
-        require(stage == Stage.Active, "PM: market not active or grace period expired");
+        require(stage == Stage.Active || stage == Stage.Suspended, "PM: market not active or grace period expired");
         require(_winningOutcome < outcomeCount, "PM: invalid outcome index");
         require(bytes(_proofUri).length > 0,    "PM: proof URI required");
 
@@ -322,7 +339,7 @@ contract PredictionMarket is ReentrancyGuard {
         external
         onlyAdmin
     {
-        require(stage == Stage.Active, "PM: not active");
+        require(stage == Stage.Active || stage == Stage.Suspended, "PM: not active or suspended");
         require(bytes(reason).length > 0, "PM: reason required");
         require(bytes(_proofUri).length > 0, "PM: proof URI required");
         cancelReason   = reason;
@@ -335,26 +352,61 @@ contract PredictionMarket is ReentrancyGuard {
                        ADMIN: EDIT MARKET
     //////////////////////////////////////////////////////////////*/
 
-    /// @notice Admin can edit the market title and description while it is Active.
-    function editMarket(string calldata _title, string calldata _description)
+    /// @notice Admin can edit the market title, description, and category while Active or Suspended.
+    function editMarket(
+        string calldata _title,
+        string calldata _description,
+        string calldata _category
+    )
         external
         onlyAdmin
+        onlyEditable
     {
-        require(stage == Stage.Active, "PM: not active");
         require(bytes(_title).length > 0, "PM: empty title");
         require(bytes(_description).length > 0, "PM: empty description");
+        require(bytes(_category).length > 0, "PM: empty category");
         title       = _title;
         description = _description;
-        emit MarketEdited(_title, _description);
+        category    = _category;
+        emit MarketEdited(_title, _description, _category);
     }
 
     /*//////////////////////////////////////////////////////////////
-                       EXPIRY (ANYONE CAN TRIGGER)
+                        ADMIN: SUSPEND / RESUME
+    //////////////////////////////////////////////////////////////*/
+
+    /// @notice Admin suspends trading (Active -> Suspended).
+    function suspend() external onlyAdmin {
+        require(stage == Stage.Active, "PM: not active");
+        stage = Stage.Suspended;
+        emit MarketSuspended();
+    }
+
+    /// @notice Admin resumes trading (Suspended -> Active).
+    function resume() external onlyAdmin {
+        require(stage == Stage.Suspended, "PM: not suspended");
+        stage = Stage.Active;
+        emit MarketResumed();
+    }
+
+    /*//////////////////////////////////////////////////////////////
+                        ADMIN: EDIT DEADLINE
+    //////////////////////////////////////////////////////////////*/
+
+    /// @notice Admin edits the market deadline while Active or Suspended.
+    function editDeadline(uint256 newDeadline) external onlyAdmin onlyEditable {
+        require(newDeadline > block.timestamp, "PM: deadline must be in future");
+        marketDeadline = newDeadline;
+        emit DeadlineEdited(newDeadline);
+    }
+
+    /*//////////////////////////////////////////////////////////////
+                        EXPIRY (ANYONE CAN TRIGGER)
     //////////////////////////////////////////////////////////////*/
 
     /// @notice Anyone may call this after the resolution grace period.
     function triggerExpiry() external {
-        require(stage == Stage.Active,    "PM: not active");
+        require(stage == Stage.Active || stage == Stage.Suspended, "PM: not active or suspended");
         require(
             block.timestamp > marketDeadline + RESOLUTION_GRACE_PERIOD,
             "PM: resolution grace period not passed"
@@ -563,11 +615,16 @@ contract PredictionMarket is ReentrancyGuard {
     /// @dev Check market is Active; auto-transition to Expired if
     ///      the resolution grace period (deadline + 3 days) has passed.
     function _assertActive() internal {
-        if (stage == Stage.Active && block.timestamp > marketDeadline + RESOLUTION_GRACE_PERIOD) {
+        if ((stage == Stage.Active || stage == Stage.Suspended) && block.timestamp > marketDeadline + RESOLUTION_GRACE_PERIOD) {
             stage = Stage.Expired;
             emit MarketCancelled("Auto-expired after grace period", "");
         }
         require(stage == Stage.Active, "PM: market not active");
+    }
+
+    /// @dev Check trading is allowed (only Active stage).
+    function _assertTradingAllowed() internal {
+        _assertActive();
     }
 
     function _trackParticipant(address user) internal {

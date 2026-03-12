@@ -404,10 +404,10 @@ export default function CreateMarket() {
                 type="number"
                 value={bValue}
                 onChange={e => setBValue(e.target.value)}
-                min="10"
-                step="10"
+                min="1000"
+                step="100"
                 className="input-field flex-1"
-                placeholder="100"
+                placeholder="1000"
               />
               <div className="relative">
                 <button

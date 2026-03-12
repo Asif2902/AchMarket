@@ -10,7 +10,7 @@ import EmptyState from '../../components/EmptyState';
 import UsdcIcon from '../../components/UsdcIcon';
 import Countdown from '../../components/Countdown';
 import ImageWithFallback from '../../components/ImageWithFallback';
-import { formatCompactUSDC, STABILITY_FILTERS, getStabilityLevel, parseDescription, makeMarketSlug } from '../../utils/format';
+import { formatCompactUSDC, STABILITY_FILTERS, getStabilityLevel, parseDescription, makeMarketSlug, titleCase } from '../../utils/format';
 
 const CATEGORIES = ['All', 'Crypto', 'Sports', 'Politics', 'Entertainment', 'Science', 'Other'];
 const SORT_OPTIONS = [
@@ -22,9 +22,10 @@ const SORT_OPTIONS = [
 const STAGE_FILTERS = [
   { value: -1, label: 'All' },
   { value: 0, label: 'Active' },
-  { value: 1, label: 'Resolved' },
-  { value: 2, label: 'Cancelled' },
-  { value: 3, label: 'Expired' },
+  { value: 1, label: 'Suspended' },
+  { value: 2, label: 'Resolved' },
+  { value: 3, label: 'Cancelled' },
+  { value: 4, label: 'Expired' },
 ];
 const PAGE_SIZE = 12;
 
@@ -103,8 +104,8 @@ export default function Home() {
       switch (sortBy) {
         case 'newest': return b.marketId - a.marketId;
         case 'ending':
-          if (a.stage !== STAGE.Active && b.stage === STAGE.Active) return 1;
-          if (a.stage === STAGE.Active && b.stage !== STAGE.Active) return -1;
+          if (a.stage !== STAGE.Active && a.stage !== STAGE.Suspended && (b.stage === STAGE.Active || b.stage === STAGE.Suspended)) return 1;
+          if ((a.stage === STAGE.Active || a.stage === STAGE.Suspended) && b.stage !== STAGE.Active && b.stage !== STAGE.Suspended) return -1;
           return a.marketDeadline - b.marketDeadline;
         case 'volume': return Number(b.totalVolumeWei - a.totalVolumeWei);
         case 'participants': return b.participants - a.participants;
@@ -115,7 +116,7 @@ export default function Home() {
   const filtered = filteredNoSubcategory.filter((m) => {
     if (subcategoryFilter === 'All') return true;
     const raw = descriptionByMarket[m.market];
-    if (raw === undefined) return false;
+    if (raw === undefined) return true;
     const parsed = parseDescription(raw);
     const sub = (parsed.subcategory ?? '__uncategorized__').trim().toLowerCase();
     return sub === subcategoryFilter;
@@ -264,13 +265,7 @@ export default function Home() {
             </button>
             {subcategoryCounts.map(({ key, count }) => {
               const isUncategorized = key === '__uncategorized__';
-              const label = isUncategorized
-                ? 'Uncategorized'
-                : key
-                    .split(' ')
-                    .filter(Boolean)
-                    .map(word => word.charAt(0).toUpperCase() + word.slice(1))
-                    .join(' ');
+              const label = isUncategorized ? 'Uncategorized' : titleCase(key);
               return (
                 <button
                   key={key}
@@ -449,13 +444,7 @@ export default function Home() {
                       <option value="All">All</option>
                       {subcategoryCounts.map(({ key }) => {
                         const isUncategorized = key === '__uncategorized__';
-                        const label = isUncategorized
-                          ? 'Uncategorized'
-                          : key
-                              .split(' ')
-                              .filter(Boolean)
-                              .map(word => word.charAt(0).toUpperCase() + word.slice(1))
-                              .join(' ');
+                        const label = isUncategorized ? 'Uncategorized' : titleCase(key);
                         return (
                           <option key={key} value={key}>
                             {label}

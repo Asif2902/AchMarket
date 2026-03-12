@@ -141,14 +141,15 @@ contract PredictionMarketFactory is Ownable {
         maxDuration = _max;
     }
 
-    /// @notice Edit an existing market's title and description.
+    /// @notice Edit an existing market's title, description, and category.
     function editMarket(
         address market,
         string calldata _title,
-        string calldata _description
+        string calldata _description,
+        string calldata _category
     ) external onlyOwner {
         require(isMarket[market], "Factory: unknown market");
-        PredictionMarket(payable(market)).editMarket(_title, _description);
+        PredictionMarket(payable(market)).editMarket(_title, _description, _category);
     }
 
     /*//////////////////////////////////////////////////////////////

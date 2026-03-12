@@ -12,28 +12,31 @@ export const NETWORK = {
   blockscoutApi: 'https://testnet.arcscan.app/api',
 } as const;
 
-export const FACTORY_ADDRESS = '0x191C44a5c78Cf936513104557f2354155dfAcCB3';
-export const LENS_ADDRESS = '0x3F365446020560E1682097665577ad87188EB0E7';
+export const FACTORY_ADDRESS = '0x914afD6779AC6aD050D36c7323AfC0ab130B9e5F';
+export const LENS_ADDRESS = '0xD7Bc29266f4C983e4831680e62e767c3c818f989';
 
 export const STAGE = {
   Active: 0,
-  Resolved: 1,
-  Cancelled: 2,
-  Expired: 3,
+  Suspended: 1,
+  Resolved: 2,
+  Cancelled: 3,
+  Expired: 4,
 } as const;
 
 export type Stage = (typeof STAGE)[keyof typeof STAGE];
 
 export const STAGE_LABELS: Record<number, string> = {
   0: 'Active',
-  1: 'Resolved',
-  2: 'Cancelled',
-  3: 'Expired',
+  1: 'Suspended',
+  2: 'Resolved',
+  3: 'Cancelled',
+  4: 'Expired',
 };
 
 export const STAGE_COLORS: Record<number, string> = {
   0: 'bg-green-500/20 text-green-400 border-green-500/30',
-  1: 'bg-blue-500/20 text-blue-400 border-blue-500/30',
-  2: 'bg-red-500/20 text-red-400 border-red-500/30',
-  3: 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30',
+  1: 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30',
+  2: 'bg-blue-500/20 text-blue-400 border-blue-500/30',
+  3: 'bg-red-500/20 text-red-400 border-red-500/30',
+  4: 'bg-gray-500/20 text-gray-400 border-gray-500/30',
 };

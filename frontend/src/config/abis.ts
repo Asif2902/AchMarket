@@ -5,6 +5,7 @@ export const FACTORY_ABI = [
   "function markets(uint256) view returns (address)",
   "function isMarket(address) view returns (bool)",
   "function minBWad() view returns (int256)",
+  "function maxBWad() view returns (int256)",
   "function minDuration() view returns (uint256)",
   "function maxDuration() view returns (uint256)",
   "function getMarkets(uint256 offset, uint256 limit) view returns (address[])",
@@ -13,8 +14,9 @@ export const FACTORY_ABI = [
   // Write functions
   "function createMarket(string _title, string _description, string _category, string _imageUri, string[] _outcomeLabels, int256 _bWad, uint256 _durationSeconds) returns (address market)",
   "function setMinBWad(int256 _min)",
+  "function setMaxBWad(int256 _max)",
   "function setDurationBounds(uint256 _min, uint256 _max)",
-  "function editMarket(address market, string _title, string _description)",
+  "function editMarket(address market, string _title, string _description, string _category)",
 
   // Events
   "event MarketCreated(address indexed market, uint256 indexed marketId, address indexed creator, string title, string category, uint256 outcomeCount, uint256 deadline)",
@@ -75,7 +77,10 @@ export const MARKET_ABI = [
   "function sell(uint256 outcomeIdx, uint256 sharesWad, uint256 minReceiveWei)",
   "function resolve(uint256 _winningOutcome, string _proofUri)",
   "function cancel(string reason, string _proofUri)",
-  "function editMarket(string _title, string _description)",
+  "function editMarket(string _title, string _description, string _category)",
+  "function suspend()",
+  "function resume()",
+  "function editDeadline(uint256 newDeadline)",
   "function triggerExpiry()",
   "function redeem()",
   "function refund()",
