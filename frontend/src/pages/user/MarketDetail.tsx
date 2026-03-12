@@ -1176,8 +1176,9 @@ export default function MarketDetail() {
                     {tradeTab === 'sell' && userInfo && (userInfo.shares[selectedOutcome] || 0n) > 0n && (
                       <button
                         onClick={() => {
-                          const maxShares = Number(userInfo.shares[selectedOutcome]) / 1e18;
-                          setShareAmount(maxShares.toString());
+                          const maxSharesWei = userInfo.shares[selectedOutcome];
+                          const maxShares = ethers.formatEther(maxSharesWei - 1n);
+                          setShareAmount(maxShares);
                         }}
                         className="px-2 py-0.5 rounded text-2xs font-semibold bg-red-500/15 text-red-400 hover:bg-red-500/25 transition-all"
                       >
