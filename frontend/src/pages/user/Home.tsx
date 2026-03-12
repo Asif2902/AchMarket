@@ -10,7 +10,7 @@ import EmptyState from '../../components/EmptyState';
 import UsdcIcon from '../../components/UsdcIcon';
 import Countdown from '../../components/Countdown';
 import ImageWithFallback from '../../components/ImageWithFallback';
-import { formatCompactUSDC, STABILITY_FILTERS, getStabilityLevel, parseDescription, formatDate, makeMarketSlug } from '../../utils/format';
+import { formatCompactUSDC, STABILITY_FILTERS, getStabilityLevel, parseDescription, makeMarketSlug } from '../../utils/format';
 
 const CATEGORIES = ['All', 'Crypto', 'Sports', 'Politics', 'Entertainment', 'Science', 'Other'];
 const SORT_OPTIONS = [
@@ -176,131 +176,125 @@ export default function Home() {
 
   return (
     <div className="min-h-screen">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8 space-y-5">
-        <div className="space-y-3">
-          <div className="flex flex-col sm:flex-row gap-2.5">
-            <div className="relative flex-1">
-              <svg className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-dark-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-              </svg>
-              <input
-                type="text"
-                placeholder="Search markets..."
-                value={searchQuery}
-                onChange={(e) => { setSearchQuery(e.target.value); setPage(0); }}
-                className="input-field pl-10 text-sm"
-              />
-            </div>
-
-            <div className="flex gap-2.5 items-center">
-              <select
-                value={sortBy}
-                onChange={(e) => setSortBy(e.target.value)}
-                className="select-field text-sm flex-1 sm:flex-none sm:w-44"
-              >
-                {SORT_OPTIONS.map((opt) => (
-                  <option key={opt.value} value={opt.value}>{opt.label}</option>
-                ))}
-              </select>
-              <select
-                value={stageFilter}
-                onChange={(e) => { setStageFilter(Number(e.target.value)); setPage(0); }}
-                className="select-field text-sm flex-1 sm:flex-none sm:w-36"
-              >
-                {STAGE_FILTERS.map((sf) => (
-                  <option key={sf.value} value={sf.value}>{sf.label}</option>
-                ))}
-              </select>
-
-              <button
-                onClick={() => setFiltersOpen(true)}
-                className="hidden sm:inline-flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border select-field"
-              >
-                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M3 4h18M4 9h16M6 14h12M9 19h6" />
-                </svg>
-                <span>Filters</span>
-              </button>
-
-              <div className="flex gap-1.5">
-                <button
-                  onClick={() => setViewMode('grid')}
-                  className={`px-2.5 py-1.5 rounded-lg text-xs font-medium border ${
-                    viewMode === 'grid'
-                      ? 'bg-primary-600/80 border-primary-500 text-white'
-                      : 'bg-dark-800 border-white/[0.08] text-dark-300 hover:text-white'
-                  }`}
-                >
-                  Grid
-                </button>
-                <button
-                  onClick={() => setViewMode('list')}
-                  className={`px-2.5 py-1.5 rounded-lg text-xs font-medium border ${
-                    viewMode === 'list'
-                      ? 'bg-primary-600/80 border-primary-500 text-white'
-                      : 'bg-dark-800 border-white/[0.08] text-dark-300 hover:text-white'
-                  }`}
-                >
-                  List
-                </button>
-              </div>
-            </div>
-          </div>
-
-          <div className="flex gap-2 overflow-x-auto scrollbar-hide pb-1 -mx-4 px-4 sm:mx-0 sm:px-0 sm:flex-wrap">
-            {CATEGORIES.map((cat) => (
-              <button
-                key={cat}
-                onClick={() => { setCategoryFilter(cat); setPage(0); }}
-                className={`chip whitespace-nowrap shrink-0 ${categoryFilter === cat ? 'chip-active' : ''}`}
-              >
-                {cat}
-              </button>
-            ))}
-          </div>
-
-          {categoryFilter !== 'All' && subcategoryCounts.length > 0 && (
-            <div className="hidden sm:flex gap-2 overflow-x-auto scrollbar-hide pb-1 -mx-4 px-4 sm:mx-0 sm:px-0 sm:flex-wrap">
-              <button
-                onClick={() => { setSubcategoryFilter('All'); setPage(0); }}
-                className={`chip whitespace-nowrap shrink-0 ${subcategoryFilter === 'All' ? 'chip-active' : ''}`}
-              >
-                All
-              </button>
-              {subcategoryCounts.map(({ key, count }) => {
-                const isUncategorized = key === '__uncategorized__';
-                const label = isUncategorized
-                  ? 'Uncategorized'
-                  : key
-                      .split(' ')
-                      .filter(Boolean)
-                      .map(word => word.charAt(0).toUpperCase() + word.slice(1))
-                      .join(' ');
-                return (
-                  <button
-                    key={key}
-                    onClick={() => { setSubcategoryFilter(key); setPage(0); }}
-                    className={`chip whitespace-nowrap shrink-0 ${subcategoryFilter === key ? 'chip-active' : ''}`}
-                    title={isUncategorized ? 'No subcategory' : label}
-                  >
-                    {label}
-                    <span className="ml-2 text-2xs text-dark-500 font-semibold">{count}</span>
-                  </button>
-                );
-              })}
-            </div>
-          )}
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8 space-y-4">
+        <div className="relative">
+          <svg className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-white/40" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+          </svg>
+          <input
+            type="text"
+            placeholder="Search markets..."
+            value={searchQuery}
+            onChange={(e) => { setSearchQuery(e.target.value); setPage(0); }}
+            className="input-field pl-10 text-sm"
+          />
         </div>
+
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-2 flex-wrap">
+            <select
+              value={sortBy}
+              onChange={(e) => setSortBy(e.target.value)}
+              className="select-field text-sm w-40"
+            >
+              {SORT_OPTIONS.map((opt) => (
+                <option key={opt.value} value={opt.value}>{opt.label}</option>
+              ))}
+            </select>
+            <select
+              value={stageFilter}
+              onChange={(e) => { setStageFilter(Number(e.target.value)); setPage(0); }}
+              className="select-field text-sm w-32"
+            >
+              {STAGE_FILTERS.map((sf) => (
+                <option key={sf.value} value={sf.value}>{sf.label}</option>
+              ))}
+            </select>
+
+            <button
+              onClick={() => setFiltersOpen(true)}
+              className="inline-flex items-center gap-1.5 text-sm px-4 py-3 rounded-lg border bg-[var(--bg-card)] text-white/80 hover:text-white hover:border-white/20 transition-all duration-150"
+            >
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M3 4h18M4 9h16M6 14h12M9 19h6" />
+              </svg>
+              Filters
+            </button>
+          </div>
+
+          <div className="view-toggle">
+            <button
+              onClick={() => setViewMode('grid')}
+              className={viewMode === 'grid' ? 'active' : ''}
+            >
+              <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z" />
+              </svg>
+            </button>
+            <button
+              onClick={() => setViewMode('list')}
+              className={viewMode === 'list' ? 'active' : ''}
+            >
+              <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16M4 18h10" />
+              </svg>
+            </button>
+          </div>
+        </div>
+
+        <div className="flex gap-2 overflow-x-auto scrollbar-hide pb-1 -mx-4 px-4 sm:mx-0 sm:px-0">
+          {CATEGORIES.map((cat) => (
+            <button
+              key={cat}
+              onClick={() => { setCategoryFilter(cat); setPage(0); }}
+              className={`chip whitespace-nowrap shrink-0 ${categoryFilter === cat ? 'chip-active' : ''}`}
+            >
+              {cat}
+            </button>
+          ))}
+        </div>
+
+        {categoryFilter !== 'All' && subcategoryCounts.length > 0 && (
+          <div className="flex gap-2 overflow-x-auto scrollbar-hide pb-1 -mx-4 px-4 sm:mx-0 sm:px-0 animate-fade-in">
+            <button
+              onClick={() => { setSubcategoryFilter('All'); setPage(0); }}
+              className={`chip-sm whitespace-nowrap shrink-0 ${subcategoryFilter === 'All' ? 'chip-sm-active' : ''}`}
+            >
+              All
+            </button>
+            {subcategoryCounts.map(({ key, count }) => {
+              const isUncategorized = key === '__uncategorized__';
+              const label = isUncategorized
+                ? 'Uncategorized'
+                : key
+                    .split(' ')
+                    .filter(Boolean)
+                    .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+                    .join(' ');
+              return (
+                <button
+                  key={key}
+                  onClick={() => { setSubcategoryFilter(key); setPage(0); }}
+                  className={`chip-sm whitespace-nowrap shrink-0 ${subcategoryFilter === key ? 'chip-sm-active' : ''}`}
+                  title={isUncategorized ? 'No subcategory' : label}
+                >
+                  {label}
+                  <span className="ml-1.5 text-[10px] opacity-60">{count}</span>
+                </button>
+              );
+            })}
+          </div>
+        )}
 
         {!loading && (
           <div className="flex items-center justify-between">
-            <p className="text-xs text-dark-500 font-medium">
+            <p className="text-xs text-white/50 font-medium">
               {filtered.length} market{filtered.length !== 1 ? 's' : ''} found
             </p>
             {(searchQuery || categoryFilter !== 'All' || stageFilter !== 0 || stabilityFilter !== 'all') && (
               <button
                 onClick={() => { setSearchQuery(''); setCategoryFilter('All'); setStageFilter(0); setStabilityFilter('all'); setPage(0); }}
-                className="text-xs text-primary-400 hover:text-primary-300 font-medium transition-colors"
+                className="text-xs text-[var(--accent-green)] hover:text-[var(--accent-green)]/80 font-medium transition-colors"
               >
                 Clear filters
               </button>
@@ -309,7 +303,7 @@ export default function Home() {
         )}
 
         {loading ? (
-          <div className={viewMode === 'grid' ? 'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-5' : 'space-y-3'}>
+          <div className={viewMode === 'grid' ? 'grid grid-cols-1 sm:grid-cols-2 gap-4' : 'space-y-3'}>
             {Array.from({ length: 6 }).map((_, i) => (
               <SkeletonCard key={i} />
             ))}
@@ -324,7 +318,7 @@ export default function Home() {
         ) : (
           <>
             {viewMode === 'grid' ? (
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-5">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 {paginated.map((market, i) => (
                   <div
                     key={market.market}
@@ -378,8 +372,8 @@ export default function Home() {
                         onClick={() => setPage(pageNum)}
                         className={`w-8 h-8 rounded-lg text-xs font-medium transition-all ${
                           page === pageNum
-                            ? 'bg-primary-600 text-white shadow-glow-sm'
-                            : 'text-dark-400 hover:text-white hover:bg-white/[0.06]'
+                            ? 'bg-[var(--accent-green)] text-[#0a0a0f] font-semibold'
+                            : 'text-white/50 hover:text-white hover:bg-white/[0.06]'
                         }`}
                       >
                         {pageNum + 1}
@@ -411,12 +405,12 @@ export default function Home() {
               className="absolute inset-0 bg-black/60"
               onClick={() => setFiltersOpen(false)}
             />
-            <div className="relative w-full sm:max-w-md bg-dark-900 border border-white/[0.08] rounded-t-2xl sm:rounded-2xl p-5 sm:p-6 z-50">
+            <div className="relative w-full sm:max-w-md bg-[var(--bg-card)] border border-[var(--bg-border)] rounded-t-2xl sm:rounded-2xl p-5 sm:p-6 z-50">
               <div className="flex items-center justify-between mb-4">
                 <h2 className="text-sm font-semibold text-white">Filters</h2>
                 <button
                   onClick={() => setFiltersOpen(false)}
-                  className="w-8 h-8 rounded-lg bg-dark-800 border border-white/[0.08] flex items-center justify-center text-dark-400 hover:text-white"
+                  className="w-8 h-8 rounded-lg bg-[var(--bg-base)] border border-[var(--bg-border)] flex items-center justify-center text-white/60 hover:text-white"
                 >
                   <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
@@ -426,16 +420,16 @@ export default function Home() {
 
               <div className="space-y-4 max-h-[70vh] overflow-y-auto pr-1">
                 <div>
-                  <p className="text-2xs font-medium text-dark-400 uppercase tracking-wider mb-2">Stability</p>
+                  <p className="text-2xs font-medium text-white/40 uppercase tracking-wider mb-2">Stability</p>
                   <div className="grid grid-cols-2 gap-2">
                     {STABILITY_FILTERS.map(sf => (
                       <button
                         key={sf.value}
                         onClick={() => setStabilityFilter(sf.value)}
-                        className={`px-2.5 py-1.5 rounded-lg text-xs border text-left ${
+                        className={`px-2.5 py-2 rounded-lg text-xs border text-left transition-all duration-150 ${
                           stabilityFilter === sf.value
-                            ? 'bg-primary-600/80 border-primary-500 text-white'
-                            : 'bg-dark-800 border-white/[0.08] text-dark-300 hover:text-white'
+                            ? 'bg-[var(--accent-green)] border-[var(--accent-green)] text-[#0a0a0f] font-semibold'
+                            : 'bg-[var(--bg-base)] border-[var(--bg-border)] text-white/60 hover:text-white hover:border-white/20'
                         }`}
                       >
                         {sf.label}
@@ -446,7 +440,7 @@ export default function Home() {
 
                 {categoryFilter !== 'All' && subcategoryCounts.length > 0 && (
                   <div>
-                    <p className="text-2xs font-medium text-dark-400 uppercase tracking-wider mb-2">Subcategory</p>
+                    <p className="text-2xs font-medium text-white/40 uppercase tracking-wider mb-2">Subcategory</p>
                     <select
                       value={subcategoryFilter}
                       onChange={e => { setSubcategoryFilter(e.target.value); setPage(0); }}
@@ -480,13 +474,13 @@ export default function Home() {
                     setSubcategoryFilter('All');
                     setPage(0);
                   }}
-                  className="text-xs text-dark-400 hover:text-white"
+                  className="text-xs text-white/40 hover:text-white"
                 >
                   Clear filters
                 </button>
                 <button
                   onClick={() => setFiltersOpen(false)}
-                  className="btn-primary text-xs px-4 py-2"
+                  className="px-5 py-2.5 rounded-lg text-sm font-semibold transition-all duration-150 bg-[var(--accent-green)] text-[#0a0a0f] hover:opacity-90"
                 >
                   Done
                 </button>
@@ -503,74 +497,68 @@ function MarketListItem({ data }: { data: MarketSummaryData }) {
   const isActive = data.stage === STAGE.Active;
   const isResolved = data.stage === STAGE.Resolved;
   const isCancelled = data.stage === STAGE.Cancelled || data.stage === STAGE.Expired;
-  const stability = getStabilityLevel(data.bWad);
 
   return (
     <Link
       to={`/market/${makeMarketSlug(data.marketId, data.title)}`}
-      className="block"
+      className="block group"
     >
       <div
-        className={`card overflow-hidden flex gap-3 sm:gap-4 items-stretch ${
-          isResolved ? 'ring-2 ring-emerald-500/30' : isCancelled ? 'ring-2 ring-red-500/20' : ''
+        className={`card overflow-hidden flex gap-4 items-stretch transition-all duration-200 ${
+          isCancelled ? 'card-hover-cancelled' : 'card-hover'
         }`}
       >
-        <div className="relative w-28 sm:w-36 h-24 sm:h-28 flex-shrink-0 overflow-hidden rounded-xl">
+        <div className="relative w-[100px] h-[90px] flex-shrink-0 overflow-hidden rounded-lg">
           <ImageWithFallback
             src={data.imageUri}
             alt={data.title}
-            className={`w-full h-full object-cover ${
+            className={`w-full h-full object-cover transition-all duration-500 group-hover:scale-105 ${
               isCancelled ? 'grayscale-[0.5] opacity-70' : ''
             }`}
           />
-          <div className="absolute top-2 left-2">
+          <div className="absolute top-1.5 left-1.5">
             <span className={`badge-sm ${STAGE_COLORS[data.stage]}`}>{STAGE_LABELS[data.stage]}</span>
           </div>
         </div>
 
-        <div className="flex-1 min-w-0 flex flex-col justify-between py-1.5 pr-1">
-          <div>
-            <div className="flex items-center gap-1.5 text-2xs text-dark-400 mb-1">
-              <span className="px-1.5 py-0.5 rounded-md bg-dark-800 border border-white/[0.06]">
-                {data.category}
-              </span>
-              <span className={`px-1.5 py-0.5 rounded-md border ${stability.bgColor} ${stability.color} text-[10px]`}>
-                {stability.label}
-              </span>
-            </div>
-            <h3 className="text-sm font-semibold text-white line-clamp-2">{data.title}</h3>
+        <div className="flex-1 min-w-0 flex flex-col justify-center py-1.5 pr-1">
+          <div className="flex items-center gap-2 text-[10px] text-white/50 mb-1">
+            <span className="px-1.5 py-0.5 rounded bg-[var(--bg-border)]">
+              {data.category}
+            </span>
           </div>
+          <h3 className={`text-sm font-semibold line-clamp-2 transition-colors duration-200 ${
+            isResolved ? 'text-[var(--accent-green)]' : isCancelled ? 'text-[var(--accent-red)]/80' : 'text-white group-hover:text-[var(--accent-green)]'
+          }`}>{data.title}</h3>
 
-          <div className="mt-2 flex items-center justify-between text-[11px] text-dark-400">
-            <div className="flex items-center gap-2">
-              <span className="flex items-center gap-1">
-                <UsdcIcon size={12} />
-                {formatCompactUSDC(data.totalVolumeWei)} USDC
-              </span>
-              <span className="flex items-center gap-1">
-                <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" />
-                </svg>
-                {data.participants}
-              </span>
-            </div>
-            <div className="flex items-center gap-1 text-[11px]">
+          <div className="mt-2 flex items-center gap-4 text-[11px] text-white/60">
+            <span className="flex items-center gap-1">
+              <UsdcIcon size={11} />
+              <span className="font-medium">{formatCompactUSDC(data.totalVolumeWei)}</span>
+            </span>
+            <span className="flex items-center gap-1">
+              <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" />
+              </svg>
+              <span className="font-medium">{data.participants}</span>
+            </span>
+            <span className="flex items-center gap-1">
               {isActive ? (
                 <>
                   <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
                   </svg>
-                  <Countdown deadline={data.marketDeadline} compact className="text-dark-300" />
+                  <Countdown deadline={data.marketDeadline} compact className="text-white/80" />
                 </>
               ) : (
                 <>
                   <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
                   </svg>
-                  <span>{formatDate(data.marketDeadline)}</span>
+                  <span>Ended</span>
                 </>
               )}
-            </div>
+            </span>
           </div>
         </div>
       </div>
