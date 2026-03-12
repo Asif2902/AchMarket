@@ -10,7 +10,7 @@ import EmptyState from '../../components/EmptyState';
 import UsdcIcon from '../../components/UsdcIcon';
 import Countdown from '../../components/Countdown';
 import ImageWithFallback from '../../components/ImageWithFallback';
-import { formatCompactUSDC, STABILITY_FILTERS, getStabilityLevel, parseDescription, formatDate } from '../../utils/format';
+import { formatCompactUSDC, STABILITY_FILTERS, getStabilityLevel, parseDescription, formatDate, makeMarketSlug } from '../../utils/format';
 
 const CATEGORIES = ['All', 'Crypto', 'Sports', 'Politics', 'Entertainment', 'Science', 'Other'];
 const SORT_OPTIONS = [
@@ -212,7 +212,17 @@ export default function Home() {
                 ))}
               </select>
 
-              <div className="hidden sm:flex gap-1.5">
+              <button
+                onClick={() => setFiltersOpen(true)}
+                className="hidden sm:inline-flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border select-field"
+              >
+                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M3 4h18M4 9h16M6 14h12M9 19h6" />
+                </svg>
+                <span>Filters</span>
+              </button>
+
+              <div className="flex gap-1.5">
                 <button
                   onClick={() => setViewMode('grid')}
                   className={`px-2.5 py-1.5 rounded-lg text-xs font-medium border ${
@@ -249,20 +259,37 @@ export default function Home() {
             ))}
           </div>
 
-          <div className="flex items-center justify-between px-0 sm:px-0">
-            <div className="flex gap-2 overflow-x-auto scrollbar-hide pb-1 -mx-4 px-4 sm:mx-0 sm:px-0 sm:flex-wrap">
-              {/* Category chips already rendered above */}
+          {categoryFilter !== 'All' && subcategoryCounts.length > 0 && (
+            <div className="hidden sm:flex gap-2 overflow-x-auto scrollbar-hide pb-1 -mx-4 px-4 sm:mx-0 sm:px-0 sm:flex-wrap">
+              <button
+                onClick={() => { setSubcategoryFilter('All'); setPage(0); }}
+                className={`chip whitespace-nowrap shrink-0 ${subcategoryFilter === 'All' ? 'chip-active' : ''}`}
+              >
+                All
+              </button>
+              {subcategoryCounts.map(({ key, count }) => {
+                const isUncategorized = key === '__uncategorized__';
+                const label = isUncategorized
+                  ? 'Uncategorized'
+                  : key
+                      .split(' ')
+                      .filter(Boolean)
+                      .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+                      .join(' ');
+                return (
+                  <button
+                    key={key}
+                    onClick={() => { setSubcategoryFilter(key); setPage(0); }}
+                    className={`chip whitespace-nowrap shrink-0 ${subcategoryFilter === key ? 'chip-active' : ''}`}
+                    title={isUncategorized ? 'No subcategory' : label}
+                  >
+                    {label}
+                    <span className="ml-2 text-2xs text-dark-500 font-semibold">{count}</span>
+                  </button>
+                );
+              })}
             </div>
-            <button
-              onClick={() => setFiltersOpen(true)}
-              className="inline-flex items-center gap-1.5 text-xs text-dark-300 hover:text-white px-3 py-1.5 rounded-lg bg-dark-800 border border-white/[0.06] sm:ml-4"
-            >
-              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M3 4h18M4 9h16M6 14h12M9 19h6" />
-              </svg>
-              <span>Filters</span>
-            </button>
-          </div>
+          )}
         </div>
 
         {!loading && (
@@ -480,7 +507,7 @@ function MarketListItem({ data }: { data: MarketSummaryData }) {
 
   return (
     <Link
-      to={`/market/${data.marketId}-${encodeURIComponent(data.title.toLowerCase().replace(/\s+/g, '-'))}`}
+      to={`/market/${makeMarketSlug(data.marketId, data.title)}`}
       className="block"
     >
       <div
