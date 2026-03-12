@@ -294,7 +294,7 @@ export default function Home() {
             {(searchQuery || categoryFilter !== 'All' || stageFilter !== 0 || stabilityFilter !== 'all') && (
               <button
                 onClick={() => { setSearchQuery(''); setCategoryFilter('All'); setStageFilter(0); setStabilityFilter('all'); setPage(0); }}
-                className="text-xs text-[var(--accent-green)] hover:text-[var(--accent-green)]/80 font-medium transition-colors"
+                className="text-xs text-emerald-500 hover:text-emerald-400 font-medium transition-colors"
               >
                 Clear filters
               </button>
@@ -372,7 +372,7 @@ export default function Home() {
                         onClick={() => setPage(pageNum)}
                         className={`w-8 h-8 rounded-lg text-xs font-medium transition-all ${
                           page === pageNum
-                            ? 'bg-[var(--accent-green)] text-[#0a0a0f] font-semibold'
+                            ? 'bg-emerald-600 text-white font-semibold'
                             : 'text-white/50 hover:text-white hover:bg-white/[0.06]'
                         }`}
                       >
@@ -428,7 +428,7 @@ export default function Home() {
                         onClick={() => setStabilityFilter(sf.value)}
                         className={`px-2.5 py-2 rounded-lg text-xs border text-left transition-all duration-150 ${
                           stabilityFilter === sf.value
-                            ? 'bg-[var(--accent-green)] border-[var(--accent-green)] text-[#0a0a0f] font-semibold'
+                            ? 'bg-emerald-600 border-emerald-500 text-white font-semibold'
                             : 'bg-[var(--bg-base)] border-[var(--bg-border)] text-white/60 hover:text-white hover:border-white/20'
                         }`}
                       >
@@ -480,7 +480,7 @@ export default function Home() {
                 </button>
                 <button
                   onClick={() => setFiltersOpen(false)}
-                  className="px-5 py-2.5 rounded-lg text-sm font-semibold transition-all duration-150 bg-[var(--accent-green)] text-[#0a0a0f] hover:opacity-90"
+                  className="px-5 py-2.5 rounded-lg text-sm font-semibold transition-all duration-150 bg-emerald-600 text-white hover:opacity-90"
                 >
                   Done
                 </button>
@@ -528,7 +528,7 @@ function MarketListItem({ data }: { data: MarketSummaryData }) {
             </span>
           </div>
           <h3 className={`text-sm font-semibold line-clamp-2 transition-colors duration-200 ${
-            isResolved ? 'text-[var(--accent-green)]' : isCancelled ? 'text-[var(--accent-red)]/80' : 'text-white group-hover:text-[var(--accent-green)]'
+            isResolved ? 'text-emerald-400' : isCancelled ? 'text-red-400/80' : 'text-white group-hover:text-emerald-400'
           }`}>{data.title}</h3>
 
           <div className="mt-2 flex items-center gap-4 text-[11px] text-white/60">

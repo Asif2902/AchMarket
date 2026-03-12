@@ -1,8 +1,8 @@
 import { probToPercent } from '../utils/format';
 
 const OUTCOME_COLORS = [
-  { bg: 'bg-[#00ff87]', text: 'text-[#00ff87]', light: 'bg-[#00ff87]/15', gradient: 'from-[#00ff87] to-[#00ff87]' },
-  { bg: 'bg-[#ff4466]', text: 'text-[#ff4466]', light: 'bg-[#ff4466]/15', gradient: 'from-[#ff4466] to-[#ff4466]' },
+  { bg: 'bg-emerald-500', text: 'text-emerald-400', light: 'bg-emerald-500/15', gradient: 'from-emerald-500 to-emerald-400' },
+  { bg: 'bg-red-500', text: 'text-red-400', light: 'bg-red-500/15', gradient: 'from-red-500 to-red-400' },
   { bg: 'bg-blue-500', text: 'text-blue-400', light: 'bg-blue-500/15', gradient: 'from-blue-500 to-blue-400' },
   { bg: 'bg-purple-500', text: 'text-purple-400', light: 'bg-purple-500/15', gradient: 'from-purple-500 to-purple-400' },
   { bg: 'bg-orange-500', text: 'text-orange-400', light: 'bg-orange-500/15', gradient: 'from-orange-500 to-orange-400' },
@@ -34,7 +34,7 @@ export default function ProbabilityBar({ labels, probabilities, winningOutcome, 
             <div key={i} className="flex items-center gap-2">
               <div className="flex-1 flex items-center gap-2 min-w-0">
                 <div className={`w-1.5 h-1.5 rounded-full shrink-0 ${color.bg}`} />
-                <span className={`text-xs truncate ${isWinner ? 'text-[#00ff87] font-semibold' : 'text-white/60'}`}>
+                <span className={`text-xs truncate ${isWinner ? 'text-emerald-400 font-semibold' : 'text-white/60'}`}>
                   {isWinner && (
                     <svg className="w-3 h-3 inline mr-0.5 -mt-0.5" fill="currentColor" viewBox="0 0 20 20">
                       <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
@@ -67,7 +67,7 @@ export default function ProbabilityBar({ labels, probabilities, winningOutcome, 
         return (
           <div key={i} className="space-y-1">
             <div className="flex justify-between items-center">
-              <span className={`text-sm font-medium ${isWinner ? 'text-[#00ff87]' : 'text-white/80'}`}>
+              <span className={`text-sm font-medium ${isWinner ? 'text-emerald-400' : 'text-white/80'}`}>
                 {isWinner && (
                   <svg className="w-4 h-4 inline mr-1 -mt-0.5" fill="currentColor" viewBox="0 0 20 20">
                     <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />

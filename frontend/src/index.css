@@ -33,8 +33,8 @@
     --elevate-1: rgba(59, 130, 246, 0.08);
     --elevate-2: rgba(59, 130, 246, 0.15);
 
-    --accent-green: #00ff87;
-    --accent-red: #ff4466;
+    --accent-green: #10b981;
+    --accent-red: #ef4444;
     --bg-base: #0a0a0f;
     --bg-card: #111118;
     --bg-border: #1a1a24;
@@ -355,9 +355,9 @@
     @apply text-white;
   }
   .chip-active {
-    background: var(--accent-green);
-    border: 1px solid var(--accent-green);
-    color: #0a0a0f;
+    background: #10b981;
+    border: 1px solid #10b981;
+    color: white;
     font-weight: 600;
   }
 
@@ -373,9 +373,9 @@
     @apply text-white;
   }
   .chip-sm-active {
-    background: var(--accent-green);
-    border: 1px solid var(--accent-green);
-    color: #0a0a0f;
+    background: #10b981;
+    border: 1px solid #10b981;
+    color: white;
     font-weight: 600;
   }
 
@@ -392,8 +392,8 @@
     color: white;
   }
   .view-toggle button.active {
-    background: var(--accent-green);
-    color: #0a0a0f;
+    background: #10b981;
+    color: white;
     font-weight: 600;
   }
 
