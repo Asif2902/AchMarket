@@ -144,7 +144,8 @@ contract PredictionMarket is ReentrancyGuard {
 
     modifier onlyEditable() {
         require(
-            stage == Stage.Active || stage == Stage.Suspended,
+            (stage == Stage.Active || stage == Stage.Suspended) &&
+            block.timestamp <= marketDeadline,
             "PM: market not editable"
         );
         _;
@@ -302,10 +303,10 @@ contract PredictionMarket is ReentrancyGuard {
         external
         onlyAdmin
     {
-        // Auto-expire if grace period has passed
         if ((stage == Stage.Active || stage == Stage.Suspended) && block.timestamp > marketDeadline + RESOLUTION_GRACE_PERIOD) {
             stage = Stage.Expired;
             emit MarketCancelled("Auto-expired after grace period", "");
+            return;
         }
 
         require(stage == Stage.Active || stage == Stage.Suspended, "PM: market not active or grace period expired");
