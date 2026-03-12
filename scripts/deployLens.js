@@ -7,15 +7,15 @@ async function main() {
   const [deployer] = await hre.ethers.getSigners();
   console.log("Deploying with account:", deployer.address);
 
-  const network = hre.network;
-  const chainId = Number(network.config.chainId);
+  const provider = hre.ethers.provider;
+  const rpcChain = await provider.getNetwork();
+  const chainId = Number(rpcChain.chainId);
   console.log("Current network chainId:", chainId);
 
   if (chainId !== EXPECTED_CHAIN_ID) {
     throw new Error(`Wrong network: expected chainId ${EXPECTED_CHAIN_ID}, got ${chainId}. Aborting deployment of PredictionMarketLens.`);
   }
 
-  const provider = hre.ethers.provider;
   const factoryCode = await provider.getCode(FACTORY_ADDRESS);
   if (factoryCode === '0x') {
     throw new Error(`No contract code at FACTORY_ADDRESS ${FACTORY_ADDRESS} on chain ${chainId}. Aborting deployment of PredictionMarketLens.`);

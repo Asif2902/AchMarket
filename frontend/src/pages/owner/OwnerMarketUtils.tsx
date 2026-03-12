@@ -473,6 +473,7 @@ export function EditModal({ market, onClose, onEdited }: EditModalProps) {
   const [submittingDeadline, setSubmittingDeadline] = useState(false);
   const [submittingSuspend, setSubmittingSuspend] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [deadlineError, setDeadlineError] = useState<string | null>(null);
 
   const isSuspended = market.stage === STAGE.Suspended;
   const isActiveOrSuspended = market.stage === STAGE.Active || market.stage === STAGE.Suspended;
@@ -484,7 +485,15 @@ export function EditModal({ market, onClose, onEdited }: EditModalProps) {
   const customSeconds = ((parseInt(customDays) || 0) * 86400 + (parseInt(customHours) || 0) * 3600);
   const adjustment = removeTime ? -customSeconds : customSeconds;
   const newDeadlineTimestamp = customSeconds > 0 ? market.marketDeadline + adjustment : 0;
-  const canSubmitDeadline = newDeadlineTimestamp > currentTimestamp && !submittingDeadline;
+  const canSubmitDeadline = newDeadlineTimestamp > currentTimestamp && !submittingDeadline && customSeconds > 0;
+
+  useEffect(() => {
+    if (customSeconds <= 0 && (customDays || customHours)) {
+      setDeadlineError('Please enter a time adjustment');
+    } else {
+      setDeadlineError(null);
+    }
+  }, [customDays, customHours, customSeconds]);
 
   const handleSubmit = async () => {
     if (!signer || !canSubmit) return;
@@ -645,7 +654,7 @@ export function EditModal({ market, onClose, onEdited }: EditModalProps) {
               <input
                 type="number"
                 value={customDays}
-                onChange={e => setCustomDays(e.target.value)}
+                onChange={e => setCustomDays(String(Math.max(0, parseInt(e.target.value) || 0)))}
                 min="0"
                 placeholder="0"
                 className="input-field"
@@ -656,7 +665,7 @@ export function EditModal({ market, onClose, onEdited }: EditModalProps) {
               <input
                 type="number"
                 value={customHours}
-                onChange={e => setCustomHours(e.target.value)}
+                onChange={e => setCustomHours(String(Math.min(23, Math.max(0, parseInt(e.target.value) || 0))))}
                 min="0"
                 max="23"
                 placeholder="0"
@@ -664,6 +673,11 @@ export function EditModal({ market, onClose, onEdited }: EditModalProps) {
               />
             </div>
           </div>
+          {deadlineError && (
+            <div className="mt-2 text-xs text-red-400">
+              {deadlineError}
+            </div>
+          )}
           {newDeadlineTimestamp > 0 && (
             <div className="mt-3 p-3 rounded-xl bg-dark-900/40 border border-white/[0.06] flex items-center gap-2">
               <svg className="w-4 h-4 text-dark-400 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">

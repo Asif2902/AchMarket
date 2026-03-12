@@ -151,6 +151,7 @@ export default function Home() {
   }, [categoryFilter]);
 
   useEffect(() => {
+    const BATCH_SIZE = 5;
     const run = async () => {
       if (categoryFilter === 'All') return;
       const targets = markets.filter(m => m.category.toLowerCase() === categoryFilter.toLowerCase());
@@ -158,16 +159,25 @@ export default function Home() {
       if (missing.length === 0) return;
 
       try {
-        const entries = await Promise.all(missing.map(async (m) => {
-          const mc = new ethers.Contract(m.market, MARKET_ABI, readProvider);
-          const desc = await mc.description();
-          return [m.market, desc as string] as const;
-        }));
-        setDescriptionByMarket(prev => {
-          const next = { ...prev };
-          for (const [addr, desc] of entries) next[addr] = desc;
-          return next;
-        });
+        for (let i = 0; i < missing.length; i += BATCH_SIZE) {
+          const batch = missing.slice(i, i + BATCH_SIZE);
+          const entries = await Promise.all(batch.map(async (m) => {
+            try {
+              const mc = new ethers.Contract(m.market, MARKET_ABI, readProvider);
+              const desc = await mc.description();
+              return [m.market, desc as string] as const;
+            } catch (err) {
+              console.error(`Failed to fetch description for ${m.market}:`, err);
+              return null;
+            }
+          }));
+          const validEntries = entries.filter((e): e is [string, string] => e !== null);
+          setDescriptionByMarket(prev => {
+            const next = { ...prev };
+            for (const [addr, desc] of validEntries) next[addr] = desc;
+            return next;
+          });
+        }
       } catch (err) {
         console.error('Failed to fetch market descriptions:', err);
       }
@@ -484,6 +494,8 @@ export default function Home() {
 
 function MarketListItem({ data }: { data: MarketSummaryData }) {
   const isActive = data.stage === STAGE.Active;
+  const isSuspended = data.stage === STAGE.Suspended;
+  const isTradingAllowed = isActive || isSuspended;
   const isResolved = data.stage === STAGE.Resolved;
   const isCancelled = data.stage === STAGE.Cancelled || data.stage === STAGE.Expired;
 
@@ -532,7 +544,7 @@ function MarketListItem({ data }: { data: MarketSummaryData }) {
               <span className="font-medium">{data.participants}</span>
             </span>
             <span className="flex items-center gap-1">
-              {isActive ? (
+              {isTradingAllowed ? (
                 <>
                   <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
