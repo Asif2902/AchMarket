@@ -461,12 +461,23 @@ interface EditModalProps {
   onEdited: () => void;
 }
 
+const DEADLINE_PRESETS = [
+  { label: '+1 Day', seconds: 86400 },
+  { label: '+3 Days', seconds: 259200 },
+  { label: '+7 Days', seconds: 604800 },
+  { label: '+14 Days', seconds: 1209600 },
+  { label: '+30 Days', seconds: 2592000 },
+  { label: 'Custom', seconds: -1 },
+];
+
 export function EditModal({ market, onClose, onEdited }: EditModalProps) {
   const { signer } = useWallet();
   const [title, setTitle] = useState(market.title);
   const [description, setDescription] = useState(market.description);
   const [category, setCategory] = useState(market.category);
-  const [deadline, setDeadline] = useState('');
+  const [deadlinePreset, setDeadlinePreset] = useState(0);
+  const [customDays, setCustomDays] = useState('');
+  const [customHours, setCustomHours] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [submittingDeadline, setSubmittingDeadline] = useState(false);
   const [submittingSuspend, setSubmittingSuspend] = useState(false);
@@ -479,9 +490,13 @@ export function EditModal({ market, onClose, onEdited }: EditModalProps) {
   const canSubmit = title.trim().length > 0 && category.trim().length > 0 && hasChanges && !submitting;
 
   const currentTimestamp = Math.floor(Date.now() / 1000);
-  const newDeadlineTimestamp = deadline.trim().length > 0 ? parseInt(deadline) : 0;
-  const hasDeadlineChange = newDeadlineTimestamp > currentTimestamp;
-  const canSubmitDeadline = hasDeadlineChange && !submittingDeadline;
+  const customSeconds = (parseInt(customDays) || 0) * 86400 + (parseInt(customHours) || 0) * 3600;
+  const newDeadlineTimestamp = deadlinePreset > 0 
+    ? market.marketDeadline + deadlinePreset 
+    : customSeconds > 0 
+      ? market.marketDeadline + customSeconds 
+      : 0;
+  const canSubmitDeadline = newDeadlineTimestamp > currentTimestamp && !submittingDeadline;
 
   const handleSubmit = async () => {
     if (!signer || !canSubmit) return;
@@ -505,8 +520,7 @@ export function EditModal({ market, onClose, onEdited }: EditModalProps) {
     setError(null);
     try {
       const marketContract = new ethers.Contract(market.market, MARKET_ABI, signer);
-      const newDeadline = parseInt(deadline);
-      const tx = await marketContract.editDeadline(newDeadline);
+      const tx = await marketContract.editDeadline(newDeadlineTimestamp);
       await tx.wait();
       onEdited();
     } catch (err) {
@@ -615,32 +629,68 @@ export function EditModal({ market, onClose, onEdited }: EditModalProps) {
               Current: {new Date(market.marketDeadline * 1000).toLocaleString()}
             </span>
           </div>
-          <div className="flex gap-2">
-            <input
-              type="number"
-              value={deadline}
-              onChange={e => setDeadline(e.target.value)}
-              placeholder="Enter Unix timestamp..."
-              className="input-field flex-1"
-            />
-            <button 
-              onClick={handleDeadlineSubmit} 
-              disabled={!canSubmitDeadline}
-              className="btn-secondary whitespace-nowrap"
-            >
-              {submittingDeadline ? (
-                <div className="w-4 h-4 border-2 border-current/30 border-t-current rounded-full animate-spin" />
-              ) : (
-                'Update'
-              )}
-            </button>
+          <div className="flex flex-wrap gap-2 mb-3">
+            {DEADLINE_PRESETS.map(d => (
+              <button
+                key={d.label}
+                onClick={() => setDeadlinePreset(d.seconds)}
+                className={`chip ${deadlinePreset === d.seconds ? 'chip-active' : ''}`}
+              >
+                {d.label}
+              </button>
+            ))}
           </div>
-          {deadline && newDeadlineTimestamp > 0 && (
-            <p className="text-2xs text-dark-400 mt-2">
-              New deadline: {new Date(newDeadlineTimestamp * 1000).toLocaleString()}
-            </p>
+          {deadlinePreset === 0 && (
+            <div className="flex gap-3 mt-2">
+              <div className="flex-1">
+                <label className="text-xs text-dark-400 mb-1 block">Add Days</label>
+                <input
+                  type="number"
+                  value={customDays}
+                  onChange={e => setCustomDays(e.target.value)}
+                  min="0"
+                  placeholder="0"
+                  className="input-field"
+                />
+              </div>
+              <div className="flex-1">
+                <label className="text-xs text-dark-400 mb-1 block">Add Hours</label>
+                <input
+                  type="number"
+                  value={customHours}
+                  onChange={e => setCustomHours(e.target.value)}
+                  min="0"
+                  max="23"
+                  placeholder="0"
+                  className="input-field"
+                />
+              </div>
+            </div>
           )}
-          <p className="text-2xs text-dark-500 mt-1">Set any date in the future. Can be earlier or later than current deadline.</p>
+          {newDeadlineTimestamp > 0 && (
+            <div className="mt-3 p-3 rounded-xl bg-dark-900/40 border border-white/[0.06] flex items-center gap-2">
+              <svg className="w-4 h-4 text-dark-400 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+              </svg>
+              <p className="text-xs text-dark-400">
+                New deadline: <span className="text-white font-medium">{new Date(newDeadlineTimestamp * 1000).toLocaleString()}</span>
+              </p>
+            </div>
+          )}
+          <button 
+            onClick={handleDeadlineSubmit} 
+            disabled={!canSubmitDeadline}
+            className="btn-secondary w-full mt-3"
+          >
+            {submittingDeadline ? (
+              <span className="flex items-center justify-center gap-2">
+                <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                Updating...
+              </span>
+            ) : (
+              'Update Deadline'
+            )}
+          </button>
         </div>
 
         {/* Divider */}
