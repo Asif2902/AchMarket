@@ -84,12 +84,23 @@ export default function MarketDetail() {
   const [poolBalance, setPoolBalance] = useState<bigint>(0n);
   const [showMainFrame, setShowMainFrame] = useState(false);
   const [hoveredImage, setHoveredImage] = useState<number | null>(null);
-  const [aboutExpanded, setAboutExpanded] = useState(true);
+  const [aboutExpanded, setAboutExpanded] = useState(false);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
   const [userBalance, setUserBalance] = useState<bigint | null>(null);
   const hasLoadedOnce = useRef(false);
   const requestSeqRef = useRef(0);
   const prevMarketIdRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    const handleResize = () => {
+      if (window.innerWidth >= 768) {
+        setAboutExpanded(true);
+      }
+    };
+    handleResize();
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
 
   useEffect(() => {
     if (txMessage) {
@@ -1030,6 +1041,17 @@ export default function MarketDetail() {
                 {aboutExpanded && (
                   <div className="px-5 pb-5">
                     <p className="text-sm text-dark-300 leading-relaxed whitespace-pre-wrap">{parsedAbout.description}</p>
+                  </div>
+                )}
+                {!aboutExpanded && (
+                  <div className="px-5 pb-5">
+                    <p className="text-sm text-dark-500">{parsedAbout.description?.slice(0, 80)}...</p>
+                    <span className="text-xs text-[var(--accent-green)] mt-2 inline-flex items-center gap-1">
+                      Tap to read more
+                      <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                      </svg>
+                    </span>
                   </div>
                 )}
               </div>

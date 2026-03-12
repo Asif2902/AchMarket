@@ -64,6 +64,9 @@ export default function MarketCard({ data }: Props) {
             <span className="badge bg-[var(--bg-card)]/80 text-white/90 border-[var(--bg-border)] backdrop-blur-sm text-2xs">
               {data.category}
             </span>
+            <span className={`badge mt-1.5 block ${stability.bgColor} ${stability.color} border backdrop-blur-sm text-2xs`}>
+              {stability.label}
+            </span>
           </div>
 
           <div className="absolute bottom-3 left-3 right-3">
