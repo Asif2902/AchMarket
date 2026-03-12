@@ -644,7 +644,7 @@ export function EditModal({ market, onClose, onEdited }: EditModalProps) {
               New deadline: {new Date(parseInt(deadline) * 1000).toLocaleString()}
             </p>
           )}
-          <p className="text-2xs text-dark-500 mt-1">Can be increased or decreased (must be in the future).</p>
+          <p className="text-2xs text-dark-500 mt-1">Set any date in the future. Can be earlier or later than current deadline.</p>
         </div>
 
         {/* Divider */}
