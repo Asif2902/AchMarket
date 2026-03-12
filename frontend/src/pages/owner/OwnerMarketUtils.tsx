@@ -483,11 +483,6 @@ export function EditModal({ market, onClose, onEdited }: EditModalProps) {
   const hasDeadlineChange = newDeadlineTimestamp > currentTimestamp;
   const canSubmitDeadline = hasDeadlineChange && !submittingDeadline;
 
-  console.log('Deadline input:', deadline);
-  console.log('New timestamp:', newDeadlineTimestamp);
-  console.log('Current timestamp:', currentTimestamp);
-  console.log('Can submit:', canSubmitDeadline);
-
   const handleSubmit = async () => {
     if (!signer || !canSubmit) return;
     setSubmitting(true);
@@ -622,17 +617,10 @@ export function EditModal({ market, onClose, onEdited }: EditModalProps) {
           </div>
           <div className="flex gap-2">
             <input
-              type="datetime-local"
+              type="number"
               value={deadline}
-              onChange={e => {
-                if (e.target.value) {
-                  const date = new Date(e.target.value);
-                  const timestamp = Math.floor(date.getTime() / 1000);
-                  setDeadline(timestamp.toString());
-                } else {
-                  setDeadline('');
-                }
-              }}
+              onChange={e => setDeadline(e.target.value)}
+              placeholder="Enter Unix timestamp..."
               className="input-field flex-1"
             />
             <button 
@@ -649,7 +637,7 @@ export function EditModal({ market, onClose, onEdited }: EditModalProps) {
           </div>
           {deadline && newDeadlineTimestamp > 0 && (
             <p className="text-2xs text-dark-400 mt-2">
-              New deadline: {new Date(newDeadlineTimestamp * 1000).toLocaleString()} (timestamp: {newDeadlineTimestamp})
+              New deadline: {new Date(newDeadlineTimestamp * 1000).toLocaleString()}
             </p>
           )}
           <p className="text-2xs text-dark-500 mt-1">Set any date in the future. Can be earlier or later than current deadline.</p>
