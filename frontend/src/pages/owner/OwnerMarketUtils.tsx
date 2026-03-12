@@ -478,8 +478,15 @@ export function EditModal({ market, onClose, onEdited }: EditModalProps) {
   const hasChanges = title.trim() !== market.title || description.trim() !== market.description || category.trim() !== market.category;
   const canSubmit = title.trim().length > 0 && category.trim().length > 0 && hasChanges && !submitting;
 
-  const hasDeadlineChange = deadline.trim().length > 0 && parseInt(deadline) > Math.floor(Date.now() / 1000);
+  const currentTimestamp = Math.floor(Date.now() / 1000);
+  const newDeadlineTimestamp = deadline.trim().length > 0 ? parseInt(deadline) : 0;
+  const hasDeadlineChange = newDeadlineTimestamp > currentTimestamp;
   const canSubmitDeadline = hasDeadlineChange && !submittingDeadline;
+
+  console.log('Deadline input:', deadline);
+  console.log('New timestamp:', newDeadlineTimestamp);
+  console.log('Current timestamp:', currentTimestamp);
+  console.log('Can submit:', canSubmitDeadline);
 
   const handleSubmit = async () => {
     if (!signer || !canSubmit) return;
@@ -619,7 +626,8 @@ export function EditModal({ market, onClose, onEdited }: EditModalProps) {
               value={deadline}
               onChange={e => {
                 if (e.target.value) {
-                  const timestamp = Math.floor(new Date(e.target.value).getTime() / 1000);
+                  const date = new Date(e.target.value);
+                  const timestamp = Math.floor(date.getTime() / 1000);
                   setDeadline(timestamp.toString());
                 } else {
                   setDeadline('');
@@ -639,9 +647,9 @@ export function EditModal({ market, onClose, onEdited }: EditModalProps) {
               )}
             </button>
           </div>
-          {deadline && (
+          {deadline && newDeadlineTimestamp > 0 && (
             <p className="text-2xs text-dark-400 mt-2">
-              New deadline: {new Date(parseInt(deadline) * 1000).toLocaleString()}
+              New deadline: {new Date(newDeadlineTimestamp * 1000).toLocaleString()} (timestamp: {newDeadlineTimestamp})
             </p>
           )}
           <p className="text-2xs text-dark-500 mt-1">Set any date in the future. Can be earlier or later than current deadline.</p>
