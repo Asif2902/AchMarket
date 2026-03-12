@@ -45,6 +45,7 @@ export default function CreateMarket() {
 
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
+  const [subcategory, setSubcategory] = useState('');
   const [category, setCategory] = useState('Crypto');
   const [customCategory, setCustomCategory] = useState('');
   const [imageUri, setImageUri] = useState('');
@@ -104,10 +105,13 @@ export default function CreateMarket() {
     try {
       const factory = new ethers.Contract(FACTORY_ADDRESS, FACTORY_ABI, signer);
       const bWad = ethers.parseEther(bValue);
+      const encodedDescription = subcategory.trim().length > 0
+        ? `${description.trim()}:::${subcategory.trim()}`
+        : description.trim();
 
       const tx = await factory.createMarket(
         title.trim(),
-        description.trim(),
+        encodedDescription,
         actualCategory.trim(),
         imageUri.trim(),
         outcomes.map(o => o.trim()),
@@ -140,6 +144,7 @@ export default function CreateMarket() {
 
       setTitle('');
       setDescription('');
+      setSubcategory('');
       setImageUri('');
       setOutcomes(['Yes', 'No']);
     } catch (err) {
@@ -222,6 +227,23 @@ export default function CreateMarket() {
               maxLength={2000}
             />
             <p className="text-xs text-dark-500 mt-2">{description.length}/2000 characters</p>
+
+            <div className="mt-4">
+              <label className="label">
+                Subcategory <span className="text-dark-500 font-normal">(optional)</span>
+              </label>
+              <input
+                type="text"
+                value={subcategory}
+                onChange={e => setSubcategory(e.target.value)}
+                placeholder="e.g. DeFi, NBA, Elections"
+                className="input-field"
+                maxLength={80}
+              />
+              <p className="text-2xs text-dark-500 mt-2">
+                If provided, it will be stored separately and shown as a tag.
+              </p>
+            </div>
           </div>
 
           {/* Category & Image */}

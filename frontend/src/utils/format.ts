@@ -400,3 +400,11 @@ export function parseProofLinks(proofUri: string): {
 
   return { image, mainLink, raw, extraLinks };
 }
+
+export function parseDescription(raw: string): { description: string; subcategory: string | null } {
+  const parts = (raw ?? '').split(':::');
+  if (parts.length === 2) {
+    return { description: parts[0].trim(), subcategory: parts[1].trim() };
+  }
+  return { description: raw ?? '', subcategory: null };
+}

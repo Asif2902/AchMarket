@@ -1,13 +1,16 @@
 import { useState, useEffect, useCallback } from 'react';
+import { Link } from 'react-router-dom';
 import { ethers } from 'ethers';
 import { useWallet } from '../../context/WalletContext';
-import { FACTORY_ADDRESS, LENS_ADDRESS, STAGE } from '../../config/network';
-import { FACTORY_ABI, LENS_ABI } from '../../config/abis';
+import { FACTORY_ADDRESS, LENS_ADDRESS, STAGE, STAGE_LABELS, STAGE_COLORS } from '../../config/network';
+import { FACTORY_ABI, LENS_ABI, MARKET_ABI } from '../../config/abis';
 import MarketCard, { MarketSummaryData } from '../../components/MarketCard';
 import { SkeletonCard } from '../../components/LoadingSpinner';
 import EmptyState from '../../components/EmptyState';
 import UsdcIcon from '../../components/UsdcIcon';
-import { formatCompactUSDC, STABILITY_FILTERS, getStabilityLevel } from '../../utils/format';
+import Countdown from '../../components/Countdown';
+import ImageWithFallback from '../../components/ImageWithFallback';
+import { formatCompactUSDC, STABILITY_FILTERS, getStabilityLevel, parseDescription, formatDate } from '../../utils/format';
 
 const CATEGORIES = ['All', 'Crypto', 'Sports', 'Politics', 'Entertainment', 'Science', 'Other'];
 const SORT_OPTIONS = [
@@ -30,11 +33,15 @@ export default function Home() {
   const [markets, setMarkets] = useState<MarketSummaryData[]>([]);
   const [loading, setLoading] = useState(true);
   const [categoryFilter, setCategoryFilter] = useState('All');
+  const [subcategoryFilter, setSubcategoryFilter] = useState<string>('All');
+  const [descriptionByMarket, setDescriptionByMarket] = useState<Record<string, string>>({});
   const [stageFilter, setStageFilter] = useState(0);
   const [stabilityFilter, setStabilityFilter] = useState('all');
   const [sortBy, setSortBy] = useState('newest');
   const [searchQuery, setSearchQuery] = useState('');
   const [page, setPage] = useState(0);
+  const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
+  const [filtersOpen, setFiltersOpen] = useState(false);
 
   const fetchMarkets = useCallback(async () => {
     try {
@@ -78,7 +85,7 @@ export default function Home() {
     fetchMarkets();
   }, [fetchMarkets]);
 
-  const filtered = markets
+  const filteredNoSubcategory = markets
     .filter((m) => {
       if (categoryFilter !== 'All' && m.category.toLowerCase() !== categoryFilter.toLowerCase()) return false;
       if (stageFilter !== -1 && m.stage !== stageFilter) return false;
@@ -105,11 +112,67 @@ export default function Home() {
       }
     });
 
+  const filtered = filteredNoSubcategory.filter((m) => {
+    if (subcategoryFilter === 'All') return true;
+    const raw = descriptionByMarket[m.market];
+    if (raw === undefined) return false;
+    const parsed = parseDescription(raw);
+    const sub = (parsed.subcategory ?? '__uncategorized__').trim().toLowerCase();
+    return sub === subcategoryFilter;
+  });
+
   const totalPages = Math.ceil(filtered.length / PAGE_SIZE);
   const paginated = filtered.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
 
+  const subcategoryCounts = (() => {
+    if (categoryFilter === 'All') return [];
+    const counts = new Map<string, number>();
+    for (const m of filteredNoSubcategory) {
+      if (m.category.toLowerCase() !== categoryFilter.toLowerCase()) continue;
+      const raw = descriptionByMarket[m.market];
+      if (raw === undefined) continue;
+      const parsed = parseDescription(raw);
+      const sub = (parsed.subcategory ?? '__uncategorized__').trim().toLowerCase();
+      counts.set(sub, (counts.get(sub) ?? 0) + 1);
+    }
+    return Array.from(counts.entries())
+      .sort((a, b) => b[1] - a[1])
+      .map(([key, count]) => ({ key, count }));
+  })();
+
   const activeCount = markets.filter(m => m.stage === STAGE.Active).length;
   const totalVolume = markets.reduce((acc, m) => acc + m.totalVolumeWei, 0n);
+
+  useEffect(() => {
+    // Reset subcategory whenever the top-level category changes
+    setSubcategoryFilter('All');
+    setPage(0);
+  }, [categoryFilter]);
+
+  useEffect(() => {
+    const run = async () => {
+      if (categoryFilter === 'All') return;
+      const targets = markets.filter(m => m.category.toLowerCase() === categoryFilter.toLowerCase());
+      const missing = targets.filter(m => descriptionByMarket[m.market] === undefined);
+      if (missing.length === 0) return;
+
+      try {
+        const entries = await Promise.all(missing.map(async (m) => {
+          const mc = new ethers.Contract(m.market, MARKET_ABI, readProvider);
+          const desc = await mc.description();
+          return [m.market, desc as string] as const;
+        }));
+        setDescriptionByMarket(prev => {
+          const next = { ...prev };
+          for (const [addr, desc] of entries) next[addr] = desc;
+          return next;
+        });
+      } catch (err) {
+        console.error('Failed to fetch market descriptions:', err);
+      }
+    };
+    run();
+  }, [categoryFilter, markets, descriptionByMarket, readProvider]);
 
   return (
     <div className="min-h-screen">
@@ -129,7 +192,7 @@ export default function Home() {
               />
             </div>
 
-            <div className="flex gap-2.5">
+            <div className="flex gap-2.5 items-center">
               <select
                 value={sortBy}
                 onChange={(e) => setSortBy(e.target.value)}
@@ -148,6 +211,29 @@ export default function Home() {
                   <option key={sf.value} value={sf.value}>{sf.label}</option>
                 ))}
               </select>
+
+              <div className="hidden sm:flex gap-1.5">
+                <button
+                  onClick={() => setViewMode('grid')}
+                  className={`px-2.5 py-1.5 rounded-lg text-xs font-medium border ${
+                    viewMode === 'grid'
+                      ? 'bg-primary-600/80 border-primary-500 text-white'
+                      : 'bg-dark-800 border-white/[0.08] text-dark-300 hover:text-white'
+                  }`}
+                >
+                  Grid
+                </button>
+                <button
+                  onClick={() => setViewMode('list')}
+                  className={`px-2.5 py-1.5 rounded-lg text-xs font-medium border ${
+                    viewMode === 'list'
+                      ? 'bg-primary-600/80 border-primary-500 text-white'
+                      : 'bg-dark-800 border-white/[0.08] text-dark-300 hover:text-white'
+                  }`}
+                >
+                  List
+                </button>
+              </div>
             </div>
           </div>
 
@@ -163,16 +249,19 @@ export default function Home() {
             ))}
           </div>
 
-          <div className="flex gap-2 overflow-x-auto scrollbar-hide pb-1 -mx-4 px-4 sm:mx-0 sm:px-0 sm:flex-wrap">
-            {STABILITY_FILTERS.map((sf) => (
-              <button
-                key={sf.value}
-                onClick={() => { setStabilityFilter(sf.value); setPage(0); }}
-                className={`chip whitespace-nowrap shrink-0 ${stabilityFilter === sf.value ? 'chip-active' : ''}`}
-              >
-                {sf.label}
-              </button>
-            ))}
+          <div className="flex items-center justify-between px-0 sm:px-0">
+            <div className="flex gap-2 overflow-x-auto scrollbar-hide pb-1 -mx-4 px-4 sm:mx-0 sm:px-0 sm:flex-wrap">
+              {/* Category chips already rendered above */}
+            </div>
+            <button
+              onClick={() => setFiltersOpen(true)}
+              className="inline-flex items-center gap-1.5 text-xs text-dark-300 hover:text-white px-3 py-1.5 rounded-lg bg-dark-800 border border-white/[0.06] sm:ml-4"
+            >
+              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M3 4h18M4 9h16M6 14h12M9 19h6" />
+              </svg>
+              <span>Filters</span>
+            </button>
           </div>
         </div>
 
@@ -193,8 +282,10 @@ export default function Home() {
         )}
 
         {loading ? (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-5">
-            {Array.from({ length: 6 }).map((_, i) => <SkeletonCard key={i} />)}
+          <div className={viewMode === 'grid' ? 'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-5' : 'space-y-3'}>
+            {Array.from({ length: 6 }).map((_, i) => (
+              <SkeletonCard key={i} />
+            ))}
           </div>
         ) : paginated.length === 0 ? (
           <EmptyState
@@ -205,13 +296,31 @@ export default function Home() {
           />
         ) : (
           <>
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-5">
-              {paginated.map((market, i) => (
-                <div key={market.market} className="animate-fade-in-up" style={{ animationDelay: `${i * 60}ms`, animationFillMode: 'both' }}>
-                  <MarketCard data={market} />
-                </div>
-              ))}
-            </div>
+            {viewMode === 'grid' ? (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-5">
+                {paginated.map((market, i) => (
+                  <div
+                    key={market.market}
+                    className="animate-fade-in-up"
+                    style={{ animationDelay: `${i * 60}ms`, animationFillMode: 'both' }}
+                  >
+                    <MarketCard data={market} />
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {paginated.map((market, i) => (
+                  <div
+                    key={market.market}
+                    className="animate-fade-in-up"
+                    style={{ animationDelay: `${i * 60}ms`, animationFillMode: 'both' }}
+                  >
+                    <MarketListItem data={market} />
+                  </div>
+                ))}
+              </div>
+            )}
 
             {totalPages > 1 && (
               <div className="flex items-center justify-center gap-3 pt-6">
@@ -268,7 +377,176 @@ export default function Home() {
             )}
           </>
         )}
+
+        {filtersOpen && (
+          <div className="fixed inset-0 z-40 flex items-end sm:items-center justify-center">
+            <div
+              className="absolute inset-0 bg-black/60"
+              onClick={() => setFiltersOpen(false)}
+            />
+            <div className="relative w-full sm:max-w-md bg-dark-900 border border-white/[0.08] rounded-t-2xl sm:rounded-2xl p-5 sm:p-6 z-50">
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-sm font-semibold text-white">Filters</h2>
+                <button
+                  onClick={() => setFiltersOpen(false)}
+                  className="w-8 h-8 rounded-lg bg-dark-800 border border-white/[0.08] flex items-center justify-center text-dark-400 hover:text-white"
+                >
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+
+              <div className="space-y-4 max-h-[70vh] overflow-y-auto pr-1">
+                <div>
+                  <p className="text-2xs font-medium text-dark-400 uppercase tracking-wider mb-2">Stability</p>
+                  <div className="grid grid-cols-2 gap-2">
+                    {STABILITY_FILTERS.map(sf => (
+                      <button
+                        key={sf.value}
+                        onClick={() => setStabilityFilter(sf.value)}
+                        className={`px-2.5 py-1.5 rounded-lg text-xs border text-left ${
+                          stabilityFilter === sf.value
+                            ? 'bg-primary-600/80 border-primary-500 text-white'
+                            : 'bg-dark-800 border-white/[0.08] text-dark-300 hover:text-white'
+                        }`}
+                      >
+                        {sf.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {categoryFilter !== 'All' && subcategoryCounts.length > 0 && (
+                  <div>
+                    <p className="text-2xs font-medium text-dark-400 uppercase tracking-wider mb-2">Subcategory</p>
+                    <select
+                      value={subcategoryFilter}
+                      onChange={e => { setSubcategoryFilter(e.target.value); setPage(0); }}
+                      className="select-field text-sm w-full"
+                    >
+                      <option value="All">All</option>
+                      {subcategoryCounts.map(({ key }) => {
+                        const isUncategorized = key === '__uncategorized__';
+                        const label = isUncategorized
+                          ? 'Uncategorized'
+                          : key
+                              .split(' ')
+                              .filter(Boolean)
+                              .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+                              .join(' ');
+                        return (
+                          <option key={key} value={key}>
+                            {label}
+                          </option>
+                        );
+                      })}
+                    </select>
+                  </div>
+                )}
+              </div>
+
+              <div className="mt-5 flex items-center justify-between gap-3">
+                <button
+                  onClick={() => {
+                    setStabilityFilter('all');
+                    setSubcategoryFilter('All');
+                    setPage(0);
+                  }}
+                  className="text-xs text-dark-400 hover:text-white"
+                >
+                  Clear filters
+                </button>
+                <button
+                  onClick={() => setFiltersOpen(false)}
+                  className="btn-primary text-xs px-4 py-2"
+                >
+                  Done
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
+  );
+}
+
+function MarketListItem({ data }: { data: MarketSummaryData }) {
+  const isActive = data.stage === STAGE.Active;
+  const isResolved = data.stage === STAGE.Resolved;
+  const isCancelled = data.stage === STAGE.Cancelled || data.stage === STAGE.Expired;
+  const stability = getStabilityLevel(data.bWad);
+
+  return (
+    <Link
+      to={`/market/${data.marketId}-${encodeURIComponent(data.title.toLowerCase().replace(/\s+/g, '-'))}`}
+      className="block"
+    >
+      <div
+        className={`card overflow-hidden flex gap-3 sm:gap-4 items-stretch ${
+          isResolved ? 'ring-2 ring-emerald-500/30' : isCancelled ? 'ring-2 ring-red-500/20' : ''
+        }`}
+      >
+        <div className="relative w-28 sm:w-36 h-24 sm:h-28 flex-shrink-0 overflow-hidden rounded-xl">
+          <ImageWithFallback
+            src={data.imageUri}
+            alt={data.title}
+            className={`w-full h-full object-cover ${
+              isCancelled ? 'grayscale-[0.5] opacity-70' : ''
+            }`}
+          />
+          <div className="absolute top-2 left-2">
+            <span className={`badge-sm ${STAGE_COLORS[data.stage]}`}>{STAGE_LABELS[data.stage]}</span>
+          </div>
+        </div>
+
+        <div className="flex-1 min-w-0 flex flex-col justify-between py-1.5 pr-1">
+          <div>
+            <div className="flex items-center gap-1.5 text-2xs text-dark-400 mb-1">
+              <span className="px-1.5 py-0.5 rounded-md bg-dark-800 border border-white/[0.06]">
+                {data.category}
+              </span>
+              <span className={`px-1.5 py-0.5 rounded-md border ${stability.bgColor} ${stability.color} text-[10px]`}>
+                {stability.label}
+              </span>
+            </div>
+            <h3 className="text-sm font-semibold text-white line-clamp-2">{data.title}</h3>
+          </div>
+
+          <div className="mt-2 flex items-center justify-between text-[11px] text-dark-400">
+            <div className="flex items-center gap-2">
+              <span className="flex items-center gap-1">
+                <UsdcIcon size={12} />
+                {formatCompactUSDC(data.totalVolumeWei)} USDC
+              </span>
+              <span className="flex items-center gap-1">
+                <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" />
+                </svg>
+                {data.participants}
+              </span>
+            </div>
+            <div className="flex items-center gap-1 text-[11px]">
+              {isActive ? (
+                <>
+                  <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                  <Countdown deadline={data.marketDeadline} compact className="text-dark-300" />
+                </>
+              ) : (
+                <>
+                  <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                  </svg>
+                  <span>{formatDate(data.marketDeadline)}</span>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+    </Link>
   );
 }

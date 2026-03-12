@@ -8,7 +8,7 @@ import ProbabilityBar from '../../components/ProbabilityBar';
 import Countdown from '../../components/Countdown';
 import { PageLoader } from '../../components/LoadingSpinner';
 import EmptyState from '../../components/EmptyState';
-import { formatCompactUSDC, formatDate, formatTimeAgo, parseContractError, resolveImageUri } from '../../utils/format';
+import { formatCompactUSDC, formatDate, formatTimeAgo, parseContractError, resolveImageUri, parseDescription } from '../../utils/format';
 import { fetchAllMarketVolumes } from '../../services/blockscout';
 
 export interface OwnerMarketData {
@@ -110,6 +110,7 @@ export function OwnerMarketCard({ market, actions, urgentBadge }: OwnerCardProps
   const isActive = market.stage === STAGE.Active;
   const isResolved = market.stage === STAGE.Resolved;
   const isCancelled = market.stage === STAGE.Cancelled || market.stage === STAGE.Expired;
+  const parsed = parseDescription(market.description ?? '');
 
   return (
     <div className={`card overflow-hidden animate-fade-in transition-all duration-300 ${
@@ -144,6 +145,16 @@ export function OwnerMarketCard({ market, actions, urgentBadge }: OwnerCardProps
           <div className="hidden sm:flex items-center gap-2 mb-2">
             <span className={`badge ${STAGE_COLORS[market.stage]}`}>{STAGE_LABELS[market.stage]}</span>
             <span className="badge bg-dark-750/80 text-dark-300 border-white/[0.08]">{market.category}</span>
+            {parsed.subcategory && (
+              <span className="badge bg-primary-500/15 text-primary-300 border-primary-500/25">
+                {parsed.subcategory
+                  .split(' ')
+                  .filter(Boolean)
+                  .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+                  .join(' ')
+                }
+              </span>
+            )}
             {urgentBadge && (
               <span className="badge bg-yellow-500/20 text-yellow-400 border-yellow-500/30 animate-pulse">
                 {urgentBadge}
@@ -155,7 +166,7 @@ export function OwnerMarketCard({ market, actions, urgentBadge }: OwnerCardProps
             isResolved ? 'text-emerald-400' : isCancelled ? 'text-red-400/80' : 'text-white'
           }`}>{market.title}</h3>
           
-          <p className="text-xs sm:text-sm text-dark-400 line-clamp-2 mt-1.5 mb-3">{market.description}</p>
+          <p className="text-xs sm:text-sm text-dark-400 line-clamp-2 mt-1.5 mb-3">{parsed.description}</p>
 
           <ProbabilityBar
             labels={market.outcomeLabels}
@@ -282,7 +293,7 @@ export function ResolveModal({ market, onClose, onResolved }: ResolveModalProps)
             <ImageWithFallback src={market.imageUri} alt={market.title} className="w-14 h-14 rounded-xl flex-shrink-0" />
             <div className="min-w-0">
               <h3 className="font-semibold text-white text-sm leading-tight">{market.title}</h3>
-              <p className="text-xs text-dark-400 line-clamp-2 mt-1">{market.description}</p>
+              <p className="text-xs text-dark-400 line-clamp-2 mt-1">{parseDescription(market.description ?? '').description}</p>
             </div>
           </div>
         </div>
@@ -605,7 +616,7 @@ export function CancelModal({ market, onClose, onCancelled }: CancelModalProps) 
             <ImageWithFallback src={market.imageUri} alt={market.title} className="w-14 h-14 rounded-xl flex-shrink-0" />
             <div className="min-w-0">
               <h3 className="font-semibold text-white text-sm leading-tight">{market.title}</h3>
-              <p className="text-xs text-dark-400 line-clamp-2 mt-1">{market.description}</p>
+              <p className="text-xs text-dark-400 line-clamp-2 mt-1">{parseDescription(market.description ?? '').description}</p>
             </div>
           </div>
         </div>

@@ -14,7 +14,7 @@ import { fetchTradeEvents, computeVolumeFromEvents } from '../../services/blocks
 import {
   formatUSDC, formatCompactUSDC, formatWad, formatProbability, probToPercent, formatDate,
   applyBuySlippage, applySellSlippage, parseContractError, resolveImageUri,
-  parseMarketSlug, parseProofLinks, getStabilityLevel
+  parseMarketSlug, parseProofLinks, getStabilityLevel, parseDescription
 } from '../../utils/format';
 import { showToast } from '../../components/Toast';
 import { NETWORK } from '../../config/network';
@@ -629,6 +629,8 @@ export default function MarketDetail() {
     }
   }
 
+  const parsedAbout = parseDescription(detail?.description ?? '');
+
   return (
     <div className="min-h-screen animate-fade-in">
       <div className="relative overflow-hidden">
@@ -645,6 +647,16 @@ export default function MarketDetail() {
           <div className="flex items-center gap-2">
             <span className={`badge ${STAGE_COLORS[detail.stage]} backdrop-blur-sm`}>{STAGE_LABELS[detail.stage]}</span>
             <span className="badge bg-dark-900/70 text-dark-200 border-white/[0.1] backdrop-blur-sm">{detail.category}</span>
+            {parsedAbout.subcategory && (
+              <span className="badge bg-primary-500/15 text-primary-300 border-primary-500/25 backdrop-blur-sm">
+                {parsedAbout.subcategory
+                  .split(' ')
+                  .filter(Boolean)
+                  .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+                  .join(' ')
+                }
+              </span>
+            )}
             {(() => { const stab = getStabilityLevel(detail.bWad); return (
               <span className={`badge ${stab.bgColor} ${stab.color} border backdrop-blur-sm`}>{stab.label}</span>
             ); })()}
@@ -1017,7 +1029,7 @@ export default function MarketDetail() {
                 </button>
                 {aboutExpanded && (
                   <div className="px-5 pb-5">
-                    <p className="text-sm text-dark-300 leading-relaxed whitespace-pre-wrap">{detail.description}</p>
+                    <p className="text-sm text-dark-300 leading-relaxed whitespace-pre-wrap">{parsedAbout.description}</p>
                   </div>
                 )}
               </div>
