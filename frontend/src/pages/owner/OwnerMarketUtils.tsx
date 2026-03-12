@@ -608,15 +608,23 @@ export function EditModal({ market, onClose, onEdited }: EditModalProps) {
         {/* Deadline Section */}
         <div className="mb-5">
           <div className="flex items-center justify-between mb-2">
-            <label className="label mb-0">Deadline (Unix Timestamp)</label>
-            <span className="text-2xs text-dark-500">Current: {market.marketDeadline}</span>
+            <label className="label mb-0">Deadline</label>
+            <span className="text-2xs text-dark-500">
+              Current: {new Date(market.marketDeadline * 1000).toLocaleString()}
+            </span>
           </div>
           <div className="flex gap-2">
             <input
-              type="number"
+              type="datetime-local"
               value={deadline}
-              onChange={e => setDeadline(e.target.value)}
-              placeholder="New deadline timestamp..."
+              onChange={e => {
+                if (e.target.value) {
+                  const timestamp = Math.floor(new Date(e.target.value).getTime() / 1000);
+                  setDeadline(timestamp.toString());
+                } else {
+                  setDeadline('');
+                }
+              }}
               className="input-field flex-1"
             />
             <button 
@@ -625,13 +633,18 @@ export function EditModal({ market, onClose, onEdited }: EditModalProps) {
               className="btn-secondary whitespace-nowrap"
             >
               {submittingDeadline ? (
-                <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                <div className="w-4 h-4 border-2 border-current/30 border-t-current rounded-full animate-spin" />
               ) : (
                 'Update'
               )}
             </button>
           </div>
-          <p className="text-2xs text-dark-500 mt-1">Must be greater than current timestamp.</p>
+          {deadline && (
+            <p className="text-2xs text-dark-400 mt-2">
+              New deadline: {new Date(parseInt(deadline) * 1000).toLocaleString()}
+            </p>
+          )}
+          <p className="text-2xs text-dark-500 mt-1">Can be increased or decreased (must be in the future).</p>
         </div>
 
         {/* Divider */}
