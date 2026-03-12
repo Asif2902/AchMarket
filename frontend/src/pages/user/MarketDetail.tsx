@@ -1033,7 +1033,7 @@ export default function MarketDetail() {
                 {!aboutExpanded && (
                   <div className="px-5 pb-5">
                     <p className="text-sm text-dark-500">{parsedAbout.description?.slice(0, 80)}...</p>
-                    <span className="text-xs text-emerald-500 mt-2 inline-flex items-center gap-1">
+                    <span className="text-xs text-[#00d46a] mt-2 inline-flex items-center gap-1">
                       Tap to read more
                       <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                         <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />

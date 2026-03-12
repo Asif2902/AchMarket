@@ -71,7 +71,7 @@ export default function MarketCard({ data }: Props) {
 
           <div className="absolute bottom-3 left-3 right-3">
             <h3 className={`font-semibold text-sm leading-snug line-clamp-2 transition-colors duration-200 ${
-              isResolved ? 'text-emerald-400' : isCancelled ? 'text-red-400/80' : 'text-white'
+              isResolved ? 'text-[#00d46a]' : isCancelled ? 'text-red-400/80' : 'text-white'
             }`}>
               {data.title}
             </h3>
