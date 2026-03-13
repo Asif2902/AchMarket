@@ -117,10 +117,10 @@ export default function Home() {
   const filtered = filteredNoSubcategory.filter((m) => {
     if (subcategoryFilter === 'All') return true;
     const raw = descriptionByMarket[m.market];
-    if (raw === undefined) return true;
+    if (raw === undefined) return false;
     const parsed = parseDescription(raw);
     const sub = (parsed.subcategory ?? '__uncategorized__').trim().toLowerCase();
-    return sub === subcategoryFilter;
+    return sub === subcategoryFilter.trim().toLowerCase();
   });
 
   const totalPages = Math.ceil(filtered.length / PAGE_SIZE);
@@ -239,6 +239,7 @@ export default function Home() {
             <button
               onClick={() => setViewMode('grid')}
               className={viewMode === 'grid' ? 'active' : ''}
+              aria-label="Grid view"
             >
               <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z" />
@@ -247,6 +248,7 @@ export default function Home() {
             <button
               onClick={() => setViewMode('list')}
               className={viewMode === 'list' ? 'active' : ''}
+              aria-label="List view"
             >
               <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16M4 18h10" />
@@ -318,7 +320,7 @@ export default function Home() {
         ) : paginated.length === 0 ? (
           <EmptyState
             title="No markets found"
-            description={searchQuery || categoryFilter !== 'All' || stageFilter !== 0
+            description={searchQuery || categoryFilter !== 'All' || stageFilter !== 0 || stabilityFilter !== 'all'
               ? "Try adjusting your filters or search query."
               : "No prediction markets have been created yet. Check back soon!"}
           />
@@ -432,7 +434,7 @@ export default function Home() {
                     {STABILITY_FILTERS.map(sf => (
                       <button
                         key={sf.value}
-                        onClick={() => setStabilityFilter(sf.value)}
+                        onClick={() => { setStabilityFilter(sf.value); setPage(0); }}
                         className={`px-2.5 py-2 rounded-lg text-xs border text-left transition-all duration-150 ${
                           stabilityFilter === sf.value
                             ? 'bg-[#00d46a] border-[#00d46a] text-white font-semibold'

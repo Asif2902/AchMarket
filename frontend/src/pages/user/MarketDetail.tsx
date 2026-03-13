@@ -95,6 +95,8 @@ export default function MarketDetail() {
     const handleResize = () => {
       if (window.innerWidth >= 768) {
         setAboutExpanded(true);
+      } else {
+        setAboutExpanded(false);
       }
     };
     handleResize();
@@ -1139,6 +1141,9 @@ export default function MarketDetail() {
                             </svg>
                           )}
                           <span className={`font-semibold ${isSelected ? '' : ''}`} style={isSelected ? { color: hexColor } : {}}>{label}</span>
+                          {isSelected && (
+                            <span className="text-xs font-medium" style={{ color: 'rgba(255,255,255,0.6)' }}>({tradeTab === 'buy' ? 'Buying' : 'Selling'} {label})</span>
+                          )}
                         </div>
                         <div className={`font-mono text-sm font-bold tabular-nums`} style={isSelected ? { color: hexColor } : { color: 'rgba(255,255,255,0.4)' }}>
                           ${(pct / 100).toFixed(2)}
@@ -1195,7 +1200,8 @@ export default function MarketDetail() {
                       <button
                         onClick={() => {
                           const maxSharesWei = userInfo.shares[selectedOutcome];
-                          const maxShares = ethers.formatEther(maxSharesWei - 1n);
+                          const effectiveWei = maxSharesWei > 1n ? maxSharesWei - 1n : maxSharesWei;
+                          const maxShares = ethers.formatEther(effectiveWei);
                           setShareAmount(maxShares);
                         }}
                         className="px-2 py-0.5 rounded text-2xs font-semibold bg-red-500/15 text-red-400 hover:bg-red-500/25 transition-all"
