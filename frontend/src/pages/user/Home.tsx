@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import { ethers } from 'ethers';
 import { useWallet } from '../../context/WalletContext';
@@ -36,6 +36,7 @@ export default function Home() {
   const [categoryFilter, setCategoryFilter] = useState('All');
   const [subcategoryFilter, setSubcategoryFilter] = useState<string>('All');
   const [descriptionByMarket, setDescriptionByMarket] = useState<Record<string, string>>({});
+  const fetchedMarketsRef = useRef<Set<string>>(new Set());
   const [stageFilter, setStageFilter] = useState(0);
   const [stabilityFilter, setStabilityFilter] = useState('all');
   const [sortBy, setSortBy] = useState('newest');
@@ -155,7 +156,7 @@ export default function Home() {
     const run = async () => {
       if (categoryFilter === 'All') return;
       const targets = markets.filter(m => m.category.toLowerCase() === categoryFilter.toLowerCase());
-      const missing = targets.filter(m => descriptionByMarket[m.market] === undefined);
+      const missing = targets.filter(m => !fetchedMarketsRef.current.has(m.market));
       if (missing.length === 0) return;
 
       try {
@@ -165,6 +166,7 @@ export default function Home() {
             try {
               const mc = new ethers.Contract(m.market, MARKET_ABI, readProvider);
               const desc = await mc.description();
+              fetchedMarketsRef.current.add(m.market);
               return [m.market, desc as string] as const;
             } catch (err) {
               console.error(`Failed to fetch description for ${m.market}:`, err);
@@ -183,7 +185,7 @@ export default function Home() {
       }
     };
     run();
-  }, [categoryFilter, markets, descriptionByMarket, readProvider]);
+  }, [categoryFilter, markets, readProvider]);
 
   return (
     <div className="min-h-screen">
