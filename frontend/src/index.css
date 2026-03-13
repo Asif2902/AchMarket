@@ -32,6 +32,12 @@
     
     --elevate-1: rgba(59, 130, 246, 0.08);
     --elevate-2: rgba(59, 130, 246, 0.15);
+
+    --accent-green: #00d46a;
+    --accent-red: #ef4444;
+    --bg-base: #0a0a0f;
+    --bg-card: #111118;
+    --bg-border: #1a1a24;
   }
 
   * {
@@ -120,19 +126,24 @@
 
 @layer components {
   .card {
-    @apply backdrop-blur-sm border rounded-2xl shadow-card;
-    background: hsl(var(--card) / 1);
-    border-color: hsl(var(--card-border) / 0.7);
-    background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.03) 0%, rgba(255, 255, 255, 0) 40%);
+    @apply backdrop-blur-sm border rounded-xl;
+    background: var(--bg-card);
+    border-color: var(--bg-border);
   }
   .card-hover {
-    @apply card transition-all duration-300 cursor-pointer;
+    @apply card transition-all duration-200 cursor-pointer;
   }
   .card-hover:hover {
-    @apply shadow-card-hover;
-    border-color: hsl(var(--primary) / 0.25);
-    transform: translateY(-4px);
-    background-image: linear-gradient(180deg, hsl(var(--primary) / 0.06) 0%, rgba(255, 255, 255, 0.01) 40%);
+    border-color: var(--accent-green);
+    box-shadow: 0 0 20px rgba(0, 255, 135, 0.15);
+  }
+
+  .card-hover-cancelled {
+    @apply card transition-all duration-200 cursor-pointer;
+  }
+  .card-hover-cancelled:hover {
+    border-color: var(--accent-red);
+    box-shadow: 0 0 20px rgba(255, 68, 102, 0.15);
   }
 
   .glass {
@@ -244,30 +255,29 @@
   }
 
   .input-field {
-    @apply w-full px-4 py-3 border rounded-xl
+    @apply w-full px-4 py-3 border rounded-lg
            text-white transition-all duration-200
            focus:outline-none focus:ring-2;
-    background: hsl(var(--background) / 0.6);
-    border-color: hsl(var(--border) / 0.15);
+    background: var(--bg-card);
+    border-color: var(--bg-border);
   }
   .input-field::placeholder {
     color: hsl(var(--muted-foreground) / 0.5);
   }
   .input-field:focus {
-    border-color: hsl(var(--primary) / 0.4);
-    --tw-ring-color: hsl(var(--primary) / 0.1);
-    background: hsl(var(--background) / 0.8);
+    border-color: var(--accent-green);
+    --tw-ring-color: rgba(0, 255, 135, 0.1);
   }
   .select-field {
-    @apply w-full px-4 py-3 border rounded-xl
+    @apply w-full px-4 py-3 border rounded-lg
            text-white transition-all duration-200 appearance-none cursor-pointer
            focus:outline-none focus:ring-2;
-    background: rgba(255, 255, 255, 0.04);
-    border-color: hsl(var(--border) / 0.08);
+    background: var(--bg-card);
+    border-color: var(--bg-border);
   }
   .select-field:focus {
-    border-color: hsl(var(--primary) / 0.5);
-    --tw-ring-color: hsl(var(--primary) / 0.1);
+    border-color: var(--accent-green);
+    --tw-ring-color: rgba(0, 255, 135, 0.1);
   }
   .label {
     @apply block text-sm font-medium mb-1.5;
@@ -334,22 +344,57 @@
   }
 
   .chip {
-    @apply inline-flex items-center gap-1.5 px-3.5 py-2 rounded-full text-xs font-medium
-           transition-all duration-200 cursor-pointer select-none;
-    background: hsl(var(--muted) / 0.6);
-    border: 1px solid hsl(var(--border) / 0.08);
-    color: hsl(var(--muted-foreground) / 1);
+    @apply inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-xs font-medium
+           transition-all duration-150 cursor-pointer select-none;
+    background: var(--bg-card);
+    border: 1px solid var(--bg-border);
+    color: hsl(var(--muted-foreground) / 0.8);
   }
   .chip:hover {
-    border: 1px solid hsl(var(--border) / 0.2);
+    border: 1px solid rgba(255, 255, 255, 0.15);
     @apply text-white;
-    background: hsl(var(--muted) / 0.8);
   }
   .chip-active {
-    background: hsl(var(--primary) / 0.15);
-    border: 1px solid hsl(var(--primary) / 0.3);
-    color: hsl(var(--primary) / 1);
-    @apply shadow-glow-sm;
+    background: #00d46a;
+    border: 1px solid #00d46a;
+    color: white;
+    font-weight: 600;
+  }
+
+  .chip-sm {
+    @apply inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium
+           transition-all duration-150 cursor-pointer select-none;
+    background: var(--bg-card);
+    border: 1px solid var(--bg-border);
+    color: hsl(var(--muted-foreground) / 0.8);
+  }
+  .chip-sm:hover {
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    @apply text-white;
+  }
+  .chip-sm-active {
+    background: #00d46a;
+    border: 1px solid #00d46a;
+    color: white;
+    font-weight: 600;
+  }
+
+  .view-toggle {
+    @apply inline-flex items-center p-1 rounded-lg;
+    background: var(--bg-card);
+    border: 1px solid var(--bg-border);
+  }
+  .view-toggle button {
+    @apply inline-flex items-center justify-center px-3 py-2 rounded-md text-xs font-medium transition-all duration-150;
+    color: hsl(var(--muted-foreground) / 0.8);
+  }
+  .view-toggle button:hover {
+    color: white;
+  }
+  .view-toggle button.active {
+    background: #00d46a;
+    color: white;
+    font-weight: 600;
   }
 
   .hover-elevate {

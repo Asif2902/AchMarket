@@ -45,6 +45,7 @@ export default function CreateMarket() {
 
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
+  const [subcategory, setSubcategory] = useState('');
   const [category, setCategory] = useState('Crypto');
   const [customCategory, setCustomCategory] = useState('');
   const [imageUri, setImageUri] = useState('');
@@ -52,7 +53,7 @@ export default function CreateMarket() {
   const [durationPreset, setDurationPreset] = useState(604800);
   const [customDays, setCustomDays] = useState('');
   const [customHours, setCustomHours] = useState('');
-  const [bValue, setBValue] = useState('100');
+  const [bValue, setBValue] = useState('1000');
   const [showBTooltip, setShowBTooltip] = useState(false);
 
   const [submitting, setSubmitting] = useState(false);
@@ -85,7 +86,7 @@ export default function CreateMarket() {
     outcomes.length >= 2 &&
     outcomes.every(o => o.trim().length > 0) &&
     durationSeconds >= 3600 &&
-    parseFloat(bValue) >= 10;
+    parseFloat(bValue) >= 1000;
 
   // Count completed fields for progress
   const completedSteps = [
@@ -94,7 +95,7 @@ export default function CreateMarket() {
     actualCategory.trim().length > 0,
     outcomes.length >= 2 && outcomes.every(o => o.trim().length > 0),
     durationSeconds >= 3600,
-    parseFloat(bValue) >= 10,
+    parseFloat(bValue) >= 1000,
   ].filter(Boolean).length;
 
   const handleSubmit = async () => {
@@ -104,10 +105,13 @@ export default function CreateMarket() {
     try {
       const factory = new ethers.Contract(FACTORY_ADDRESS, FACTORY_ABI, signer);
       const bWad = ethers.parseEther(bValue);
+      const encodedDescription = subcategory.trim().length > 0
+        ? `${description.trim()}:::${subcategory.trim()}`
+        : description.trim();
 
       const tx = await factory.createMarket(
         title.trim(),
-        description.trim(),
+        encodedDescription,
         actualCategory.trim(),
         imageUri.trim(),
         outcomes.map(o => o.trim()),
@@ -140,6 +144,7 @@ export default function CreateMarket() {
 
       setTitle('');
       setDescription('');
+      setSubcategory('');
       setImageUri('');
       setOutcomes(['Yes', 'No']);
     } catch (err) {
@@ -222,6 +227,23 @@ export default function CreateMarket() {
               maxLength={2000}
             />
             <p className="text-xs text-dark-500 mt-2">{description.length}/2000 characters</p>
+
+            <div className="mt-4">
+              <label className="label">
+                Subcategory <span className="text-dark-500 font-normal">(optional)</span>
+              </label>
+              <input
+                type="text"
+                value={subcategory}
+                onChange={e => setSubcategory(e.target.value)}
+                placeholder="e.g. DeFi, NBA, Elections"
+                className="input-field"
+                maxLength={80}
+              />
+              <p className="text-2xs text-dark-500 mt-2">
+                If provided, it will be stored separately and shown as a tag.
+              </p>
+            </div>
           </div>
 
           {/* Category & Image */}
@@ -382,10 +404,10 @@ export default function CreateMarket() {
                 type="number"
                 value={bValue}
                 onChange={e => setBValue(e.target.value)}
-                min="10"
-                step="10"
+                min="1000"
+                step="100"
                 className="input-field flex-1"
-                placeholder="100"
+                placeholder="1000"
               />
               <div className="relative">
                 <button
@@ -401,14 +423,14 @@ export default function CreateMarket() {
                     <p className="font-semibold text-white mb-2">LMSR Liquidity Parameter</p>
                     <p className="text-dark-300 leading-relaxed">Higher values = more stable prices, smaller multipliers. Lower values = more volatile prices, bigger potential returns.</p>
                     <div className="divider my-3" />
-                    <p className="text-dark-400">Rule of thumb: expected total volume / 10. Minimum: 10.</p>
+                    <p className="text-dark-400">Rule of thumb: expected total volume / 10. Minimum: 1000, Maximum: 1,000,000.</p>
                   </div>
                 )}
               </div>
             </div>
             {/* Quick preset buttons */}
             <div className="flex gap-2 mt-3">
-              {[50, 100, 250, 500, 1000].map(v => (
+              {[1000, 2500, 5000, 10000, 50000].map(v => (
                 <button
                   key={v}
                   onClick={() => setBValue(v.toString())}
@@ -538,7 +560,7 @@ export default function CreateMarket() {
                 {[
                   { label: 'Outcomes', value: outcomes.filter(o => o.trim()).length.toString(), ok: outcomes.length >= 2 && outcomes.every(o => o.trim().length > 0) },
                   { label: 'Duration', value: durationSeconds >= 86400 ? `${Math.floor(durationSeconds / 86400)} days` : `${Math.floor(durationSeconds / 3600)} hours`, ok: durationSeconds >= 3600 },
-                  { label: 'Liquidity (b)', value: bValue, ok: parseFloat(bValue) >= 10 },
+                  { label: 'Liquidity (b)', value: bValue, ok: parseFloat(bValue) >= 1000 },
                   { label: 'Expiry', value: durationSeconds >= 3600 ? expiryDate.toLocaleDateString() : '-', ok: durationSeconds >= 3600 },
                 ].map(row => (
                   <div key={row.label} className="flex items-center justify-between">

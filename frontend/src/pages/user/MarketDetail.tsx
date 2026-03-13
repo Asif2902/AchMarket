@@ -14,7 +14,7 @@ import { fetchTradeEvents, computeVolumeFromEvents } from '../../services/blocks
 import {
   formatUSDC, formatCompactUSDC, formatWad, formatProbability, probToPercent, formatDate,
   applyBuySlippage, applySellSlippage, parseContractError, resolveImageUri,
-  parseMarketSlug, parseProofLinks
+  parseMarketSlug, parseProofLinks, parseDescription
 } from '../../utils/format';
 import { showToast } from '../../components/Toast';
 import { NETWORK } from '../../config/network';
@@ -84,12 +84,25 @@ export default function MarketDetail() {
   const [poolBalance, setPoolBalance] = useState<bigint>(0n);
   const [showMainFrame, setShowMainFrame] = useState(false);
   const [hoveredImage, setHoveredImage] = useState<number | null>(null);
-  const [aboutExpanded, setAboutExpanded] = useState(true);
+  const [aboutExpanded, setAboutExpanded] = useState(false);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
   const [userBalance, setUserBalance] = useState<bigint | null>(null);
   const hasLoadedOnce = useRef(false);
   const requestSeqRef = useRef(0);
   const prevMarketIdRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    const handleResize = () => {
+      if (window.innerWidth >= 768) {
+        setAboutExpanded(true);
+      } else {
+        setAboutExpanded(false);
+      }
+    };
+    handleResize();
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
 
   useEffect(() => {
     if (txMessage) {
@@ -629,6 +642,8 @@ export default function MarketDetail() {
     }
   }
 
+  const parsedAbout = parseDescription(detail?.description ?? '');
+
   return (
     <div className="min-h-screen animate-fade-in">
       <div className="relative overflow-hidden">
@@ -1014,7 +1029,22 @@ export default function MarketDetail() {
                 </button>
                 {aboutExpanded && (
                   <div className="px-5 pb-5">
-                    <p className="text-sm text-dark-300 leading-relaxed whitespace-pre-wrap">{detail.description}</p>
+                    <p className="text-sm text-dark-300 leading-relaxed whitespace-pre-wrap">{parsedAbout.description}</p>
+                  </div>
+                )}
+                {!aboutExpanded && (
+                  <div className="px-5 pb-5">
+                    <p className="text-sm text-dark-500">
+                      {parsedAbout.description && parsedAbout.description.length > 80
+                        ? parsedAbout.description.slice(0, 80) + '...'
+                        : parsedAbout.description}
+                    </p>
+                    <span className="text-xs text-[#00d46a] mt-2 inline-flex items-center gap-1">
+                      Tap to read more
+                      <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                      </svg>
+                    </span>
                   </div>
                 )}
               </div>
@@ -1075,30 +1105,51 @@ export default function MarketDetail() {
                 </div>
 
                 {/* Outcome selector */}
-                <div className="space-y-1.5 mb-4">
+                <div className="flex gap-2 mb-4">
                   {detail.outcomeLabels.map((label, i) => {
-                    const color = getOutcomeColor(i);
                     const userShares = userInfo?.shares[i] || 0n;
                     const pct = probToPercent(detail.impliedProbabilitiesWad[i]);
+                    const isSelected = selectedOutcome === i;
+                    const color = getOutcomeColor(i);
+                    const colorHexMap: Record<string, string> = {
+                      'bg-[#00d46a]': '#00d46a',
+                      'bg-red-500': '#ef4444',
+                      'bg-blue-500': '#3b82f6',
+                      'bg-purple-500': '#a855f7',
+                      'bg-orange-500': '#f97316',
+                      'bg-cyan-500': '#06b6d4',
+                    };
+                    const hexColor = colorHexMap[color.bg] || '#3b82f6';
                     return (
                       <button
                         key={i}
                         onClick={() => setSelectedOutcome(i)}
-                        className={`w-full p-3 rounded-xl text-left text-sm transition-all border ${
-                          selectedOutcome === i
-                            ? 'border-primary-500/30 bg-primary-500/8'
-                            : 'border-white/[0.06] bg-dark-900/30 hover:border-white/[0.08]'
+                        className={`flex-1 p-3 rounded-xl text-center text-sm transition-all border-2 relative ${
+                          isSelected
+                            ? ''
+                            : 'border-white/10 bg-dark-900/40 hover:border-white/20'
                         }`}
+                        style={isSelected ? {
+                          borderColor: hexColor,
+                          backgroundColor: `${hexColor}15`,
+                        } : {}}
                       >
-                        <div className="flex justify-between items-center">
-                          <div className="flex items-center gap-2">
-                            <div className={`w-2 h-2 rounded-full ${color.bg} ${selectedOutcome === i ? 'ring-2 ring-offset-1 ring-offset-dark-900' : ''}`} style={selectedOutcome === i ? { boxShadow: `0 0 0 2px var(--tw-ring-offset-color), 0 0 0 4px currentColor`, color: 'rgba(99,102,241,0.3)' } : {}} />
-                            <span className="font-medium text-white text-sm">{label}</span>
-                          </div>
-                          <span className={`font-mono text-xs font-bold tabular-nums flex items-center gap-1 ${color.text}`}><UsdcIcon size={12} />{(pct / 100).toFixed(2)} USDC</span>
+                        <div className="flex items-center justify-center gap-2 mb-1">
+                          {isSelected && (
+                            <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20" style={{ color: hexColor }}>
+                              <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                            </svg>
+                          )}
+                          <span className={`font-semibold ${isSelected ? '' : ''}`} style={isSelected ? { color: hexColor } : {}}>{label}</span>
+                          {isSelected && (
+                            <span className="text-xs font-medium" style={{ color: 'rgba(255,255,255,0.6)' }}>({tradeTab === 'buy' ? 'Buying' : 'Selling'} {label})</span>
+                          )}
+                        </div>
+                        <div className={`font-mono text-sm font-bold tabular-nums`} style={isSelected ? { color: hexColor } : { color: 'rgba(255,255,255,0.4)' }}>
+                          ${(pct / 100).toFixed(2)}
                         </div>
                         {tradeTab === 'sell' && userShares > 0n && (
-                          <p className="text-2xs text-dark-500 mt-1 ml-4">Your shares: {formatWad(userShares)}</p>
+                          <p className="text-2xs text-dark-400 mt-1">Your shares: {formatWad(userShares)}</p>
                         )}
                       </button>
                     );
@@ -1148,8 +1199,10 @@ export default function MarketDetail() {
                     {tradeTab === 'sell' && userInfo && (userInfo.shares[selectedOutcome] || 0n) > 0n && (
                       <button
                         onClick={() => {
-                          const maxShares = Number(userInfo.shares[selectedOutcome]) / 1e18;
-                          setShareAmount(maxShares.toString());
+                          const maxSharesWei = userInfo.shares[selectedOutcome];
+                          const effectiveWei = maxSharesWei > 1n ? maxSharesWei - 1n : maxSharesWei;
+                          const maxShares = ethers.formatEther(effectiveWei);
+                          setShareAmount(maxShares);
                         }}
                         className="px-2 py-0.5 rounded text-2xs font-semibold bg-red-500/15 text-red-400 hover:bg-red-500/25 transition-all"
                       >

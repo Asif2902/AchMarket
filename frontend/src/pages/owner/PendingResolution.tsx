@@ -17,6 +17,7 @@ export default function PendingResolution() {
   const now = Math.floor(Date.now() / 1000);
   const pending = markets.filter(m =>
     (m.stage === STAGE.Active && m.marketDeadline < now) ||
+    (m.stage === STAGE.Suspended && m.marketDeadline < now) ||
     m.stage === STAGE.Expired
   );
 

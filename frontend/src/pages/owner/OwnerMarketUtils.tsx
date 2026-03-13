@@ -8,7 +8,7 @@ import ProbabilityBar from '../../components/ProbabilityBar';
 import Countdown from '../../components/Countdown';
 import { PageLoader } from '../../components/LoadingSpinner';
 import EmptyState from '../../components/EmptyState';
-import { formatCompactUSDC, formatDate, formatTimeAgo, parseContractError, resolveImageUri } from '../../utils/format';
+import { formatCompactUSDC, formatDate, formatTimeAgo, parseContractError, resolveImageUri, parseDescription, titleCase } from '../../utils/format';
 import { fetchAllMarketVolumes } from '../../services/blockscout';
 
 export interface OwnerMarketData {
@@ -108,8 +108,10 @@ interface OwnerCardProps {
 
 export function OwnerMarketCard({ market, actions, urgentBadge }: OwnerCardProps) {
   const isActive = market.stage === STAGE.Active;
+  const isSuspended = market.stage === STAGE.Suspended;
   const isResolved = market.stage === STAGE.Resolved;
   const isCancelled = market.stage === STAGE.Cancelled || market.stage === STAGE.Expired;
+  const parsed = parseDescription(market.description ?? '');
 
   return (
     <div className={`card overflow-hidden animate-fade-in transition-all duration-300 ${
@@ -144,6 +146,11 @@ export function OwnerMarketCard({ market, actions, urgentBadge }: OwnerCardProps
           <div className="hidden sm:flex items-center gap-2 mb-2">
             <span className={`badge ${STAGE_COLORS[market.stage]}`}>{STAGE_LABELS[market.stage]}</span>
             <span className="badge bg-dark-750/80 text-dark-300 border-white/[0.08]">{market.category}</span>
+            {parsed.subcategory && (
+              <span className="badge bg-primary-500/15 text-primary-300 border-primary-500/25">
+                {titleCase(parsed.subcategory)}
+              </span>
+            )}
             {urgentBadge && (
               <span className="badge bg-yellow-500/20 text-yellow-400 border-yellow-500/30 animate-pulse">
                 {urgentBadge}
@@ -155,7 +162,7 @@ export function OwnerMarketCard({ market, actions, urgentBadge }: OwnerCardProps
             isResolved ? 'text-emerald-400' : isCancelled ? 'text-red-400/80' : 'text-white'
           }`}>{market.title}</h3>
           
-          <p className="text-xs sm:text-sm text-dark-400 line-clamp-2 mt-1.5 mb-3">{market.description}</p>
+          <p className="text-xs sm:text-sm text-dark-400 line-clamp-2 mt-1.5 mb-3">{parsed.description}</p>
 
           <ProbabilityBar
             labels={market.outcomeLabels}
@@ -175,7 +182,7 @@ export function OwnerMarketCard({ market, actions, urgentBadge }: OwnerCardProps
               <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
               {market.participants}
             </span>
-            {isActive ? (
+            {isActive || isSuspended ? (
               <span className="flex items-center gap-1">
                 <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
                 <Countdown deadline={market.marketDeadline} compact className="text-dark-300" />
@@ -282,7 +289,7 @@ export function ResolveModal({ market, onClose, onResolved }: ResolveModalProps)
             <ImageWithFallback src={market.imageUri} alt={market.title} className="w-14 h-14 rounded-xl flex-shrink-0" />
             <div className="min-w-0">
               <h3 className="font-semibold text-white text-sm leading-tight">{market.title}</h3>
-              <p className="text-xs text-dark-400 line-clamp-2 mt-1">{market.description}</p>
+              <p className="text-xs text-dark-400 line-clamp-2 mt-1">{parseDescription(market.description ?? '').description}</p>
             </div>
           </div>
         </div>
@@ -458,11 +465,35 @@ export function EditModal({ market, onClose, onEdited }: EditModalProps) {
   const { signer } = useWallet();
   const [title, setTitle] = useState(market.title);
   const [description, setDescription] = useState(market.description);
+  const [category, setCategory] = useState(market.category);
+  const [customDays, setCustomDays] = useState('');
+  const [customHours, setCustomHours] = useState('');
+  const [removeTime, setRemoveTime] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [submittingDeadline, setSubmittingDeadline] = useState(false);
+  const [submittingSuspend, setSubmittingSuspend] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [deadlineError, setDeadlineError] = useState<string | null>(null);
 
-  const hasChanges = title.trim() !== market.title || description.trim() !== market.description;
-  const canSubmit = title.trim().length > 0 && hasChanges && !submitting;
+  const isSuspended = market.stage === STAGE.Suspended;
+  const isActiveOrSuspended = market.stage === STAGE.Active || market.stage === STAGE.Suspended;
+
+  const hasChanges = title.trim() !== market.title || description.trim() !== market.description || category.trim() !== market.category;
+  const canSubmit = title.trim().length > 0 && category.trim().length > 0 && hasChanges && !submitting;
+
+  const currentTimestamp = Math.floor(Date.now() / 1000);
+  const customSeconds = ((parseInt(customDays) || 0) * 86400 + (parseInt(customHours) || 0) * 3600);
+  const adjustment = removeTime ? -customSeconds : customSeconds;
+  const newDeadlineTimestamp = customSeconds > 0 ? market.marketDeadline + adjustment : 0;
+  const canSubmitDeadline = newDeadlineTimestamp > currentTimestamp && !submittingDeadline && customSeconds > 0;
+
+  useEffect(() => {
+    if (customSeconds <= 0 && (customDays || customHours)) {
+      setDeadlineError('Please enter a time adjustment');
+    } else {
+      setDeadlineError(null);
+    }
+  }, [customDays, customHours, customSeconds]);
 
   const handleSubmit = async () => {
     if (!signer || !canSubmit) return;
@@ -470,7 +501,7 @@ export function EditModal({ market, onClose, onEdited }: EditModalProps) {
     setError(null);
     try {
       const marketContract = new ethers.Contract(market.market, MARKET_ABI, signer);
-      const tx = await marketContract.editMarket(title.trim(), description.trim());
+      const tx = await marketContract.editMarket(title.trim(), description.trim(), category.trim());
       await tx.wait();
       onEdited();
     } catch (err) {
@@ -480,10 +511,44 @@ export function EditModal({ market, onClose, onEdited }: EditModalProps) {
     }
   };
 
+  const handleDeadlineSubmit = async () => {
+    if (!signer || !canSubmitDeadline) return;
+    setSubmittingDeadline(true);
+    setError(null);
+    try {
+      const marketContract = new ethers.Contract(market.market, MARKET_ABI, signer);
+      const tx = await marketContract.editDeadline(newDeadlineTimestamp);
+      await tx.wait();
+      onEdited();
+    } catch (err) {
+      setError(parseContractError(err));
+    } finally {
+      setSubmittingDeadline(false);
+    }
+  };
+
+  const handleSuspendResume = async () => {
+    if (!signer) return;
+    setSubmittingSuspend(true);
+    setError(null);
+    try {
+      const marketContract = new ethers.Contract(market.market, MARKET_ABI, signer);
+      const tx = isSuspended 
+        ? await marketContract.resume()
+        : await marketContract.suspend();
+      await tx.wait();
+      onEdited();
+    } catch (err) {
+      setError(parseContractError(err));
+    } finally {
+      setSubmittingSuspend(false);
+    }
+  };
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-dark-950/80 backdrop-blur-sm animate-fade-in" onClick={onClose} />
-      <div className="relative card w-full max-w-md p-6 animate-slide-up">
+      <div className="relative card w-full max-w-lg p-6 animate-slide-up max-h-[90vh] overflow-y-auto">
         <button onClick={onClose} className="absolute top-4 right-4 w-8 h-8 rounded-lg bg-dark-750 border border-white/[0.08] flex items-center justify-center text-dark-400 hover:text-white hover:border-white/[0.15] transition-colors">
           <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -496,10 +561,11 @@ export function EditModal({ market, onClose, onEdited }: EditModalProps) {
           </div>
           <div>
             <h2 className="text-lg font-bold text-white">Edit Market</h2>
-            <p className="text-xs text-dark-400">Update title or description</p>
+            <p className="text-xs text-dark-400">Update title, description, category, deadline, or suspend</p>
           </div>
         </div>
 
+        {/* Title */}
         <label className="label">Title <span className="text-red-400">*</span></label>
         <input
           type="text"
@@ -509,39 +575,189 @@ export function EditModal({ market, onClose, onEdited }: EditModalProps) {
           className="input-field mb-3"
         />
 
+        {/* Category */}
+        <label className="label">Category <span className="text-red-400">*</span></label>
+        <input
+          type="text"
+          value={category}
+          onChange={e => setCategory(e.target.value)}
+          placeholder="e.g., Crypto, Sports, Politics..."
+          className="input-field mb-3"
+        />
+
+        {/* Description */}
         <label className="label">Description</label>
         <textarea
           value={description}
           onChange={e => setDescription(e.target.value)}
           placeholder="Market description..."
-          rows={4}
+          rows={3}
           className="input-field mb-1 resize-none"
         />
         <p className="text-2xs text-dark-500 mb-4">Changes are permanent and visible to all users.</p>
 
+        {/* Save Button for Title/Description/Category */}
+        <button 
+          onClick={handleSubmit} 
+          disabled={!canSubmit} 
+          className="btn-primary w-full font-semibold mb-5"
+        >
+          {submitting ? (
+            <span className="flex items-center justify-center gap-2">
+              <div className="w-4 h-4 border-2 border-primary-300/30 border-t-primary-300 rounded-full animate-spin" />
+              Saving...
+            </span>
+          ) : (
+            <span className="flex items-center justify-center gap-2">
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
+              Save Changes
+            </span>
+          )}
+        </button>
+
+        {/* Divider */}
+        <div className="border-t border-white/[0.08] my-5" />
+
+        {/* Deadline Section */}
+        <div className="mb-5">
+          <div className="flex items-center justify-between mb-2">
+            <label className="label mb-0">Deadline</label>
+            <span className="text-2xs text-dark-500">
+              Current: {new Date(market.marketDeadline * 1000).toLocaleString()}
+            </span>
+          </div>
+          <div className="flex gap-2 mt-2 mb-3">
+            <button
+              onClick={() => setRemoveTime(false)}
+              className={`flex-1 py-2 px-3 rounded-lg text-xs font-medium transition-colors ${
+                !removeTime 
+                  ? 'bg-green-500/20 text-green-400 border border-green-500/30' 
+                  : 'bg-dark-800 text-dark-400 border border-white/[0.08]'
+              }`}
+            >
+              + Add Time
+            </button>
+            <button
+              onClick={() => setRemoveTime(true)}
+              className={`flex-1 py-2 px-3 rounded-lg text-xs font-medium transition-colors ${
+                removeTime 
+                  ? 'bg-red-500/20 text-red-400 border border-red-500/30' 
+                  : 'bg-dark-800 text-dark-400 border border-white/[0.08]'
+              }`}
+            >
+              - Remove Time
+            </button>
+          </div>
+          <div className="flex gap-3">
+            <div className="flex-1">
+              <label className="text-xs text-dark-400 mb-1 block">Days</label>
+              <input
+                type="number"
+                value={customDays}
+                onChange={e => setCustomDays(String(Math.max(0, parseInt(e.target.value) || 0)))}
+                min="0"
+                placeholder="0"
+                className="input-field"
+              />
+            </div>
+            <div className="flex-1">
+              <label className="text-xs text-dark-400 mb-1 block">Hours</label>
+              <input
+                type="number"
+                value={customHours}
+                onChange={e => setCustomHours(String(Math.min(23, Math.max(0, parseInt(e.target.value) || 0))))}
+                min="0"
+                max="23"
+                placeholder="0"
+                className="input-field"
+              />
+            </div>
+          </div>
+          {deadlineError && (
+            <div className="mt-2 text-xs text-red-400">
+              {deadlineError}
+            </div>
+          )}
+          {newDeadlineTimestamp > 0 && (
+            <div className="mt-3 p-3 rounded-xl bg-dark-900/40 border border-white/[0.06] flex items-center gap-2">
+              <svg className="w-4 h-4 text-dark-400 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+              </svg>
+              <p className="text-xs text-dark-400">
+                New deadline: <span className="text-white font-medium">{new Date(newDeadlineTimestamp * 1000).toLocaleString()}</span>
+              </p>
+            </div>
+          )}
+          <button 
+            onClick={handleDeadlineSubmit} 
+            disabled={!canSubmitDeadline}
+            className="btn-secondary w-full mt-3"
+          >
+            {submittingDeadline ? (
+              <span className="flex items-center justify-center gap-2">
+                <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                Updating...
+              </span>
+            ) : (
+              'Update Deadline'
+            )}
+          </button>
+        </div>
+
+        {/* Divider */}
+        <div className="border-t border-white/[0.08] my-5" />
+
+        {/* Suspend/Resume Section */}
+        <div className="mb-4">
+          <label className="label">Market Status</label>
+          <div className="flex items-center justify-between p-3 rounded-xl bg-dark-900/60 border border-white/[0.06]">
+            <div className="flex items-center gap-2">
+              {isSuspended ? (
+                <>
+                  <span className="w-2 h-2 rounded-full bg-yellow-500 animate-pulse" />
+                  <span className="text-sm text-yellow-400">Suspended</span>
+                </>
+              ) : (
+                <>
+                  <span className="w-2 h-2 rounded-full bg-green-500" />
+                  <span className="text-sm text-green-400">Active</span>
+                </>
+              )}
+            </div>
+            {isActiveOrSuspended && (
+              <button 
+                onClick={handleSuspendResume} 
+                disabled={submittingSuspend}
+                className={`text-xs px-3 py-1.5 rounded-lg font-medium transition-colors ${
+                  isSuspended 
+                    ? 'bg-green-500/20 text-green-400 hover:bg-green-500/30' 
+                    : 'bg-yellow-500/20 text-yellow-400 hover:bg-yellow-500/30'
+                }`}
+              >
+                {submittingSuspend ? (
+                  <div className="w-4 h-4 border-2 border-current/30 border-t-current rounded-full animate-spin" />
+                ) : isSuspended ? (
+                  'Resume Trading'
+                ) : (
+                  'Suspend Trading'
+                )}
+              </button>
+            )}
+          </div>
+          <p className="text-2xs text-dark-500 mt-2">
+            {isSuspended 
+              ? 'Trading is currently paused. Users cannot buy or sell. Click Resume to re-enable trading.'
+              : 'Suspend to pause all trading. Users will not be able to buy or sell until you resume.'
+            }
+          </p>
+        </div>
+
         {error && (
-          <div className="p-3 rounded-xl bg-red-500/10 text-red-400 border border-red-500/20 text-sm mb-4 flex items-start gap-2">
+          <div className="p-3 rounded-xl bg-red-500/10 text-red-400 border border-red-500/20 text-sm mt-4 flex items-start gap-2">
             <svg className="w-4 h-4 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
             <span>{error}</span>
           </div>
         )}
-
-        <div className="flex gap-3">
-          <button onClick={onClose} className="btn-secondary flex-1">Cancel</button>
-          <button onClick={handleSubmit} disabled={!canSubmit} className="btn-primary flex-1 font-semibold">
-            {submitting ? (
-              <span className="flex items-center justify-center gap-2">
-                <div className="w-4 h-4 border-2 border-primary-300/30 border-t-primary-300 rounded-full animate-spin" />
-                Saving...
-              </span>
-            ) : (
-              <span className="flex items-center justify-center gap-2">
-                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
-                Save Changes
-              </span>
-            )}
-          </button>
-        </div>
       </div>
     </div>
   );
@@ -605,7 +821,7 @@ export function CancelModal({ market, onClose, onCancelled }: CancelModalProps) 
             <ImageWithFallback src={market.imageUri} alt={market.title} className="w-14 h-14 rounded-xl flex-shrink-0" />
             <div className="min-w-0">
               <h3 className="font-semibold text-white text-sm leading-tight">{market.title}</h3>
-              <p className="text-xs text-dark-400 line-clamp-2 mt-1">{market.description}</p>
+              <p className="text-xs text-dark-400 line-clamp-2 mt-1">{parseDescription(market.description ?? '').description}</p>
             </div>
           </div>
         </div>

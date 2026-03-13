@@ -51,7 +51,8 @@ contract PredictionMarketFactory is Ownable {
     uint256 public totalMarkets;
 
     // -- Creation guards ------------------------------------------
-    int256  public minBWad              = 10e18;
+    int256  public minBWad              = 1_000e18;
+    int256  public maxBWad              = 1_000_000e18;
     uint256 public minDuration          = 1 hours;
     uint256 public maxDuration          = 365 days;
 
@@ -82,6 +83,7 @@ contract PredictionMarketFactory is Ownable {
         require(bytes(_category).length    > 0, "Factory: empty category");
         require(_outcomeLabels.length      >= 2, "Factory: need >= 2 outcomes");
         require(_bWad >= minBWad,               "Factory: b too small");
+        require(_bWad <= maxBWad,               "Factory: b too large");
         require(
             _durationSeconds >= minDuration &&
             _durationSeconds <= maxDuration,
@@ -128,20 +130,26 @@ contract PredictionMarketFactory is Ownable {
         minBWad = _min;
     }
 
+    function setMaxBWad(int256 _max) external onlyOwner {
+        require(_max > minBWad, "Factory: max must be > min");
+        maxBWad = _max;
+    }
+
     function setDurationBounds(uint256 _min, uint256 _max) external onlyOwner {
         require(_min < _max && _min > 0, "Factory: invalid bounds");
         minDuration = _min;
         maxDuration = _max;
     }
 
-    /// @notice Edit an existing market's title and description.
+    /// @notice Edit an existing market's title, description, and category.
     function editMarket(
         address market,
         string calldata _title,
-        string calldata _description
+        string calldata _description,
+        string calldata _category
     ) external onlyOwner {
         require(isMarket[market], "Factory: unknown market");
-        PredictionMarket(payable(market)).editMarket(_title, _description);
+        PredictionMarket(payable(market)).editMarket(_title, _description, _category);
     }
 
     /*//////////////////////////////////////////////////////////////

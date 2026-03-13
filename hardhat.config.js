@@ -1,5 +1,4 @@
 require("@nomicfoundation/hardhat-toolbox");
-require("hardhat-contract-sizer");
 require("dotenv").config();
 
 /** @type import('hardhat/config').HardhatUserConfig */
@@ -16,16 +15,9 @@ module.exports = {
   },
   networks: {
     arc_testnet: {
-      url: process.env.RPC_URL || "",
-      accounts: process.env.DEPLOYER_PRIVATE_KEY
-        ? [process.env.DEPLOYER_PRIVATE_KEY]
-        : [],
-      chainId: Number(process.env.CHAIN_ID) || undefined,
+      url: "https://rpc.testnet.arc.network",
+      accounts: process.env.DEPLOYER_PRIVATE_KEY ? [process.env.DEPLOYER_PRIVATE_KEY] : [],
+      chainId: 5042002,
     },
-  },
-  contractSizer: {
-    alphaSort: true,
-    runOnCompile: true,
-    disambiguatePaths: false,
   },
 };

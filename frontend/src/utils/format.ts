@@ -1,5 +1,58 @@
 import { ethers } from 'ethers';
 
+export interface StabilityLevel {
+  label: string;
+  color: string;
+  gradient: string;
+  bgColor: string;
+}
+
+export interface StabilityFilter {
+  value: string;
+  label: string;
+  min?: number;
+  max?: number;
+}
+
+const STABILITY_THRESHOLDS = [
+  { max: 5000, level: { label: 'Degen Market', color: 'text-orange-400', gradient: 'from-orange-500 to-red-500', bgColor: 'bg-orange-500/20 border-orange-500/30' } },
+  { max: 10000, level: { label: 'Highly Unstable', color: 'text-red-400', gradient: 'from-red-500 to-rose-600', bgColor: 'bg-red-500/20 border-red-500/30' } },
+  { max: 25000, level: { label: 'Unstable', color: 'text-amber-400', gradient: 'from-amber-500 to-orange-500', bgColor: 'bg-amber-500/20 border-amber-500/30' } },
+  { max: 50000, level: { label: 'Stable', color: 'text-emerald-400', gradient: 'from-emerald-500 to-teal-500', bgColor: 'bg-emerald-500/20 border-emerald-500/30' } },
+  { max: 100000, level: { label: 'Highly Stable', color: 'text-cyan-400', gradient: 'from-cyan-500 to-blue-500', bgColor: 'bg-cyan-500/20 border-cyan-500/30' } },
+  { max: 250000, level: { label: 'Extremely Stable', color: 'text-blue-400', gradient: 'from-blue-500 to-indigo-500', bgColor: 'bg-blue-500/20 border-blue-500/30' } },
+] as const;
+
+const STABILITY_FILTERS_BASE = [
+  { value: 'degen_market', label: 'Degen Market', min: 0, max: 5000 },
+  { value: 'highly_unstable', label: 'Highly Unstable', min: 5001, max: 10000 },
+  { value: 'unstable', label: 'Unstable', min: 10001, max: 25000 },
+  { value: 'stable', label: 'Stable', min: 25001, max: 50000 },
+  { value: 'highly_stable', label: 'Highly Stable', min: 50001, max: 100000 },
+  { value: 'extremely_stable', label: 'Extremely Stable', min: 100001, max: 250000 },
+  { value: 'whale_stable', label: 'Whale Stable', min: 250001, max: Infinity },
+] as const;
+
+export function getStabilityLevel(bWad: bigint | string): StabilityLevel {
+  const bValue = Number(ethers.formatEther(bWad));
+
+  for (const { max, level } of STABILITY_THRESHOLDS) {
+    if (bValue <= max) return level;
+  }
+
+  return {
+    label: 'Whale Stable',
+    color: 'text-violet-400',
+    gradient: 'from-violet-500 to-purple-600',
+    bgColor: 'bg-violet-500/20 border-violet-500/30',
+  };
+}
+
+export const STABILITY_FILTERS: StabilityFilter[] = [
+  { value: 'all', label: 'All Stability' },
+  ...STABILITY_FILTERS_BASE,
+];
+
 /**
  * Format a wei amount to human-readable USDC with appropriate decimals.
  */
@@ -309,4 +362,20 @@ export function parseProofLinks(proofUri: string): {
   }
 
   return { image, mainLink, raw, extraLinks };
+}
+
+export function parseDescription(raw: string): { description: string; subcategory: string | null } {
+  const parts = (raw ?? '').split(':::');
+  if (parts.length === 2) {
+    return { description: parts[0].trim(), subcategory: parts[1].trim() };
+  }
+  return { description: raw ?? '', subcategory: null };
+}
+
+export function titleCase(str: string): string {
+  return str
+    .split(' ')
+    .filter(Boolean)
+    .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+    .join(' ');
 }
