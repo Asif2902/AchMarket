@@ -1103,7 +1103,7 @@ export default function MarketDetail() {
                 </div>
 
                 {/* Outcome selector */}
-                <div className="space-y-3 mb-4">
+                <div className="flex gap-2 mb-4">
                   {detail.outcomeLabels.map((label, i) => {
                     const userShares = userInfo?.shares[i] || 0n;
                     const pct = probToPercent(detail.impliedProbabilitiesWad[i]);
@@ -1115,49 +1115,29 @@ export default function MarketDetail() {
                       <button
                         key={i}
                         onClick={() => setSelectedOutcome(i)}
-                        className={`w-full p-4 rounded-xl text-left text-sm transition-all border-2 relative ${
+                        className={`flex-1 p-3 rounded-xl text-center text-sm transition-all border-2 relative ${
                           isSelected
                             ? isBinary
                               ? isYes
-                                ? 'border-emerald-500 bg-emerald-500/15 shadow-[0_0_20px_rgba(16,185,129,0.3)]'
-                                : 'border-red-500 bg-red-500/15 shadow-[0_0_20px_rgba(239,68,68,0.3)]'
-                              : 'border-indigo-500 bg-indigo-500/15'
+                                ? 'border-emerald-500 bg-emerald-500/10'
+                                : 'border-red-500 bg-red-500/10'
+                              : 'border-indigo-500 bg-indigo-500/10'
                             : 'border-white/10 bg-dark-900/40 hover:border-white/20'
                         }`}
                       >
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-3">
-                            <div className={`w-8 h-8 rounded-lg flex items-center justify-center font-bold text-sm ${
-                              isSelected
-                                ? isBinary
-                                  ? isYes
-                                    ? 'bg-emerald-500 text-white'
-                                    : 'bg-red-500 text-white'
-                                  : 'bg-indigo-500 text-white'
-                                : 'bg-dark-800 text-white/40'
-                            }`}>
-                              {isSelected ? (
-                                <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
-                                  <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
-                                </svg>
-                              ) : (
-                                i + 1
-                              )}
-                            </div>
-                            <div>
-                              <span className={`font-semibold text-lg ${isSelected ? (isYes ? 'text-emerald-400' : isNo ? 'text-red-400' : 'text-indigo-400') : 'text-white/50'}`}>{label}</span>
-                              {isSelected && (
-                                <span className="ml-2 text-xs font-medium text-white/60">(Buying {label})</span>
-                              )}
-                            </div>
-                          </div>
-                          <div className={`text-right ${isSelected ? (isYes ? 'text-emerald-400' : isNo ? 'text-red-400' : 'text-indigo-400') : 'text-white/40'}`}>
-                            <span className="font-mono text-lg font-bold tabular-nums">${(pct / 100).toFixed(2)}</span>
-                            <span className="text-xs ml-1">USDC</span>
-                          </div>
+                        <div className="flex items-center justify-center gap-2 mb-1">
+                          {isSelected && (
+                            <svg className={`w-4 h-4 ${isYes ? 'text-emerald-400' : isNo ? 'text-red-400' : 'text-indigo-400'}`} fill="currentColor" viewBox="0 0 20 20">
+                              <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                            </svg>
+                          )}
+                          <span className={`font-semibold ${isSelected ? (isYes ? 'text-emerald-400' : isNo ? 'text-red-400' : 'text-indigo-400') : 'text-white/60'}`}>{label}</span>
+                        </div>
+                        <div className={`font-mono text-sm font-bold tabular-nums ${isSelected ? (isYes ? 'text-emerald-400' : isNo ? 'text-red-400' : 'text-indigo-400') : 'text-white/40'}`}>
+                          ${(pct / 100).toFixed(2)}
                         </div>
                         {tradeTab === 'sell' && userShares > 0n && (
-                          <p className="text-xs text-dark-400 mt-2 ml-11">Your shares: {formatWad(userShares)}</p>
+                          <p className="text-2xs text-dark-400 mt-1">Your shares: {formatWad(userShares)}</p>
                         )}
                       </button>
                     );
