@@ -1111,29 +1111,33 @@ export default function MarketDetail() {
                     const isYes = label.toLowerCase() === 'yes';
                     const isNo = label.toLowerCase() === 'no';
                     const isBinary = isYes || isNo;
+                    const getColorClasses = (idx: number, yes: boolean, no: boolean, selected: boolean) => {
+                      if (yes) return selected ? 'border-emerald-500 bg-emerald-500/10 text-emerald-400' : '';
+                      if (no) return selected ? 'border-red-500 bg-red-500/10 text-red-400' : '';
+                      if (idx === 0) return selected ? 'border-blue-500 bg-blue-500/10 text-blue-400' : '';
+                      if (idx === 1) return selected ? 'border-purple-500 bg-purple-500/10 text-purple-400' : '';
+                      return selected ? 'border-orange-500 bg-orange-500/10 text-orange-400' : '';
+                    };
+                    const colorClasses = getColorClasses(i, isYes, isNo, isSelected);
                     return (
                       <button
                         key={i}
                         onClick={() => setSelectedOutcome(i)}
                         className={`flex-1 p-3 rounded-xl text-center text-sm transition-all border-2 relative ${
                           isSelected
-                            ? isBinary
-                              ? isYes
-                                ? 'border-emerald-500 bg-emerald-500/10'
-                                : 'border-red-500 bg-red-500/10'
-                              : 'border-indigo-500 bg-indigo-500/10'
+                            ? colorClasses
                             : 'border-white/10 bg-dark-900/40 hover:border-white/20'
                         }`}
                       >
                         <div className="flex items-center justify-center gap-2 mb-1">
                           {isSelected && (
-                            <svg className={`w-4 h-4 ${isYes ? 'text-emerald-400' : isNo ? 'text-red-400' : 'text-indigo-400'}`} fill="currentColor" viewBox="0 0 20 20">
+                            <svg className={`w-4 h-4 ${isYes ? 'text-emerald-400' : isNo ? 'text-red-400' : i === 0 ? 'text-blue-400' : i === 1 ? 'text-purple-400' : 'text-orange-400'}`} fill="currentColor" viewBox="0 0 20 20">
                               <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
                             </svg>
                           )}
-                          <span className={`font-semibold ${isSelected ? (isYes ? 'text-emerald-400' : isNo ? 'text-red-400' : 'text-indigo-400') : 'text-white/60'}`}>{label}</span>
+                          <span className={`font-semibold ${isSelected ? (isYes ? 'text-emerald-400' : isNo ? 'text-red-400' : i === 0 ? 'text-blue-400' : i === 1 ? 'text-purple-400' : 'text-orange-400') : 'text-white/60'}`}>{label}</span>
                         </div>
-                        <div className={`font-mono text-sm font-bold tabular-nums ${isSelected ? (isYes ? 'text-emerald-400' : isNo ? 'text-red-400' : 'text-indigo-400') : 'text-white/40'}`}>
+                        <div className={`font-mono text-sm font-bold tabular-nums ${isSelected ? (isYes ? 'text-emerald-400' : isNo ? 'text-red-400' : i === 0 ? 'text-blue-400' : i === 1 ? 'text-purple-400' : 'text-orange-400') : 'text-white/40'}`}>
                           ${(pct / 100).toFixed(2)}
                         </div>
                         {tradeTab === 'sell' && userShares > 0n && (
