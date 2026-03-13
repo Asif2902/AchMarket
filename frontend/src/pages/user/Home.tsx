@@ -12,7 +12,21 @@ import Countdown from '../../components/Countdown';
 import ImageWithFallback from '../../components/ImageWithFallback';
 import { formatCompactUSDC, STABILITY_FILTERS, getStabilityLevel, parseDescription, makeMarketSlug, titleCase } from '../../utils/format';
 
-const CATEGORIES = ['All', 'Crypto', 'Sports', 'Politics', 'Entertainment', 'Science', 'Other'];
+const DEFAULT_CATEGORIES = ['All', 'Crypto', 'Sports', 'Politics', 'Entertainment', 'Science', 'Other'];
+
+function getCategories(markets: MarketSummaryData[]): string[] {
+  const customCats = new Set<string>();
+  for (const m of markets) {
+    const cat = m.category.trim();
+    const catLower = cat.toLowerCase();
+    const isDefault = DEFAULT_CATEGORIES.some(dc => dc.toLowerCase() === catLower);
+    if (!isDefault && cat) {
+      customCats.add(cat);
+    }
+  }
+  const sortedCustom = Array.from(customCats).sort();
+  return [...DEFAULT_CATEGORIES, ...sortedCustom];
+}
 const SORT_OPTIONS = [
   { value: 'newest', label: 'Newest First' },
   { value: 'ending', label: 'Ending Soon' },
@@ -258,7 +272,7 @@ export default function Home() {
         </div>
 
         <div className="flex gap-2 overflow-x-auto scrollbar-hide pb-1 -mx-4 px-4 sm:mx-0 sm:px-0">
-          {CATEGORIES.map((cat) => (
+          {getCategories(markets).map((cat) => (
             <button
               key={cat}
               onClick={() => { setCategoryFilter(cat); setPage(0); }}
