@@ -3,12 +3,14 @@ import { Link, useLocation } from 'react-router-dom';
 import { ConnectButton } from '@rainbow-me/rainbowkit';
 import { useWallet } from '../context/WalletContext';
 import { Globe } from 'lucide-react';
+import { usePendingClaims } from '../hooks/usePendingClaims';
 
 export default function Header() {
   const { isConnected, isOwner } = useWallet();
   const location = useLocation();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
+  const { pendingCount, pendingClaims } = usePendingClaims();
 
   useEffect(() => {
     setMobileMenuOpen(false);
@@ -69,12 +71,17 @@ export default function Header() {
               <ConnectButton showBalance={false} />
               <button
                 onClick={() => setMobileMenuOpen(true)}
-                className="w-9 h-9 rounded-lg bg-dark-800/50 border border-white/[0.08] flex items-center justify-center text-dark-300 hover:bg-dark-800/70 hover:text-white transition-all duration-200"
+                className="w-9 h-9 rounded-lg bg-dark-800/50 border border-white/[0.08] flex items-center justify-center text-dark-300 hover:bg-dark-800/70 hover:text-white transition-all duration-200 relative"
                 aria-label="Open menu"
               >
                 <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16M4 18h16" />
                 </svg>
+                {pendingCount > 0 && (
+                  <span className="absolute -top-1 -right-1 w-4 h-4 bg-amber-500 rounded-full flex items-center justify-center text-[10px] font-bold text-dark-950">
+                    {pendingCount > 9 ? '9+' : pendingCount}
+                  </span>
+                )}
               </button>
             </div>
           </div>
@@ -135,7 +142,7 @@ export default function Header() {
                 <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M21 12a2.25 2.25 0 00-2.25-2.25H15a3 3 0 11-6 0H5.25A2.25 2.25 0 003 12m18 0v6a2.25 2.25 0 01-2.25 2.25H5.25A2.25 2.25 0 013 18v-6m18 0V9M3 12V9m18 0a2.25 2.25 0 00-2.25-2.25H5.25A2.25 2.25 0 003 9m18 0V6a2.25 2.25 0 00-2.25-2.25H5.25A2.25 2.25 0 003 6v3" />
                 </svg>
-              }>
+              } badge={pendingCount > 0 ? pendingCount : undefined}>
                 Portfolio
               </MobileNavLink>
             )}
@@ -178,7 +185,7 @@ export default function Header() {
   );
 }
 
-function MobileNavLink({ to, current, children, icon }: { to: string; current: boolean; children: React.ReactNode; icon: React.ReactNode }) {
+function MobileNavLink({ to, current, children, icon, badge }: { to: string; current: boolean; children: React.ReactNode; icon: React.ReactNode; badge?: number }) {
   return (
     <Link
       to={to}
@@ -189,7 +196,12 @@ function MobileNavLink({ to, current, children, icon }: { to: string; current: b
       }`}
     >
       {icon}
-      {children}
+      <span className="flex-1">{children}</span>
+      {badge !== undefined && badge > 0 && (
+        <span className="min-w-[20px] h-5 px-1.5 bg-amber-500 rounded-full flex items-center justify-center text-[10px] font-bold text-dark-950">
+          {badge > 9 ? '9+' : badge}
+        </span>
+      )}
     </Link>
   );
 }
