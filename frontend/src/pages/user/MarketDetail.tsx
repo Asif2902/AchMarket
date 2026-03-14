@@ -761,21 +761,23 @@ export default function MarketDetail() {
                       
                       {/* Image proof */}
                       {proof.image ? (
-                        <div className="mb-3 overflow-hidden">
+                        <div className="mb-3">
                           <p className="text-2xs font-medium text-emerald-500/70 uppercase tracking-wider mb-1.5">Proof Image</p>
-                          <a href={resolveImageUri(proof.image)} target="_blank" rel="noopener noreferrer" className="block max-w-full overflow-hidden">
-                            <img
-                              src={resolveImageUri(proof.image)}
-                              alt="Resolution proof"
-                              className="rounded-lg border border-white/[0.06] max-h-48 sm:max-h-64 w-full max-w-full h-auto object-contain bg-dark-800 hover:opacity-80 transition-opacity cursor-pointer"
-                              onError={(e) => {
-                                (e.target as HTMLImageElement).style.display = 'none';
-                                const wrapper = (e.target as HTMLImageElement).parentElement?.parentElement;
-                                const fallback = wrapper?.querySelector('.proof-image-fallback');
-                                if (fallback) (fallback as HTMLElement).style.display = 'flex';
-                              }}
-                            />
-                          </a>
+                          <div className="inline-block max-w-full overflow-hidden rounded-lg border border-white/[0.06]">
+                            <a href={resolveImageUri(proof.image)} target="_blank" rel="noopener noreferrer">
+                              <img
+                                src={resolveImageUri(proof.image)}
+                                alt="Resolution proof"
+                                className="block max-w-full max-h-48 sm:max-h-64 w-auto h-auto object-contain bg-dark-800 hover:opacity-80 transition-opacity cursor-pointer"
+                                onError={(e) => {
+                                  (e.target as HTMLImageElement).style.display = 'none';
+                                  const wrapper = (e.target as HTMLImageElement).parentElement?.parentElement;
+                                  const fallback = wrapper?.querySelector('.proof-image-fallback');
+                                  if (fallback) (fallback as HTMLElement).style.display = 'flex';
+                                }}
+                              />
+                            </a>
+                          </div>
                           {proof.raw && (
                             <a
                               href={resolveImageUri(proof.raw)}

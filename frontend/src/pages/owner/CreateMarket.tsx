@@ -6,6 +6,7 @@ import { FACTORY_ABI } from '../../config/abis';
 import ImageWithFallback from '../../components/ImageWithFallback';
 import ProbabilityBar from '../../components/ProbabilityBar';
 import { parseContractError, makeMarketSlug } from '../../utils/format';
+import { useDateTimePicker } from '../../hooks/useDateTimePicker';
 
 const CATEGORIES = ['Crypto', 'Sports', 'Politics', 'Entertainment', 'Science', 'Other'];
 const DURATION_PRESETS = [
@@ -53,6 +54,8 @@ export default function CreateMarket() {
   const [durationPreset, setDurationPreset] = useState(604800);
   const [customDays, setCustomDays] = useState('');
   const [customHours, setCustomHours] = useState('');
+  const [useCalendar, setUseCalendar] = useState(false);
+  const deadlinePicker = useDateTimePicker();
   const [bValue, setBValue] = useState('1000');
   const [showBTooltip, setShowBTooltip] = useState(false);
 
@@ -60,10 +63,16 @@ export default function CreateMarket() {
   const [txResult, setTxResult] = useState<{ type: 'success' | 'error'; text: string; market?: string; marketId?: string } | null>(null);
 
   const actualCategory = category === 'Other' ? customCategory : category;
-  const durationSeconds = durationPreset > 0
+  const durationFromPreset = durationPreset > 0
     ? durationPreset
     : (parseInt(customDays || '0') * 86400) + (parseInt(customHours || '0') * 3600);
-  const expiryDate = new Date(Date.now() + durationSeconds * 1000);
+  const calendarDuration = useCalendar && deadlinePicker.value
+    ? Math.max(0, Math.floor((new Date(deadlinePicker.value).getTime() - Date.now()) / 1000))
+    : 0;
+  const durationSeconds = useCalendar ? calendarDuration : durationFromPreset;
+  const expiryDate = useCalendar && deadlinePicker.value
+    ? new Date(deadlinePicker.value)
+    : new Date(Date.now() + durationSeconds * 1000);
 
   const addOutcome = () => setOutcomes([...outcomes, '']);
   const removeOutcome = (index: number) => {
@@ -342,42 +351,96 @@ export default function CreateMarket() {
               title="Market Duration"
               subtitle="How long should trading be open?"
             />
-            <div className="flex flex-wrap gap-2 mb-3">
-              {DURATION_PRESETS.map(d => (
-                <button
-                  key={d.label}
-                  onClick={() => setDurationPreset(d.seconds)}
-                  className={`chip ${durationPreset === d.seconds ? 'chip-active' : ''}`}
-                >
-                  {d.label}
-                </button>
-              ))}
+            
+            <div className="flex items-center gap-2 mb-3">
+              <button
+                type="button"
+                onClick={() => setUseCalendar(false)}
+                className={`chip ${!useCalendar ? 'chip-active' : ''}`}
+              >
+                Duration
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setUseCalendar(true);
+                  if (!deadlinePicker.value) {
+                    const defaultDate = new Date();
+                    defaultDate.setDate(defaultDate.getDate() + 7);
+                    const year = defaultDate.getFullYear();
+                    const month = String(defaultDate.getMonth() + 1).padStart(2, '0');
+                    const day = String(defaultDate.getDate()).padStart(2, '0');
+                    const hours = String(defaultDate.getHours()).padStart(2, '0');
+                    const minutes = String(defaultDate.getMinutes()).padStart(2, '0');
+                    deadlinePicker.setUtcValue(`${year}-${month}-${day}T${hours}:${minutes}`);
+                  }
+                }}
+                className={`chip ${useCalendar ? 'chip-active' : ''}`}
+              >
+                Calendar
+              </button>
             </div>
-            {durationPreset === 0 && (
-              <div className="flex gap-3 mt-2">
-                <div className="flex-1">
-                  <label className="text-xs text-dark-400 mb-1 block">Days</label>
-                  <input
-                    type="number"
-                    value={customDays}
-                    onChange={e => setCustomDays(e.target.value)}
-                    min="0"
-                    placeholder="0"
-                    className="input-field"
-                  />
+
+            {!useCalendar ? (
+              <>
+                <div className="flex flex-wrap gap-2 mb-3">
+                  {DURATION_PRESETS.map(d => (
+                    <button
+                      key={d.label}
+                      type="button"
+                      onClick={() => setDurationPreset(d.seconds)}
+                      className={`chip ${durationPreset === d.seconds ? 'chip-active' : ''}`}
+                    >
+                      {d.label}
+                    </button>
+                  ))}
                 </div>
-                <div className="flex-1">
-                  <label className="text-xs text-dark-400 mb-1 block">Hours</label>
-                  <input
-                    type="number"
-                    value={customHours}
-                    onChange={e => setCustomHours(e.target.value)}
-                    min="0"
-                    max="23"
-                    placeholder="0"
-                    className="input-field"
-                  />
-                </div>
+                {durationPreset === 0 && (
+                  <div className="flex gap-3 mt-2">
+                    <div className="flex-1">
+                      <label className="text-xs text-dark-400 mb-1 block">Days</label>
+                      <input
+                        type="number"
+                        value={customDays}
+                        onChange={e => setCustomDays(e.target.value)}
+                        min="0"
+                        placeholder="0"
+                        className="input-field"
+                      />
+                    </div>
+                    <div className="flex-1">
+                      <label className="text-xs text-dark-400 mb-1 block">Hours</label>
+                      <input
+                        type="number"
+                        value={customHours}
+                        onChange={e => setCustomHours(e.target.value)}
+                        min="0"
+                        max="23"
+                        placeholder="0"
+                        className="input-field"
+                      />
+                    </div>
+                  </div>
+                )}
+              </>
+            ) : (
+              <div className="mt-2">
+                <label className="text-xs text-dark-400 mb-1.5 block">Select deadline date and time (your local time)</label>
+                <input
+                  type="datetime-local"
+                  value={deadlinePicker.value}
+                  onChange={deadlinePicker.onChange}
+                  min={(() => {
+                    const now = new Date();
+                    const year = now.getFullYear();
+                    const month = String(now.getMonth() + 1).padStart(2, '0');
+                    const day = String(now.getDate()).padStart(2, '0');
+                    const hours = String(now.getHours()).padStart(2, '0');
+                    const minutes = String(now.getMinutes()).padStart(2, '0');
+                    return `${year}-${month}-${day}T${hours}:${minutes}`;
+                  })()}
+                  className="input-field"
+                />
               </div>
             )}
             {durationSeconds >= 3600 && (
