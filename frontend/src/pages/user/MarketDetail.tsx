@@ -767,7 +767,7 @@ export default function MarketDetail() {
                             <img
                               src={resolveImageUri(proof.image)}
                               alt="Resolution proof"
-                              className="rounded-lg border border-white/[0.06] max-h-64 w-auto object-contain bg-dark-800 hover:opacity-80 transition-opacity cursor-pointer"
+                              className="rounded-lg border border-white/[0.06] max-h-64 w-auto max-w-full h-auto object-contain bg-dark-800 hover:opacity-80 transition-opacity cursor-pointer"
                               onError={(e) => {
                                 (e.target as HTMLImageElement).style.display = 'none';
                                 const wrapper = (e.target as HTMLImageElement).parentElement?.parentElement;
@@ -781,7 +781,7 @@ export default function MarketDetail() {
                               href={resolveImageUri(proof.raw)}
                               target="_blank"
                               rel="noopener noreferrer"
-                              className="proof-image-fallback hidden text-sm text-emerald-300 hover:text-emerald-200 items-center gap-2 transition-colors mt-1.5"
+                              className="proof-image-fallback hidden text-sm text-emerald-300 hover:text-emerald-200 items-center gap-2 transition-colors mt-1.5 break-all"
                             >
                               <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                                 <path strokeLinecap="round" strokeLinejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
