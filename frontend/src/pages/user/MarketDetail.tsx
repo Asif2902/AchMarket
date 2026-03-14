@@ -1105,7 +1105,7 @@ export default function MarketDetail() {
                 </div>
 
                 {/* Outcome selector */}
-                <div className="flex gap-2 mb-4">
+                <div className="flex flex-col gap-2 mb-4">
                   {detail.outcomeLabels.map((label, i) => {
                     const userShares = userInfo?.shares[i] || 0n;
                     const pct = probToPercent(detail.impliedProbabilitiesWad[i]);
@@ -1124,33 +1124,32 @@ export default function MarketDetail() {
                       <button
                         key={i}
                         onClick={() => setSelectedOutcome(i)}
-                        className={`flex-1 p-3 rounded-xl text-center text-sm transition-all border-2 relative ${
+                        className={`w-full p-3 rounded-lg text-sm transition-all border-l-4 relative flex items-center justify-between ${
                           isSelected
                             ? ''
-                            : 'border-white/10 bg-dark-900/40 hover:border-white/20'
+                            : 'border-l-white/10 bg-dark-900/40 hover:border-l-white/20'
                         }`}
                         style={isSelected ? {
-                          borderColor: hexColor,
-                          backgroundColor: `${hexColor}15`,
+                          borderLeftColor: hexColor,
+                          backgroundColor: `${hexColor}10`,
                         } : {}}
                       >
-                        <div className="flex items-center justify-center gap-2 mb-1">
+                        <div className="flex items-center gap-2 min-w-0">
                           {isSelected && (
-                            <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20" style={{ color: hexColor }}>
+                            <svg className="w-4 h-4 shrink-0" fill="currentColor" viewBox="0 0 20 20" style={{ color: hexColor }}>
                               <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
                             </svg>
                           )}
-                          <span className={`font-semibold ${isSelected ? '' : ''}`} style={isSelected ? { color: hexColor } : {}}>{label}</span>
-                          {isSelected && (
-                            <span className="text-xs font-medium" style={{ color: 'rgba(255,255,255,0.6)' }}>({tradeTab === 'buy' ? 'Buying' : 'Selling'} {label})</span>
+                          <span className={`font-semibold truncate ${isSelected ? '' : 'text-white/50'}`} style={isSelected ? { color: hexColor } : {}}>{label}</span>
+                        </div>
+                        <div className="flex items-center gap-3 shrink-0">
+                          {tradeTab === 'sell' && userShares > 0n && (
+                            <span className="text-2xs text-dark-500 hidden sm:block">Your shares: {formatWad(userShares)}</span>
                           )}
+                          <span className={`font-mono text-sm font-bold tabular-nums`} style={isSelected ? { color: hexColor } : { color: 'rgba(255,255,255,0.4)' }}>
+                            ${(pct / 100).toFixed(2)}
+                          </span>
                         </div>
-                        <div className={`font-mono text-sm font-bold tabular-nums`} style={isSelected ? { color: hexColor } : { color: 'rgba(255,255,255,0.4)' }}>
-                          ${(pct / 100).toFixed(2)}
-                        </div>
-                        {tradeTab === 'sell' && userShares > 0n && (
-                          <p className="text-2xs text-dark-400 mt-1">Your shares: {formatWad(userShares)}</p>
-                        )}
                       </button>
                     );
                   })}
