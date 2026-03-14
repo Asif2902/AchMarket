@@ -25,7 +25,8 @@ function getCategories(markets: MarketSummaryData[]): string[] {
     }
   }
   const sortedCustom = Array.from(customCats).sort();
-  return [...DEFAULT_CATEGORIES, ...sortedCustom];
+  const defaultsWithoutOther = DEFAULT_CATEGORIES.filter(c => c.toLowerCase() !== 'other');
+  return [...defaultsWithoutOther, ...sortedCustom, 'Other'];
 }
 const SORT_OPTIONS = [
   { value: 'newest', label: 'Newest First' },
