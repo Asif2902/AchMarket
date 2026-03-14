@@ -989,11 +989,11 @@ export default function MarketDetail() {
                   <div className="grid grid-cols-2 gap-4">
                     <div>
                       <span className="text-2xs text-dark-500 font-medium uppercase tracking-wider">Prize Pool (after fee)</span>
-                      <p className="text-base font-bold text-white mt-0.5 flex items-center gap-1.5"><UsdcIcon size={16} />{formatCompactUSDC(detail.resolvedPoolWei)} USDC</p>
+                      <p className="text-base font-bold text-white mt-0.5 flex items-center gap-1.5 truncate"><UsdcIcon size={16} />{formatCompactUSDC(detail.resolvedPoolWei)} USDC</p>
                     </div>
                     <div>
                       <span className="text-2xs text-dark-500 font-medium uppercase tracking-wider">Platform Fee (0.25%)</span>
-                      <p className="text-base font-bold text-dark-400 mt-0.5 flex items-center gap-1.5"><UsdcIcon size={16} className="opacity-50" />{formatCompactUSDC(fee)} USDC</p>
+                      <p className="text-base font-bold text-dark-400 mt-0.5 flex items-center gap-1.5 truncate"><UsdcIcon size={16} className="opacity-50" />{formatCompactUSDC(fee)} USDC</p>
                     </div>
                   </div>
                 </div>
@@ -1166,8 +1166,8 @@ export default function MarketDetail() {
                       <svg className="w-3 h-3 text-dark-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                         <path strokeLinecap="round" strokeLinejoin="round" d="M21 12a2.25 2.25 0 00-2.25-2.25H15a3 3 0 11-6 0H5.25A2.25 2.25 0 003 12m18 0v6a2.25 2.25 0 01-2.25 2.25H5.25A2.25 2.25 0 013 18v-6m18 0V9M3 12V9m18 0a2.25 2.25 0 00-2.25-2.25H5.25A2.25 2.25 0 003 9m18 0V6a2.25 2.25 0 00-2.25-2.25H5.25A2.25 2.25 0 003 6v3" />
                       </svg>
-                      <span className="tabular-nums">{formatCompactUSDC(userBalance)}</span>
-                      <span className="text-dark-500">USDC</span>
+                      <span className="tabular-nums truncate">{formatCompactUSDC(userBalance)}</span>
+                      <span className="text-dark-500 shrink-0">USDC</span>
                     </span>
                   )}
                 </div>
@@ -1361,7 +1361,7 @@ export default function MarketDetail() {
                 <div className="p-3 rounded-xl bg-dark-900/30 border border-white/[0.06] mb-4">
                   <div className="flex justify-between text-sm">
                     <span className="text-dark-500 font-medium">Net Deposited</span>
-                    <span className="font-bold text-white tabular-nums flex items-center gap-1"><UsdcIcon size={14} />{formatCompactUSDC(userInfo.netDeposited)} USDC</span>
+                    <span className="font-bold text-white tabular-nums flex items-center gap-1 truncate"><UsdcIcon size={14} />{formatCompactUSDC(userInfo.netDeposited)} USDC</span>
                   </div>
                 </div>
 
@@ -1638,10 +1638,10 @@ function MiniStat({ label, value, suffix, small, icon }: { label: string; value:
   return (
     <div className="card p-3.5">
       <span className="text-2xs text-dark-400 font-semibold uppercase tracking-wider">{label}</span>
-      <div className="flex items-center gap-1.5 mt-1">
+      <div className="flex items-center gap-1.5 mt-1 min-w-0">
         {icon}
-        <span className={`font-bold text-white tabular-nums leading-none ${small ? 'text-xs' : 'text-sm'}`}>{value}</span>
-        {suffix && <span className="text-2xs text-dark-400 font-medium">{suffix}</span>}
+        <span className={`font-bold text-white tabular-nums leading-none truncate ${small ? 'text-xs' : 'text-sm'}`}>{value}</span>
+        {suffix && <span className="text-2xs text-dark-400 font-medium shrink-0">{suffix}</span>}
       </div>
     </div>
   );

@@ -47,7 +47,7 @@ export default function MarketCard({ data }: Props) {
       <div className={`card-hover overflow-hidden h-full flex flex-col transition-all duration-200 ${
         isCancelled ? 'card-hover-cancelled' : ''
       }`}>
-        <div className="relative overflow-hidden" style={{ height: '45%', minHeight: '140px' }}>
+        <div className="relative overflow-hidden h-40">
           <ImageWithFallback
             src={data.imageUri}
             alt={data.title}
@@ -80,8 +80,8 @@ export default function MarketCard({ data }: Props) {
           </div>
         </div>
 
-        <div className="p-4 flex-1 flex flex-col gap-3">
-          <div className="flex-1">
+        <div className="p-4 flex flex-col gap-3 min-h-[100px]">
+          <div className="min-h-[50px]">
             <ProbabilityBar
               labels={data.outcomeLabels}
               probabilities={data.impliedProbabilitiesWad}

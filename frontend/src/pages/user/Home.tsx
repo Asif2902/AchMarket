@@ -326,7 +326,7 @@ export default function Home() {
         )}
 
         {loading ? (
-          <div className={viewMode === 'grid' ? 'grid grid-cols-1 sm:grid-cols-2 gap-4' : 'space-y-3'}>
+          <div className={viewMode === 'grid' ? 'grid grid-cols-1 sm:grid-cols-2 gap-4 items-start' : 'space-y-3'}>
             {Array.from({ length: 6 }).map((_, i) => (
               <SkeletonCard key={i} />
             ))}
@@ -341,7 +341,7 @@ export default function Home() {
         ) : (
           <>
             {viewMode === 'grid' ? (
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 items-start">
                 {paginated.map((market, i) => (
                   <div
                     key={market.market}
