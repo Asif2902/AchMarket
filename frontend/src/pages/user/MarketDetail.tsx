@@ -761,13 +761,13 @@ export default function MarketDetail() {
                       
                       {/* Image proof */}
                       {proof.image ? (
-                        <div className="mb-3">
+                        <div className="mb-3 overflow-hidden">
                           <p className="text-2xs font-medium text-emerald-500/70 uppercase tracking-wider mb-1.5">Proof Image</p>
-                          <a href={resolveImageUri(proof.image)} target="_blank" rel="noopener noreferrer">
+                          <a href={resolveImageUri(proof.image)} target="_blank" rel="noopener noreferrer" className="block max-w-full overflow-hidden">
                             <img
                               src={resolveImageUri(proof.image)}
                               alt="Resolution proof"
-                              className="rounded-lg border border-white/[0.06] max-h-64 w-auto max-w-full h-auto object-contain bg-dark-800 hover:opacity-80 transition-opacity cursor-pointer"
+                              className="rounded-lg border border-white/[0.06] max-h-48 sm:max-h-64 w-full max-w-full h-auto object-contain bg-dark-800 hover:opacity-80 transition-opacity cursor-pointer"
                               onError={(e) => {
                                 (e.target as HTMLImageElement).style.display = 'none';
                                 const wrapper = (e.target as HTMLImageElement).parentElement?.parentElement;
