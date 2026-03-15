@@ -763,25 +763,27 @@ export default function MarketDetail() {
                       {proof.image ? (
                         <div className="mb-3">
                           <p className="text-2xs font-medium text-emerald-500/70 uppercase tracking-wider mb-1.5">Proof Image</p>
-                          <a href={resolveImageUri(proof.image)} target="_blank" rel="noopener noreferrer">
-                            <img
-                              src={resolveImageUri(proof.image)}
-                              alt="Resolution proof"
-                              className="rounded-lg border border-white/[0.06] max-h-64 w-auto object-contain bg-dark-800 hover:opacity-80 transition-opacity cursor-pointer"
-                              onError={(e) => {
-                                (e.target as HTMLImageElement).style.display = 'none';
-                                const wrapper = (e.target as HTMLImageElement).parentElement?.parentElement;
-                                const fallback = wrapper?.querySelector('.proof-image-fallback');
-                                if (fallback) (fallback as HTMLElement).style.display = 'flex';
-                              }}
-                            />
-                          </a>
+                          <div className="proof-image-container inline-block max-w-full overflow-hidden rounded-lg border border-white/[0.06]">
+                            <a href={resolveImageUri(proof.image)} target="_blank" rel="noopener noreferrer">
+                              <img
+                                src={resolveImageUri(proof.image)}
+                                alt="Resolution proof"
+                                className="block max-w-full max-h-48 sm:max-h-64 w-auto h-auto object-contain bg-dark-800 hover:opacity-80 transition-opacity cursor-pointer"
+                                onError={(e) => {
+                                  (e.target as HTMLImageElement).style.display = 'none';
+                                  const wrapper = (e.target as HTMLElement).closest('.proof-image-container');
+                                  const fallback = wrapper?.querySelector('.proof-image-fallback');
+                                  if (fallback) (fallback as HTMLElement).style.display = 'flex';
+                                }}
+                              />
+                            </a>
+                          </div>
                           {proof.raw && (
                             <a
                               href={resolveImageUri(proof.raw)}
                               target="_blank"
                               rel="noopener noreferrer"
-                              className="proof-image-fallback hidden text-sm text-emerald-300 hover:text-emerald-200 items-center gap-2 transition-colors mt-1.5"
+                              className="proof-image-fallback hidden text-sm text-emerald-300 hover:text-emerald-200 items-center gap-2 transition-colors mt-1.5 break-all"
                             >
                               <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                                 <path strokeLinecap="round" strokeLinejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
@@ -1105,7 +1107,7 @@ export default function MarketDetail() {
                 </div>
 
                 {/* Outcome selector */}
-                <div className="flex gap-2 mb-4">
+                <div className="flex flex-col gap-2 mb-4">
                   {detail.outcomeLabels.map((label, i) => {
                     const userShares = userInfo?.shares[i] || 0n;
                     const pct = probToPercent(detail.impliedProbabilitiesWad[i]);
@@ -1124,33 +1126,32 @@ export default function MarketDetail() {
                       <button
                         key={i}
                         onClick={() => setSelectedOutcome(i)}
-                        className={`flex-1 p-3 rounded-xl text-center text-sm transition-all border-2 relative ${
+                        className={`w-full p-3 rounded-lg text-sm transition-all border-l-4 relative flex items-center justify-between ${
                           isSelected
                             ? ''
-                            : 'border-white/10 bg-dark-900/40 hover:border-white/20'
+                            : 'border-l-white/10 bg-dark-900/40 hover:border-l-white/20'
                         }`}
                         style={isSelected ? {
-                          borderColor: hexColor,
-                          backgroundColor: `${hexColor}15`,
+                          borderLeftColor: hexColor,
+                          backgroundColor: `${hexColor}10`,
                         } : {}}
                       >
-                        <div className="flex items-center justify-center gap-2 mb-1">
+                        <div className="flex items-center gap-2 min-w-0">
                           {isSelected && (
-                            <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20" style={{ color: hexColor }}>
+                            <svg className="w-4 h-4 shrink-0" fill="currentColor" viewBox="0 0 20 20" style={{ color: hexColor }}>
                               <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
                             </svg>
                           )}
-                          <span className={`font-semibold ${isSelected ? '' : ''}`} style={isSelected ? { color: hexColor } : {}}>{label}</span>
-                          {isSelected && (
-                            <span className="text-xs font-medium" style={{ color: 'rgba(255,255,255,0.6)' }}>({tradeTab === 'buy' ? 'Buying' : 'Selling'} {label})</span>
+                          <span className={`font-semibold truncate ${isSelected ? '' : 'text-white/50'}`} style={isSelected ? { color: hexColor } : {}}>{label}</span>
+                        </div>
+                        <div className="flex items-center gap-3 shrink-0">
+                          {tradeTab === 'sell' && userShares > 0n && (
+                            <span className="text-2xs text-dark-500 hidden sm:block">Your shares: {formatWad(userShares)}</span>
                           )}
+                          <span className={`font-mono text-sm font-bold tabular-nums`} style={isSelected ? { color: hexColor } : { color: 'rgba(255,255,255,0.4)' }}>
+                            ${(pct / 100).toFixed(2)}
+                          </span>
                         </div>
-                        <div className={`font-mono text-sm font-bold tabular-nums`} style={isSelected ? { color: hexColor } : { color: 'rgba(255,255,255,0.4)' }}>
-                          ${(pct / 100).toFixed(2)}
-                        </div>
-                        {tradeTab === 'sell' && userShares > 0n && (
-                          <p className="text-2xs text-dark-400 mt-1">Your shares: {formatWad(userShares)}</p>
-                        )}
                       </button>
                     );
                   })}
@@ -1168,6 +1169,15 @@ export default function MarketDetail() {
                       </svg>
                       <span className="tabular-nums">{formatCompactUSDC(userBalance)}</span>
                       <span className="text-dark-500">USDC</span>
+                    </span>
+                  )}
+                  {tradeTab === 'sell' && userInfo && (
+                    <span className="text-2xs text-dark-400 font-medium flex items-center gap-1">
+                      <svg className="w-3 h-3 text-dark-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M7.5 14.25v2.25m3-4.5v4.5m3-6.75v6.75m3-9v9M6 20.25h12A2.25 2.25 0 0020.25 18V6A2.25 2.25 0 0018 3.75H6A2.25 2.25 0 003.75 6v12A2.25 2.25 0 006 20.25z" />
+                      </svg>
+                      <span className="tabular-nums">{formatWad(userInfo.shares[selectedOutcome] || 0n)}</span>
+                      <span className="text-dark-500">shares</span>
                     </span>
                   )}
                 </div>
