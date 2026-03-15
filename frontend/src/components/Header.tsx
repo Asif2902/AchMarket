@@ -64,9 +64,35 @@ export default function Header() {
 
             <div className="flex items-center gap-2">
               {isConnected && isOwner && (
-                <span className="hidden sm:inline-flex badge bg-primary-500/15 text-primary-400 border-primary-500/25 text-2xs">
-                  Owner
-                </span>
+                <>
+                  <Link
+                    to="/"
+                    className={`hidden sm:flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium transition-all ${
+                      location.pathname === '/' || location.pathname.startsWith('/market') || location.pathname === '/portfolio'
+                        ? 'bg-primary-500/15 text-primary-400'
+                        : 'text-dark-400 hover:text-white hover:bg-white/[0.06]'
+                    }`}
+                  >
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 15.75l5.159-5.159a2.25 2.25 0 013.182 0l5.159 5.159m-1.5-1.5l1.409-1.409a2.25 2.25 0 013.182 0l2.909 2.909m-18 3.75h16.5a1.5 1.5 0 001.5-1.5V6a1.5 1.5 0 00-1.5-1.5H3.75A1.5 1.5 0 002.25 6v12a1.5 1.5 0 001.5 1.5zm10.5-11.25h.008v.008h-.008V8.25zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0z" />
+                    </svg>
+                    Markets
+                  </Link>
+                  <Link
+                    to="/owner"
+                    className={`hidden sm:flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium transition-all ${
+                      location.pathname.startsWith('/owner')
+                        ? 'bg-primary-500/15 text-primary-400'
+                        : 'text-dark-400 hover:text-white hover:bg-white/[0.06]'
+                    }`}
+                  >
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                    </svg>
+                    Admin
+                  </Link>
+                </>
               )}
               <ConnectButton showBalance={false} />
               <button
@@ -123,6 +149,35 @@ export default function Header() {
             </div>
 
             <nav className="p-3 space-y-1">
+              {isConnected && isOwner && (
+                <>
+                  <div className="px-4 py-2">
+                    <div className="flex items-center gap-1 p-1 bg-dark-800/60 rounded-lg">
+                      <Link
+                        to="/"
+                        className={`flex-1 px-3 py-1.5 rounded-md text-xs font-medium transition-all ${
+                          location.pathname === '/' || location.pathname.startsWith('/market') || location.pathname === '/portfolio'
+                            ? 'bg-primary-500/20 text-primary-400'
+                            : 'text-dark-400 hover:text-white'
+                        }`}
+                      >
+                        Markets
+                      </Link>
+                      <Link
+                        to="/owner"
+                        className={`flex-1 px-3 py-1.5 rounded-md text-xs font-medium transition-all ${
+                          location.pathname.startsWith('/owner')
+                            ? 'bg-primary-500/20 text-primary-400'
+                            : 'text-dark-400 hover:text-white'
+                        }`}
+                      >
+                        Admin
+                      </Link>
+                    </div>
+                  </div>
+                  <div className="my-1 border-t border-white/[0.06]" />
+                </>
+              )}
               <MobileNavLink to="/" current={location.pathname === '/'} icon={
                 <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6A2.25 2.25 0 016 3.75h2.25A2.25 2.25 0 0110.5 6v2.25a2.25 2.25 0 01-2.25 2.25H6a2.25 2.25 0 01-2.25-2.25V6zM3.75 15.75A2.25 2.25 0 016 13.5h2.25a2.25 2.25 0 012.25 2.25V18a2.25 2.25 0 01-2.25 2.25H6A2.25 2.25 0 013.75 18v-2.25zM13.5 6a2.25 2.25 0 012.25-2.25H18A2.25 2.25 0 0120.25 6v2.25A2.25 2.25 0 0118 10.5h-2.25a2.25 2.25 0 01-2.25-2.25V6zM13.5 15.75a2.25 2.25 0 012.25-2.25H18a2.25 2.25 0 012.25 2.25V18A2.25 2.25 0 0118 20.25h-2.25A2.25 2.25 0 0113.5 18v-2.25z" />

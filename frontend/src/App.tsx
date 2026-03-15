@@ -18,10 +18,14 @@ import FeeManagement from './pages/owner/FeeManagement';
 function AppRoutes() {
   const { isOwner, isConnected } = useWallet();
 
-  // If connected as owner, show owner interface
+  // Owner gets access to both admin panel AND user pages
   if (isConnected && isOwner) {
     return (
       <Routes>
+        <Route path="/" element={<Home />} />
+        <Route path="/analytics" element={<Analytics />} />
+        <Route path="/market/:slug" element={<MarketDetail />} />
+        <Route path="/portfolio" element={<Portfolio />} />
         <Route path="/owner" element={<OwnerLayout />}>
           <Route index element={<CreateMarket />} />
           <Route path="active" element={<ActiveMarkets />} />
@@ -31,11 +35,7 @@ function AppRoutes() {
           <Route path="fees" element={<FeeManagement />} />
           <Route path="analytics" element={<Analytics />} />
         </Route>
-        {/* Owner can also view market details */}
-        <Route path="/market/:slug" element={<MarketDetail />} />
-        {/* Redirect root to owner panel */}
-        <Route path="/" element={<Navigate to="/owner" replace />} />
-        <Route path="*" element={<Navigate to="/owner" replace />} />
+        <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     );
   }
