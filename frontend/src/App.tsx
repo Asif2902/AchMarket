@@ -16,7 +16,16 @@ import CancelledMarkets from './pages/owner/CancelledMarkets';
 import FeeManagement from './pages/owner/FeeManagement';
 
 function AppRoutes() {
-  const { isOwner, isConnected } = useWallet();
+  const { isOwner, isConnected, isOwnerLoading } = useWallet();
+
+  // Wait for owner check to complete before rendering routes
+  if (isOwnerLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="w-8 h-8 border-2 border-primary-500 border-t-transparent rounded-full animate-spin" />
+      </div>
+    );
+  }
 
   // Owner gets access to both admin panel AND user pages
   if (isConnected && isOwner) {

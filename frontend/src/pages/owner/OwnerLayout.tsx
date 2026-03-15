@@ -11,7 +11,15 @@ const NAV_ITEMS = [
 ];
 
 export default function OwnerLayout() {
-  const { isOwner, isConnected } = useWallet();
+  const { isOwner, isConnected, isOwnerLoading } = useWallet();
+
+  if (isOwnerLoading) {
+    return (
+      <div className="min-h-[calc(100vh-64px)] flex items-center justify-center">
+        <div className="w-8 h-8 border-2 border-primary-500 border-t-transparent rounded-full animate-spin" />
+      </div>
+    );
+  }
 
   if (!isConnected || !isOwner) {
     return <Navigate to="/" replace />;

@@ -10,6 +10,7 @@ interface WalletState {
   signer: ethers.Signer | null;
   address: string | null;
   isOwner: boolean;
+  isOwnerLoading: boolean;
   isConnected: boolean;
   isCorrectNetwork: boolean;
   isConnecting: boolean;
@@ -36,6 +37,7 @@ const WalletContext = createContext<WalletState>({
   signer: null,
   address: null,
   isOwner: false,
+  isOwnerLoading: true,
   isConnected: false,
   isCorrectNetwork: false,
   isConnecting: false,
@@ -66,6 +68,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
   const [signer, setSigner] = useState<ethers.Signer | null>(null);
   const [provider, setProvider] = useState<ethers.BrowserProvider | null>(null);
   const [isOwner, setIsOwner] = useState(false);
+  const [isOwnerLoading, setIsOwnerLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   // ── Derived state ────────────────────────────────────────────
@@ -110,8 +113,10 @@ export function WalletProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!address) {
       setIsOwner(false);
+      setIsOwnerLoading(false);
       return;
     }
+    setIsOwnerLoading(true);
     let cancelled = false;
     const currentAddress = address;
     (async () => {
@@ -124,6 +129,10 @@ export function WalletProvider({ children }: { children: ReactNode }) {
       } catch {
         if (!cancelled) {
           setIsOwner(false);
+        }
+      } finally {
+        if (!cancelled) {
+          setIsOwnerLoading(false);
         }
       }
     })();
@@ -195,6 +204,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
         signer,
         address,
         isOwner,
+        isOwnerLoading,
         isConnected,
         isCorrectNetwork,
         isConnecting,

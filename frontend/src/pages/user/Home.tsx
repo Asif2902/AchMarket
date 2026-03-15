@@ -125,10 +125,11 @@ export default function Home() {
     })
     .sort((a, b) => {
       switch (sortBy) {
-        case 'trending':
+        case 'trending': {
           const scoreA = calculateTrendingScore(a.totalVolumeWei, a.participants);
           const scoreB = calculateTrendingScore(b.totalVolumeWei, b.participants);
           return scoreB - scoreA;
+        }
         case 'newest': return b.marketId - a.marketId;
         case 'ending':
           if (a.stage !== STAGE.Active && a.stage !== STAGE.Suspended && (b.stage === STAGE.Active || b.stage === STAGE.Suspended)) return 1;
