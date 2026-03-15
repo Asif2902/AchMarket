@@ -15,10 +15,30 @@ import ResolvedMarkets from './pages/owner/ResolvedMarkets';
 import CancelledMarkets from './pages/owner/CancelledMarkets';
 import FeeManagement from './pages/owner/FeeManagement';
 
+const sharedRoutes = (
+  <>
+    <Route path="/" element={<Home />} />
+    <Route path="/analytics" element={<Analytics />} />
+    <Route path="/market/:slug" element={<MarketDetail />} />
+    <Route path="/portfolio" element={<Portfolio />} />
+  </>
+);
+
+const ownerRoutes = (
+  <Route path="/owner" element={<OwnerLayout />}>
+    <Route index element={<CreateMarket />} />
+    <Route path="active" element={<ActiveMarkets />} />
+    <Route path="pending" element={<PendingResolution />} />
+    <Route path="resolved" element={<ResolvedMarkets />} />
+    <Route path="cancelled" element={<CancelledMarkets />} />
+    <Route path="fees" element={<FeeManagement />} />
+    <Route path="analytics" element={<Analytics />} />
+  </Route>
+);
+
 function AppRoutes() {
   const { isOwner, isConnected, isOwnerLoading } = useWallet();
 
-  // Wait for owner check to complete before rendering routes
   if (isOwnerLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
@@ -27,35 +47,19 @@ function AppRoutes() {
     );
   }
 
-  // Owner gets access to both admin panel AND user pages
   if (isConnected && isOwner) {
     return (
       <Routes>
-        <Route path="/" element={<Home />} />
-        <Route path="/analytics" element={<Analytics />} />
-        <Route path="/market/:slug" element={<MarketDetail />} />
-        <Route path="/portfolio" element={<Portfolio />} />
-        <Route path="/owner" element={<OwnerLayout />}>
-          <Route index element={<CreateMarket />} />
-          <Route path="active" element={<ActiveMarkets />} />
-          <Route path="pending" element={<PendingResolution />} />
-          <Route path="resolved" element={<ResolvedMarkets />} />
-          <Route path="cancelled" element={<CancelledMarkets />} />
-          <Route path="fees" element={<FeeManagement />} />
-          <Route path="analytics" element={<Analytics />} />
-        </Route>
+        {sharedRoutes}
+        {ownerRoutes}
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     );
   }
 
-  // User interface
   return (
     <Routes>
-      <Route path="/" element={<Home />} />
-      <Route path="/analytics" element={<Analytics />} />
-      <Route path="/market/:slug" element={<MarketDetail />} />
-      <Route path="/portfolio" element={<Portfolio />} />
+      {sharedRoutes}
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );

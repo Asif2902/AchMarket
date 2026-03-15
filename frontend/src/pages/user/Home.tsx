@@ -37,7 +37,7 @@ const SORT_OPTIONS = [
 ];
 
 function calculateTrendingScore(volumeWei: bigint, participants: number): number {
-  const volume = Number(ethers.formatEther(volumeWei));
+  const volume = Number(ethers.formatUnits(volumeWei, 6));
   const score = Math.log10(volume + 1) * Math.log10(participants + 1) * 100;
   return score;
 }
