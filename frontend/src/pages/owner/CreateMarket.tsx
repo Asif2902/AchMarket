@@ -367,12 +367,7 @@ export default function CreateMarket() {
                   if (!deadlinePicker.value) {
                     const defaultDate = new Date();
                     defaultDate.setDate(defaultDate.getDate() + 7);
-                    const year = defaultDate.getFullYear();
-                    const month = String(defaultDate.getMonth() + 1).padStart(2, '0');
-                    const day = String(defaultDate.getDate()).padStart(2, '0');
-                    const hours = String(defaultDate.getHours()).padStart(2, '0');
-                    const minutes = String(defaultDate.getMinutes()).padStart(2, '0');
-                    deadlinePicker.setUtcValue(`${year}-${month}-${day}T${hours}:${minutes}`);
+                    deadlinePicker.setUtcValue(defaultDate.toISOString());
                   }
                 }}
                 className={`chip ${useCalendar ? 'chip-active' : ''}`}

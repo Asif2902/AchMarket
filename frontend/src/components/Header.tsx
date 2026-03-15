@@ -10,7 +10,7 @@ export default function Header() {
   const location = useLocation();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
-  const { pendingCount, pendingClaims } = usePendingClaims();
+  const { pendingCount } = usePendingClaims();
 
   useEffect(() => {
     setMobileMenuOpen(false);

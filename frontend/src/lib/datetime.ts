@@ -1,6 +1,7 @@
 export function utcToLocal(utcIsoString: string): string {
   if (!utcIsoString) return '';
   const date = new Date(utcIsoString);
+  if (isNaN(date.getTime())) return '';
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, '0');
   const day = String(date.getDate()).padStart(2, '0');
@@ -12,6 +13,7 @@ export function utcToLocal(utcIsoString: string): string {
 export function localToUtc(localDateTime: string): string {
   if (!localDateTime) return '';
   const date = new Date(localDateTime);
+  if (isNaN(date.getTime())) return '';
   return date.toISOString();
 }
 
@@ -27,6 +29,14 @@ export function formatLocalDateTime(utcIsoString: string): string {
   });
 }
 
+/**
+ * Categorizes a UTC date string into a day group for UI grouping.
+ * @param utcIsoString - ISO date string to categorize
+ * @returns 'today' for today or past dates, 'tomorrow', 'day3' (2 days out), or 'later'
+ * 
+ * Note: Past dates (diffDays < 0) are intentionally mapped to 'today' to ensure
+ * past events still appear in an actionable context rather than being hidden.
+ */
 export function getDayGroup(utcIsoString: string): 'today' | 'tomorrow' | 'day3' | 'later' {
   if (!utcIsoString) return 'later';
   const date = new Date(utcIsoString);

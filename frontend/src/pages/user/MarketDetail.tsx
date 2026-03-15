@@ -763,7 +763,7 @@ export default function MarketDetail() {
                       {proof.image ? (
                         <div className="mb-3">
                           <p className="text-2xs font-medium text-emerald-500/70 uppercase tracking-wider mb-1.5">Proof Image</p>
-                          <div className="inline-block max-w-full overflow-hidden rounded-lg border border-white/[0.06]">
+                          <div className="proof-image-container inline-block max-w-full overflow-hidden rounded-lg border border-white/[0.06]">
                             <a href={resolveImageUri(proof.image)} target="_blank" rel="noopener noreferrer">
                               <img
                                 src={resolveImageUri(proof.image)}
@@ -771,7 +771,7 @@ export default function MarketDetail() {
                                 className="block max-w-full max-h-48 sm:max-h-64 w-auto h-auto object-contain bg-dark-800 hover:opacity-80 transition-opacity cursor-pointer"
                                 onError={(e) => {
                                   (e.target as HTMLImageElement).style.display = 'none';
-                                  const wrapper = (e.target as HTMLImageElement).parentElement?.parentElement;
+                                  const wrapper = (e.target as HTMLElement).closest('.proof-image-container');
                                   const fallback = wrapper?.querySelector('.proof-image-fallback');
                                   if (fallback) (fallback as HTMLElement).style.display = 'flex';
                                 }}

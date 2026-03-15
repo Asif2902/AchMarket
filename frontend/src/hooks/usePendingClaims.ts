@@ -23,9 +23,21 @@ function getCacheKey(address: string): string {
   return `${CACHE_KEY_PREFIX}${address.toLowerCase()}`;
 }
 
+interface CachedClaim {
+  marketAddress: string;
+  marketId: number;
+  title: string;
+  category: string;
+  outcomeLabels: string[];
+  winningOutcome: number;
+  type: 'win' | 'refund';
+  amountWei: string;
+  stage: number;
+}
+
 interface CachedClaims {
   lastUpdated: number;
-  claims: PendingClaim[];
+  claims: CachedClaim[];
 }
 
 function getCachedClaims(address: string): CachedClaims | null {
@@ -42,11 +54,25 @@ function getCachedClaims(address: string): CachedClaims | null {
   }
 }
 
+function toCachedClaim(claim: PendingClaim): CachedClaim {
+  return {
+    ...claim,
+    amountWei: claim.amountWei.toString(),
+  };
+}
+
+function fromCachedClaim(cached: CachedClaim): PendingClaim {
+  return {
+    ...cached,
+    amountWei: BigInt(cached.amountWei),
+  };
+}
+
 function setCachedClaims(address: string, claims: PendingClaim[]): void {
   try {
     const data: CachedClaims = {
       lastUpdated: Date.now(),
-      claims,
+      claims: claims.map(toCachedClaim),
     };
     localStorage.setItem(getCacheKey(address), JSON.stringify(data));
   } catch {
@@ -68,7 +94,7 @@ export function usePendingClaims() {
     // Check cache first
     const cached = getCachedClaims(address);
     if (cached) {
-      setPendingClaims(cached.claims);
+      setPendingClaims(cached.claims.map(fromCachedClaim));
       return;
     }
 

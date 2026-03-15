@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import { ethers } from 'ethers';
 import { useWallet } from '../../context/WalletContext';
+import { usePendingClaims } from '../../hooks/usePendingClaims';
 import { FACTORY_ADDRESS, LENS_ADDRESS, STAGE_LABELS, STAGE_COLORS } from '../../config/network';
 import { FACTORY_ABI, LENS_ABI, MARKET_ABI } from '../../config/abis';
 import { PageLoader } from '../../components/LoadingSpinner';
@@ -27,6 +28,7 @@ interface Position {
 
 export default function Portfolio() {
   const { address, readProvider, signer, isConnected } = useWallet();
+  const { clearClaim } = usePendingClaims();
   const [positions, setPositions] = useState<Position[]>([]);
   const [loading, setLoading] = useState(true);
   const [txPending, setTxPending] = useState<string | null>(null);
@@ -99,6 +101,7 @@ export default function Portfolio() {
       const tx = action === 'redeem' ? await market.redeem() : await market.refund();
       await tx.wait();
       setTxMsg({ type: 'success', text: `${action === 'redeem' ? 'Winnings' : 'Refund'} claimed!` });
+      clearClaim(marketAddr);
       // Refresh
       const factory = new ethers.Contract(FACTORY_ADDRESS, FACTORY_ABI, readProvider);
       const lens = new ethers.Contract(LENS_ADDRESS, LENS_ABI, readProvider);

@@ -68,13 +68,17 @@ export function formatUSDC(weiValue: bigint | string, decimals = 4): string {
 }
 
 /**
- * Format a number to compact form (k, m, b)
+ * Format a number to compact form (K, M, B, T)
  */
 export function formatCompact(num: number): string {
   if (num >= 1e12) return (num / 1e12).toFixed(1).replace(/\.0$/, '') + 'T';
   if (num >= 1e9) return (num / 1e9).toFixed(1).replace(/\.0$/, '') + 'B';
   if (num >= 1e6) return (num / 1e6).toFixed(1).replace(/\.0$/, '') + 'M';
-  if (num >= 1e4) return (num / 1e3).toFixed(0) + 'K';
+  if (num >= 1e4) {
+    const roundedK = Math.round(num / 1e3);
+    if (roundedK >= 1000) return '1M';
+    return `${roundedK}K`;
+  }
   if (num >= 1e3) return (num / 1e3).toFixed(1).replace(/\.0$/, '') + 'K';
   if (num >= 1) return num.toLocaleString('en-US', { maximumFractionDigits: 2 });
   if (num >= 0.01) return num.toFixed(2);
