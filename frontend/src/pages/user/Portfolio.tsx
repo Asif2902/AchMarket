@@ -160,42 +160,34 @@ export default function Portfolio() {
 
   if (loading) return <PageLoader />;
 
-   // Compute summary stats
-   const totalDeposited = positions.reduce((acc, p) => acc + p.netDepositedWei, 0n);
-   const activeDeposits = positions.filter(p => p.stage === 0).reduce((acc, p) => acc + p.netDepositedWei, 0n);
-   
-   // For P&L calculation, only consider claimed positions to make resolvedDeposits and totalWinnings comparable
-   const claimedPositions = positions.filter(p => p.hasRedeemed || p.hasRefunded);
-   const resolvedDeposits = claimedPositions.reduce((acc, p) => acc + p.netDepositedWei, 0n);
-   
-   const totalMarkets = new Set(positions.map(p => p.market)).size;
-   const activePositions = positions.filter(p => p.stage === 0).length;
-   const claimableWinnings = positions.filter(p => p.canRedeem).length;
-   const claimableRefunds = positions.filter(p => p.canRefund).length;
-   
-   // Calculate totalWinnings as the actual proceeds from claimed positions
-   let totalWinnings = 0n;
-   claimedPositions.forEach(p => {
-     if (p.hasRedeemed) {
-       // For redeemed positions, payout = (userSharesWinning / totalSharesWinning) * resolvedPoolWei
-       // We would need to fetch market details to get resolvedPoolWei and totalSharesPerWinningOutcome
-       // For now, use a more accurate fee: platform fee is 25 bps = 0.25%, so users get 99.75%
-       // NOTE: This is still an approximation as actual payout depends on share distribution
-       const totalShares = p.sharesPerOutcome.reduce((a, b) => a + b, 0n);
-       if (totalShares > 0n) {
-         // More accurate: 99.75% return (0.25% fee) instead of 80%
-         totalWinnings += (p.netDepositedWei * 9975n) / 10000n;
-       } else {
-         totalWinnings += p.netDepositedWei;
-       }
-     }
-     if (p.hasRefunded) {
-       // For refunded positions, approximate as net deposited (actual depends on contract state at refund time)
-       totalWinnings += p.netDepositedWei;
-     }
-   });
-   const profit = totalWinnings - resolvedDeposits;
-   const roi = resolvedDeposits > 0 ? ((totalWinnings - resolvedDeposits) * 10000n) / resolvedDeposits : 0;
+    // Compute summary stats
+    const totalDeposited = positions.reduce((acc, p) => acc + p.netDepositedWei, 0n);
+    const activeDeposits = positions.filter(p => p.stage === 0).reduce((acc, p) => acc + p.netDepositedWei, 0n);
+    
+    // For P&L calculation, only consider claimed positions to make resolvedDeposits and totalWinnings comparable
+    // This follows the suggestion to "restrict profit/roi to only include claimedPositions so numbers are comparable"
+    const claimedPositions = positions.filter(p => p.hasRedeemed || p.hasRefunded);
+    const resolvedDeposits = claimedPositions.reduce((acc, p) => acc + p.netDepositedWei, 0n);
+    
+    const totalMarkets = new Set(positions.map(p => p.market)).size;
+    const activePositions = positions.filter(p => p.stage === 0).length;
+    const claimableWinnings = positions.filter(p => p.canRedeem).length;
+    const claimableRefunds = positions.filter(p => p.canRefund).length;
+    
+    // Calculate totalWinnings as the actual proceeds from claimed positions
+    // For now, use a more accurate fee assumption: platform fee is 25 bps = 0.25%
+    // NOTE: This is still an approximation as actual payout depends on share distribution at resolution time
+    let totalWinnings = 0n;
+    claimedPositions.forEach(p => {
+      if (p.hasRedeemed || p.hasRefunded) {
+        // For claimed positions, approximate proceeds as 99.75% of deposit (0.25% fee)
+        // This assumes the position was resolved recently enough that the pool hasn't changed significantly
+        totalWinnings += (p.netDepositedWei * 9975n) / 10000n;
+      }
+    });
+    
+    const profit = totalWinnings - resolvedDeposits;
+    const roi = resolvedDeposits > 0 ? ((totalWinnings - resolvedDeposits) * 10000n) / resolvedDeposits : 0;
   
   // Filter positions based on tab
   const filteredPositions = positions.filter(p => {
