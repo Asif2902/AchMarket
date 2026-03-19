@@ -180,6 +180,7 @@ export default function Portfolio() {
     return acc + p.netDepositedWei;
   }, 0n);
   const profit = totalWinnings - resolvedDeposits;
+  const roi = resolvedDeposits > 0 ? ((totalWinnings - resolvedDeposits) * 10000n) / resolvedDeposits : 0;
   
   // Filter positions based on tab
   const filteredPositions = positions.filter(p => {
@@ -204,7 +205,7 @@ export default function Portfolio() {
       <div className="flex items-start sm:items-center justify-between gap-3">
         <div>
           <h1 className="text-xl sm:text-2xl font-bold text-white">Portfolio</h1>
-          <p className="text-xs text-dark-500 mt-0.5">{positions.length} position{positions.length !== 1 ? 's' : ''} across {totalMarkets} market{totalMarkets !== 1 ? 's' : ''}</p>
+          <p className="text-xs text-dark-400 mt-0.5">{positions.length} position{positions.length !== 1 ? 's' : ''} across {totalMarkets} market{totalMarkets !== 1 ? 's' : ''}</p>
         </div>
         <Link to="/" className="btn-secondary text-xs px-3 py-1.5 shrink-0 !min-h-0">
           Browse Markets
@@ -213,7 +214,7 @@ export default function Portfolio() {
 
       {/* Summary stats */}
       {positions.length > 0 && (
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-7 gap-3">
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3 max-w-5xl mx-auto">
           <div className="card p-3.5">
             <span className="text-2xs text-dark-500 font-medium uppercase tracking-wider">Total Volume</span>
             <p className="text-base sm:text-lg font-bold text-white mt-0.5 tabular-nums flex items-center gap-1.5 truncate"><UsdcIcon size={16} />{formatCompactUSDC(totalDeposited)} <span className="text-2xs text-dark-500">USDC</span></p>
@@ -232,16 +233,23 @@ export default function Portfolio() {
           </div>
           <div className="card p-3.5">
             <span className="text-2xs text-dark-500 font-medium uppercase tracking-wider">Claimable</span>
-            <p className={`text-base sm:text-lg font-bold mt-0.5 ${claimableWinnings + claimableRefunds > 0 ? 'text-emerald-400' : 'text-white'}`}>{claimableWinnings + claimableRefunds}</p>
+            <p className={`text-base sm:text-lg font-bold mt-0.5 ${claimableWinnings + claimableRefunds > 0 ? 'text-emerald-400' : 'text-white'}`}>
+              {claimableWinnings + claimableRefunds > 0 ? claimableWinnings + claimableRefunds : <span className="text-dark-500">—</span>}
+            </p>
           </div>
-          <div className="card p-3.5">
+          <div className="card p-3.5 lg:col-span-2 xl:col-span-1">
             <span className="text-2xs text-dark-500 font-medium uppercase tracking-wider">Total Winnings</span>
-            <p className="text-base sm:text-lg font-bold text-emerald-400 mt-0.5 tabular-nums flex items-center gap-1.5 truncate"><UsdcIcon size={16} />{formatCompactUSDC(totalWinnings)} <span className="text-2xs text-dark-500">USDC</span></p>
+            <p className="text-lg sm:text-xl font-bold text-emerald-400 mt-0.5 tabular-nums flex items-center gap-1.5 truncate"><UsdcIcon size={18} />{formatCompactUSDC(totalWinnings)} <span className="text-2xs text-dark-500">USDC</span></p>
           </div>
-          <div className="card p-3.5">
-            <span className="text-2xs text-dark-500 font-medium uppercase tracking-wider">P&L</span>
-            <p className={`text-base sm:text-lg font-bold mt-0.5 tabular-nums flex items-center gap-1.5 truncate ${profit >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
-              <UsdcIcon size={16} />
+          <div className={`card p-3.5 lg:col-span-2 ${profit >= 0 ? 'bg-emerald-500/5 border-emerald-500/20' : 'bg-red-500/5 border-red-500/20'} border`}>
+            <div className="flex items-center justify-between">
+              <span className="text-2xs text-dark-500 font-medium uppercase tracking-wider">P&L</span>
+              <span className={`text-2xs px-1.5 py-0.5 rounded ${profit >= 0 ? 'bg-emerald-500/20 text-emerald-400' : 'bg-red-500/20 text-red-400'}`}>
+                {roi >= 0 ? '+' : ''}{Number(roi) / 100}%
+              </span>
+            </div>
+            <p className={`text-lg sm:text-xl font-bold mt-0.5 tabular-nums flex items-center gap-1.5 truncate ${profit >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+              <UsdcIcon size={18} />
               {profit >= 0 ? '+' : ''}{formatCompactUSDC(profit)}
               <span className="text-2xs text-dark-500">USDC</span>
             </p>
@@ -251,12 +259,12 @@ export default function Portfolio() {
 
       {/* Tab Chips */}
       {positions.length > 0 && (
-        <div className="flex items-center gap-2 flex-wrap">
+        <div className="flex items-center gap-2 overflow-x-auto pb-2 -mx-4 px-4 sm:mx-0 sm:px-0 scrollbar-hide">
           {(['all', 'active', 'winnings', 'refunds', 'claimed'] as TabType[]).map((tab) => (
             <button
               key={tab}
               onClick={() => setActiveTab(tab)}
-              className={`px-3.5 py-1.5 rounded-lg text-xs font-medium transition-all ${
+              className={`px-3.5 py-1.5 rounded-lg text-xs font-medium transition-all shrink-0 ${
                 activeTab === tab
                   ? 'bg-primary-500/20 text-primary-400 border border-primary-500/30'
                   : 'bg-white/5 text-dark-400 border border-white/[0.06] hover:bg-white/10 hover:text-dark-300'
