@@ -82,7 +82,7 @@ export function formatCompact(num: number): string {
   if (num >= 1e3) return (num / 1e3).toFixed(1).replace(/\.0$/, '') + 'K';
   if (num >= 1) return num.toLocaleString('en-US', { maximumFractionDigits: 2 });
   if (num >= 0.01) return num.toFixed(2);
-  return num.toFixed(4);
+  return num.toFixed(2);
 }
 
 /**
