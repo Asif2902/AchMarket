@@ -26,6 +26,8 @@ interface Position {
   stage: number;
 }
 
+type TabType = 'all' | 'winnings' | 'refunds';
+
 export default function Portfolio() {
   const { address, readProvider, signer, isConnected } = useWallet();
   const { clearClaim } = usePendingClaims();
@@ -33,6 +35,7 @@ export default function Portfolio() {
   const [loading, setLoading] = useState(true);
   const [txPending, setTxPending] = useState<string | null>(null);
   const [txMsg, setTxMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [activeTab, setActiveTab] = useState<TabType>('all');
   const txMsgTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
@@ -159,8 +162,23 @@ export default function Portfolio() {
 
   // Compute summary stats
   const totalDeposited = positions.reduce((acc, p) => acc + p.netDepositedWei, 0n);
+  const totalMarkets = new Set(positions.map(p => p.market)).size;
   const activePositions = positions.filter(p => p.stage === 0).length;
-  const claimable = positions.filter(p => p.canRedeem || p.canRefund).length;
+  const claimableWinnings = positions.filter(p => p.canRedeem).length;
+  const claimableRefunds = positions.filter(p => p.canRefund).length;
+  
+  // Filter positions based on tab
+  const filteredPositions = positions.filter(p => {
+    if (activeTab === 'winnings') return p.canRedeem;
+    if (activeTab === 'refunds') return p.canRefund;
+    return true;
+  });
+
+  const tabCounts = {
+    all: positions.length,
+    winnings: positions.filter(p => p.canRedeem).length,
+    refunds: positions.filter(p => p.canRefund).length,
+  };
 
   return (
     <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8 space-y-6 animate-fade-in">
@@ -168,7 +186,7 @@ export default function Portfolio() {
       <div className="flex items-start sm:items-center justify-between gap-3">
         <div>
           <h1 className="text-xl sm:text-2xl font-bold text-white">Portfolio</h1>
-          <p className="text-xs text-dark-500 mt-0.5">{positions.length} position{positions.length !== 1 ? 's' : ''}</p>
+          <p className="text-xs text-dark-500 mt-0.5">{positions.length} position{positions.length !== 1 ? 's' : ''} across {totalMarkets} market{totalMarkets !== 1 ? 's' : ''}</p>
         </div>
         <Link to="/" className="btn-secondary text-xs px-3 py-1.5 shrink-0 !min-h-0">
           Browse Markets
@@ -177,10 +195,14 @@ export default function Portfolio() {
 
       {/* Summary stats */}
       {positions.length > 0 && (
-        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-          <div className="card p-3.5 col-span-2 sm:col-span-1">
-            <span className="text-2xs text-dark-500 font-medium uppercase tracking-wider">Total Deposited</span>
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          <div className="card p-3.5">
+            <span className="text-2xs text-dark-500 font-medium uppercase tracking-wider">Total Volume</span>
             <p className="text-base sm:text-lg font-bold text-white mt-0.5 tabular-nums flex items-center gap-1.5 truncate"><UsdcIcon size={16} />{formatCompactUSDC(totalDeposited)} <span className="text-2xs text-dark-500">USDC</span></p>
+          </div>
+          <div className="card p-3.5">
+            <span className="text-2xs text-dark-500 font-medium uppercase tracking-wider">Total Markets</span>
+            <p className="text-base sm:text-lg font-bold text-white mt-0.5">{totalMarkets}</p>
           </div>
           <div className="card p-3.5">
             <span className="text-2xs text-dark-500 font-medium uppercase tracking-wider">Active</span>
@@ -188,8 +210,30 @@ export default function Portfolio() {
           </div>
           <div className="card p-3.5">
             <span className="text-2xs text-dark-500 font-medium uppercase tracking-wider">Claimable</span>
-            <p className={`text-base sm:text-lg font-bold mt-0.5 ${claimable > 0 ? 'text-emerald-400' : 'text-white'}`}>{claimable}</p>
+            <p className={`text-base sm:text-lg font-bold mt-0.5 ${claimableWinnings + claimableRefunds > 0 ? 'text-emerald-400' : 'text-white'}`}>{claimableWinnings + claimableRefunds}</p>
           </div>
+        </div>
+      )}
+
+      {/* Tab Chips */}
+      {positions.length > 0 && (
+        <div className="flex items-center gap-2 flex-wrap">
+          {(['all', 'winnings', 'refunds'] as TabType[]).map((tab) => (
+            <button
+              key={tab}
+              onClick={() => setActiveTab(tab)}
+              className={`px-3.5 py-1.5 rounded-lg text-xs font-medium transition-all ${
+                activeTab === tab
+                  ? 'bg-primary-500/20 text-primary-400 border border-primary-500/30'
+                  : 'bg-white/5 text-dark-400 border border-white/[0.06] hover:bg-white/10 hover:text-dark-300'
+              }`}
+            >
+              {tab.charAt(0).toUpperCase() + tab.slice(1)}
+              <span className="ml-1.5 px-1.5 py-0.5 rounded-md bg-white/[0.06] text-2xs">
+                {tabCounts[tab]}
+              </span>
+            </button>
+          ))}
         </div>
       )}
 
@@ -203,15 +247,15 @@ export default function Portfolio() {
       )}
 
       {/* Positions */}
-      {positions.length === 0 ? (
+      {filteredPositions.length === 0 ? (
         <EmptyState
-          title="No positions yet"
-          description="You haven't traded in any prediction markets yet. Browse markets to get started."
-          action={<Link to="/" className="btn-primary text-sm">Browse Markets</Link>}
+          title={activeTab === 'all' ? "No positions yet" : `No ${activeTab} positions`}
+          description={activeTab === 'all' ? "You haven't traded in any prediction markets yet. Browse markets to get started." : `You don't have any ${activeTab} to claim right now.`}
+          action={activeTab === 'all' ? <Link to="/" className="btn-primary text-sm">Browse Markets</Link> : undefined}
         />
       ) : (
         <div className="space-y-3">
-          {positions.map((pos, idx) => (
+          {filteredPositions.map((pos, idx) => (
             <div key={pos.market} className="card p-4 sm:p-5 animate-fade-in-up" style={{ animationDelay: `${idx * 50}ms`, animationFillMode: 'both' }}>
               {/* Title + Badge */}
               <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2 sm:gap-3 mb-3">
