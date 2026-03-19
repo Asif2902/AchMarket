@@ -26,7 +26,7 @@ interface Position {
   stage: number;
 }
 
-type TabType = 'all' | 'winnings' | 'refunds';
+type TabType = 'all' | 'active' | 'winnings' | 'refunds' | 'claimed';
 
 export default function Portfolio() {
   const { address, readProvider, signer, isConnected } = useWallet();
@@ -171,13 +171,17 @@ export default function Portfolio() {
   const filteredPositions = positions.filter(p => {
     if (activeTab === 'winnings') return p.canRedeem;
     if (activeTab === 'refunds') return p.canRefund;
+    if (activeTab === 'active') return p.stage === 0;
+    if (activeTab === 'claimed') return p.hasRedeemed || p.hasRefunded;
     return true;
   });
 
   const tabCounts = {
     all: positions.length,
+    active: positions.filter(p => p.stage === 0).length,
     winnings: positions.filter(p => p.canRedeem).length,
     refunds: positions.filter(p => p.canRefund).length,
+    claimed: positions.filter(p => p.hasRedeemed || p.hasRefunded).length,
   };
 
   return (
@@ -218,7 +222,7 @@ export default function Portfolio() {
       {/* Tab Chips */}
       {positions.length > 0 && (
         <div className="flex items-center gap-2 flex-wrap">
-          {(['all', 'winnings', 'refunds'] as TabType[]).map((tab) => (
+          {(['all', 'active', 'winnings', 'refunds', 'claimed'] as TabType[]).map((tab) => (
             <button
               key={tab}
               onClick={() => setActiveTab(tab)}
@@ -250,7 +254,15 @@ export default function Portfolio() {
       {filteredPositions.length === 0 ? (
         <EmptyState
           title={activeTab === 'all' ? "No positions yet" : `No ${activeTab} positions`}
-          description={activeTab === 'all' ? "You haven't traded in any prediction markets yet. Browse markets to get started." : `You don't have any ${activeTab} to claim right now.`}
+          description={
+            activeTab === 'all' 
+              ? "You haven't traded in any prediction markets yet. Browse markets to get started."
+              : activeTab === 'active'
+              ? "You don't have any active positions right now."
+              : activeTab === 'claimed'
+              ? "You haven't claimed any winnings or refunds yet."
+              : `You don't have any ${activeTab} to claim right now.`
+          }
           action={activeTab === 'all' ? <Link to="/" className="btn-primary text-sm">Browse Markets</Link> : undefined}
         />
       ) : (
