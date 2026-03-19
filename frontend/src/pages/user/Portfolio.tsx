@@ -264,14 +264,10 @@ export default function Portfolio() {
             <button
               key={tab}
               onClick={() => setActiveTab(tab)}
-              className={`px-3.5 py-1.5 rounded-lg text-xs font-medium transition-all shrink-0 ${
-                activeTab === tab
-                  ? 'bg-primary-500/20 text-primary-400 border border-primary-500/30'
-                  : 'bg-white/5 text-dark-400 border border-white/[0.06] hover:bg-white/10 hover:text-dark-300'
-              }`}
+              className={`chip shrink-0 ${activeTab === tab ? 'chip-active' : ''}`}
             >
               {tab.charAt(0).toUpperCase() + tab.slice(1)}
-              <span className="ml-1.5 px-1.5 py-0.5 rounded-md bg-white/[0.06] text-2xs">
+              <span className="ml-1.5 px-1.5 py-0.5 rounded bg-white/20 text-2xs">
                 {tabCounts[tab]}
               </span>
             </button>
