@@ -160,27 +160,26 @@ export default function Portfolio() {
 
   if (loading) return <PageLoader />;
 
-  // Compute summary stats
-  const totalDeposited = positions.reduce((acc, p) => acc + p.netDepositedWei, 0n);
-  const activeDeposits = positions.filter(p => p.stage === 0).reduce((acc, p) => acc + p.netDepositedWei, 0n);
-  const resolvedPositions = positions.filter(p => p.stage === 1 || p.stage === 3 || p.hasRedeemed || p.hasRefunded);
-  const resolvedDeposits = resolvedPositions.reduce((acc, p) => acc + p.netDepositedWei, 0n);
-  
-  const totalMarkets = new Set(positions.map(p => p.market)).size;
-  const activePositions = positions.filter(p => p.stage === 0).length;
-  const claimableWinnings = positions.filter(p => p.canRedeem).length;
-  const claimableRefunds = positions.filter(p => p.canRefund).length;
-  
-  const claimedPositions = positions.filter(p => p.hasRedeemed || p.hasRefunded);
-  const totalWinnings = claimedPositions.reduce((acc, p) => {
-    if (p.hasRedeemed) {
-      const totalShares = p.sharesPerOutcome.reduce((a, b) => a + b, 0n);
-      if (totalShares > 0n) return acc + (p.netDepositedWei * 80n) / 100n;
-    }
-    return acc + p.netDepositedWei;
-  }, 0n);
-  const profit = totalWinnings - resolvedDeposits;
-  const roi = resolvedDeposits > 0 ? ((totalWinnings - resolvedDeposits) * 10000n) / resolvedDeposits : 0;
+   // Compute summary stats
+   const totalDeposited = positions.reduce((acc, p) => acc + p.netDepositedWei, 0n);
+   const activeDeposits = positions.filter(p => p.stage === 0).reduce((acc, p) => acc + p.netDepositedWei, 0n);
+   const claimedPositions = positions.filter(p => p.hasRedeemed || p.hasRefunded);
+   const resolvedDeposits = claimedPositions.reduce((acc, p) => acc + p.netDepositedWei, 0n);
+   
+   const totalMarkets = new Set(positions.map(p => p.market)).size;
+   const activePositions = positions.filter(p => p.stage === 0).length;
+   const claimableWinnings = positions.filter(p => p.canRedeem).length;
+   const claimableRefunds = positions.filter(p => p.canRefund).length;
+   
+   const totalWinnings = claimedPositions.reduce((acc, p) => {
+     if (p.hasRedeemed) {
+       const totalShares = p.sharesPerOutcome.reduce((a, b) => a + b, 0n);
+       if (totalShares > 0n) return acc + (p.netDepositedWei * 80n) / 100n;
+     }
+     return acc + p.netDepositedWei;
+   }, 0n);
+   const profit = totalWinnings - resolvedDeposits;
+   const roi = resolvedDeposits > 0 ? ((totalWinnings - resolvedDeposits) * 10000n) / resolvedDeposits : 0;
   
   // Filter positions based on tab
   const filteredPositions = positions.filter(p => {
