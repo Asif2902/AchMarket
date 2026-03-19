@@ -162,10 +162,15 @@ export default function Portfolio() {
 
   // Compute summary stats
   const totalDeposited = positions.reduce((acc, p) => acc + p.netDepositedWei, 0n);
+  const activeDeposits = positions.filter(p => p.stage === 0).reduce((acc, p) => acc + p.netDepositedWei, 0n);
+  const resolvedPositions = positions.filter(p => p.stage === 1 || p.stage === 3 || p.hasRedeemed || p.hasRefunded);
+  const resolvedDeposits = resolvedPositions.reduce((acc, p) => acc + p.netDepositedWei, 0n);
+  
   const totalMarkets = new Set(positions.map(p => p.market)).size;
   const activePositions = positions.filter(p => p.stage === 0).length;
   const claimableWinnings = positions.filter(p => p.canRedeem).length;
   const claimableRefunds = positions.filter(p => p.canRefund).length;
+  
   const claimedPositions = positions.filter(p => p.hasRedeemed || p.hasRefunded);
   const totalWinnings = claimedPositions.reduce((acc, p) => {
     if (p.hasRedeemed) {
@@ -174,7 +179,7 @@ export default function Portfolio() {
     }
     return acc + p.netDepositedWei;
   }, 0n);
-  const profit = totalWinnings - totalDeposited;
+  const profit = totalWinnings - resolvedDeposits;
   
   // Filter positions based on tab
   const filteredPositions = positions.filter(p => {
@@ -208,7 +213,7 @@ export default function Portfolio() {
 
       {/* Summary stats */}
       {positions.length > 0 && (
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-7 gap-3">
           <div className="card p-3.5">
             <span className="text-2xs text-dark-500 font-medium uppercase tracking-wider">Total Volume</span>
             <p className="text-base sm:text-lg font-bold text-white mt-0.5 tabular-nums flex items-center gap-1.5 truncate"><UsdcIcon size={16} />{formatCompactUSDC(totalDeposited)} <span className="text-2xs text-dark-500">USDC</span></p>
@@ -216,6 +221,10 @@ export default function Portfolio() {
           <div className="card p-3.5">
             <span className="text-2xs text-dark-500 font-medium uppercase tracking-wider">Total Markets</span>
             <p className="text-base sm:text-lg font-bold text-white mt-0.5">{totalMarkets}</p>
+          </div>
+          <div className="card p-3.5">
+            <span className="text-2xs text-dark-500 font-medium uppercase tracking-wider">Active Deposits</span>
+            <p className="text-base sm:text-lg font-bold text-primary-400 mt-0.5 tabular-nums flex items-center gap-1.5 truncate"><UsdcIcon size={16} />{formatCompactUSDC(activeDeposits)} <span className="text-2xs text-dark-500">USDC</span></p>
           </div>
           <div className="card p-3.5">
             <span className="text-2xs text-dark-500 font-medium uppercase tracking-wider">Active</span>
