@@ -166,14 +166,17 @@ export default function Portfolio() {
     
     const totalMarkets = new Set(positions.map(p => p.market)).size;
     const activePositions = positions.filter(p => p.stage === 0).length;
-    const claimableWinnings = positions.filter(p => p.canRedeem).length;
-    const claimableRefunds = positions.filter(p => p.canRefund).length;
+    // Use same filtering logic as usePendingClaims to be consistent:
+    // - Exclude already-claimed positions
+    // - Exclude zero-deposit refunds
+    const claimableWinnings = positions.filter(p => p.canRedeem && !p.hasRedeemed).length;
+    const claimableRefunds = positions.filter(p => p.canRefund && !p.hasRefunded && p.netDepositedWei > 0n).length;
     
   
-  // Filter positions based on tab
+  // Filter positions based on tab - use same logic as usePendingClaims
   const filteredPositions = positions.filter(p => {
-    if (activeTab === 'winnings') return p.canRedeem;
-    if (activeTab === 'refunds') return p.canRefund;
+    if (activeTab === 'winnings') return p.canRedeem && !p.hasRedeemed;
+    if (activeTab === 'refunds') return p.canRefund && !p.hasRefunded && p.netDepositedWei > 0n;
     if (activeTab === 'active') return p.stage === 0;
     if (activeTab === 'claimed') return p.hasRedeemed || p.hasRefunded;
     return true;
@@ -182,8 +185,8 @@ export default function Portfolio() {
   const tabCounts = {
     all: positions.length,
     active: positions.filter(p => p.stage === 0).length,
-    winnings: positions.filter(p => p.canRedeem).length,
-    refunds: positions.filter(p => p.canRefund).length,
+    winnings: positions.filter(p => p.canRedeem && !p.hasRedeemed).length,
+    refunds: positions.filter(p => p.canRefund && !p.hasRefunded && p.netDepositedWei > 0n).length,
     claimed: positions.filter(p => p.hasRedeemed || p.hasRefunded).length,
   };
 
@@ -220,7 +223,7 @@ export default function Portfolio() {
             <p className="text-base sm:text-lg font-bold text-white mt-0.5">{activePositions}</p>
           </div>
           <div className="card p-3.5">
-            <span className="text-2xs text-dark-500 font-medium uppercase tracking-wider">Claimable</span>
+            <span className="text-2xs text-dark-500 font-medium uppercase tracking-wider">Estimated Claimable</span>
             <p className={`text-base sm:text-lg font-bold mt-0.5 ${claimableWinnings + claimableRefunds > 0 ? 'text-emerald-400' : 'text-white'}`}>
               {claimableWinnings + claimableRefunds > 0 ? claimableWinnings + claimableRefunds : <span className="text-dark-500">—</span>}
             </p>
@@ -237,7 +240,7 @@ export default function Portfolio() {
               onClick={() => setActiveTab(tab)}
               className={`chip shrink-0 ${activeTab === tab ? 'chip-active' : ''}`}
             >
-              {tab.charAt(0).toUpperCase() + tab.slice(1)}
+              {tab === 'winnings' ? 'Est. Winnings' : tab === 'refunds' ? 'Est. Refunds' : tab.charAt(0).toUpperCase() + tab.slice(1)}
               <span className="ml-1.5 px-1.5 py-0.5 rounded bg-white/20 text-2xs">
                 {tabCounts[tab]}
               </span>
@@ -266,6 +269,10 @@ export default function Portfolio() {
               ? "You don't have any active positions right now."
               : activeTab === 'claimed'
               ? "You haven't claimed any winnings or refunds yet."
+              : activeTab === 'winnings'
+              ? "You don't have any estimated winnings to claim right now."
+              : activeTab === 'refunds'
+              ? "You don't have any estimated refunds to claim right now."
               : `You don't have any ${activeTab} to claim right now.`
           }
           action={activeTab === 'all' ? <Link to="/" className="btn-primary text-sm">Browse Markets</Link> : undefined}
