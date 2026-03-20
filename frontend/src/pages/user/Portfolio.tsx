@@ -85,11 +85,15 @@ export default function Portfolio() {
         let totalWithdrawalsWei = 0n;
         const REDEEMED_TOPIC = ethers.id('Redeemed(address,uint256)');
         const REFUNDED_TOPIC = ethers.id('Refunded(address,uint256)');
+        const userAddrLower = address.toLowerCase();
         
         try {
           for (const marketAddr of marketAddresses) {
-            const redeemUrl = `${NETWORK.blockscoutApi}?module=logs&action=getLogs&address=${marketAddr}&fromBlock=0&toBlock=latest&topic0=${REDEEMED_TOPIC}&topic1=${address.slice(2).toLowerCase().padStart(64, '0')}`;
-            const refundUrl = `${NETWORK.blockscoutApi}?module=logs&action=getLogs&address=${marketAddr}&fromBlock=0&toBlock=latest&topic0=${REFUNDED_TOPIC}&topic1=${address.slice(2).toLowerCase().padStart(64, '0')}`;
+            // Fetch all Redeemed/Refunded logs without topic1 filter (blockscout may not support it)
+            const [redeemUrl, refundUrl] = [
+              `${NETWORK.blockscoutApi}?module=logs&action=getLogs&address=${marketAddr}&fromBlock=0&toBlock=latest&topic0=${REDEEMED_TOPIC}`,
+              `${NETWORK.blockscoutApi}?module=logs&action=getLogs&address=${marketAddr}&fromBlock=0&toBlock=latest&topic0=${REFUNDED_TOPIC}`,
+            ];
             
             const redeemRes = await window.fetch(redeemUrl);
             const refundRes = await window.fetch(refundUrl);
@@ -97,19 +101,26 @@ export default function Portfolio() {
             const redeemData = await redeemRes.json();
             const refundData = await refundRes.json();
             
-            // Parse Redeemed events (winnings)
+            // Parse Redeemed events - filter by user address in topics[1]
             if (redeemData.status === '1' && Array.isArray(redeemData.result)) {
               for (const log of redeemData.result) {
-                const amount = BigInt('0x' + (log.data || '').slice(2, 66));
-                totalWithdrawalsWei += amount;
+                // topics[1] contains the indexed user address (padded)
+                const logUser = '0x' + ((log.topics?.[1] as string) || '').slice(26);
+                if (logUser.toLowerCase() === userAddrLower) {
+                  const amount = BigInt('0x' + ((log.data as string) || '').slice(2, 66));
+                  totalWithdrawalsWei += amount;
+                }
               }
             }
             
-            // Parse Refunded events (refunds)
+            // Parse Refunded events - filter by user address in topics[1]
             if (refundData.status === '1' && Array.isArray(refundData.result)) {
               for (const log of refundData.result) {
-                const amount = BigInt('0x' + (log.data || '').slice(2, 66));
-                totalWithdrawalsWei += amount;
+                const logUser = '0x' + ((log.topics?.[1] as string) || '').slice(26);
+                if (logUser.toLowerCase() === userAddrLower) {
+                  const amount = BigInt('0x' + ((log.data as string) || '').slice(2, 66));
+                  totalWithdrawalsWei += amount;
+                }
               }
             }
           }
@@ -217,17 +228,17 @@ export default function Portfolio() {
     const claimableRefunds = positions.filter(p => p.canRefund).length;
     
     // P&L calculation from API transaction data
-    // Get total deposits and withdrawals from the first position (all positions share the same API data)
-    const apiDeposits = positions[0]?.totalDepositsWei || 0n;
+    // Get withdrawals from the first position (all positions share the same API data)
     const apiWithdrawals = positions[0]?.totalWithdrawalsWei || 0n;
     
-    // Calculate profit from actual transactions
-    const profitWei = apiWithdrawals - apiDeposits;
-    const roi = apiDeposits > 0n ? (Number(profitWei) / Number(apiDeposits)) * 100 : 0;
+    // Use totalDeposited from lens as the deposit base
+    // Profit = actual withdrawals (from Redeemed/Refunded events) - total deposited
+    const profitWei = apiWithdrawals - totalDeposited;
+    const roi = totalDeposited > 0n ? (Number(profitWei) / Number(totalDeposited)) * 100 : 0;
     
-    // Total winnings = total withdrawals (actual payouts received)
+    // Total winnings = actual payouts from API
     const totalWinningsWei = apiWithdrawals;
-    // Use deposits from lens for display consistency
+    // For display consistency
     const resolvedDepositsWei = totalDeposited;
   
   // Filter positions based on tab
