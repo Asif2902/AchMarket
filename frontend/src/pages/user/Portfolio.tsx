@@ -80,11 +80,11 @@ export default function Portfolio() {
           marketAddresses.add((s.market as string).toLowerCase());
         }
 
-        // Fetch P&L from API
+        // Fetch P&L from API - use blockscout v2 API
         let totalDepositsWei = 0n;
         let totalWithdrawalsWei = 0n;
         try {
-          const apiUrl = `${NETWORK.blockscoutApi}/addresses/${address}/internal-transactions`;
+          const apiUrl = `${NETWORK.blockscoutApi}/v2/addresses/${address}/internal-transactions`;
           const response = await window.fetch(apiUrl);
           if (response.ok) {
             const data: { items?: Array<{ to?: { hash?: string }; from?: { hash?: string }; value?: string }> } = await response.json();
@@ -104,7 +104,7 @@ export default function Portfolio() {
             }
           }
         } catch (apiErr) {
-          console.warn('Failed to fetch P&L from API, using lens data:', apiErr);
+          console.warn('Failed to fetch P&L from API:', apiErr);
         }
 
         setPositions(portfolio.map((p: Record<string, unknown>) => ({
