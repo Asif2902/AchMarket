@@ -29,11 +29,18 @@ function getCategories(markets: MarketSummaryData[]): string[] {
   return [...defaultsWithoutOther, ...sortedCustom, 'Other'];
 }
 const SORT_OPTIONS = [
+  { value: 'trending', label: 'Trending' },
   { value: 'newest', label: 'Newest First' },
   { value: 'ending', label: 'Ending Soon' },
   { value: 'volume', label: 'Highest Volume' },
   { value: 'participants', label: 'Most Participants' },
 ];
+
+function calculateTrendingScore(volumeWei: bigint, participants: number): number {
+  const volume = Number(ethers.formatUnits(volumeWei, 6));
+  const score = Math.log10(volume + 1) * Math.log10(participants + 1) * 100;
+  return score;
+}
 const STAGE_FILTERS = [
   { value: -1, label: 'All' },
   { value: 0, label: 'Active' },
@@ -54,7 +61,7 @@ export default function Home() {
   const fetchedMarketsRef = useRef<Set<string>>(new Set());
   const [stageFilter, setStageFilter] = useState(0);
   const [stabilityFilter, setStabilityFilter] = useState('all');
-  const [sortBy, setSortBy] = useState('newest');
+  const [sortBy, setSortBy] = useState('trending');
   const [searchQuery, setSearchQuery] = useState('');
   const [page, setPage] = useState(0);
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
@@ -118,6 +125,11 @@ export default function Home() {
     })
     .sort((a, b) => {
       switch (sortBy) {
+        case 'trending': {
+          const scoreA = calculateTrendingScore(a.totalVolumeWei, a.participants);
+          const scoreB = calculateTrendingScore(b.totalVolumeWei, b.participants);
+          return scoreB - scoreA;
+        }
         case 'newest': return b.marketId - a.marketId;
         case 'ending':
           if (a.stage !== STAGE.Active && a.stage !== STAGE.Suspended && (b.stage === STAGE.Active || b.stage === STAGE.Suspended)) return 1;

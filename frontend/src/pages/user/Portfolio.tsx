@@ -26,6 +26,8 @@ interface Position {
   stage: number;
 }
 
+type TabType = 'all' | 'active' | 'winnings' | 'refunds' | 'claimed';
+
 export default function Portfolio() {
   const { address, readProvider, signer, isConnected } = useWallet();
   const { clearClaim } = usePendingClaims();
@@ -33,6 +35,7 @@ export default function Portfolio() {
   const [loading, setLoading] = useState(true);
   const [txPending, setTxPending] = useState<string | null>(null);
   const [txMsg, setTxMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [activeTab, setActiveTab] = useState<TabType>('all');
   const txMsgTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
@@ -157,10 +160,35 @@ export default function Portfolio() {
 
   if (loading) return <PageLoader />;
 
-  // Compute summary stats
-  const totalDeposited = positions.reduce((acc, p) => acc + p.netDepositedWei, 0n);
-  const activePositions = positions.filter(p => p.stage === 0).length;
-  const claimable = positions.filter(p => p.canRedeem || p.canRefund).length;
+    // Compute summary stats
+    const totalDeposited = positions.reduce((acc, p) => acc + p.netDepositedWei, 0n);
+    const activeDeposits = positions.filter(p => p.stage === 0).reduce((acc, p) => acc + p.netDepositedWei, 0n);
+    
+    const totalMarkets = new Set(positions.map(p => p.market)).size;
+    const activePositions = positions.filter(p => p.stage === 0).length;
+    // Use same filtering logic as usePendingClaims to be consistent:
+    // - Exclude already-claimed positions
+    // - Exclude zero-deposit refunds
+    const claimableWinnings = positions.filter(p => p.canRedeem && !p.hasRedeemed).length;
+    const claimableRefunds = positions.filter(p => p.canRefund && !p.hasRefunded && p.netDepositedWei > 0n).length;
+    
+  
+  // Filter positions based on tab - use same logic as usePendingClaims
+  const filteredPositions = positions.filter(p => {
+    if (activeTab === 'winnings') return p.canRedeem && !p.hasRedeemed;
+    if (activeTab === 'refunds') return p.canRefund && !p.hasRefunded && p.netDepositedWei > 0n;
+    if (activeTab === 'active') return p.stage === 0;
+    if (activeTab === 'claimed') return p.hasRedeemed || p.hasRefunded;
+    return true;
+  });
+
+  const tabCounts = {
+    all: positions.length,
+    active: positions.filter(p => p.stage === 0).length,
+    winnings: positions.filter(p => p.canRedeem && !p.hasRedeemed).length,
+    refunds: positions.filter(p => p.canRefund && !p.hasRefunded && p.netDepositedWei > 0n).length,
+    claimed: positions.filter(p => p.hasRedeemed || p.hasRefunded).length,
+  };
 
   return (
     <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8 space-y-6 animate-fade-in">
@@ -168,7 +196,7 @@ export default function Portfolio() {
       <div className="flex items-start sm:items-center justify-between gap-3">
         <div>
           <h1 className="text-xl sm:text-2xl font-bold text-white">Portfolio</h1>
-          <p className="text-xs text-dark-500 mt-0.5">{positions.length} position{positions.length !== 1 ? 's' : ''}</p>
+          <p className="text-xs text-dark-400 mt-0.5">{positions.length} position{positions.length !== 1 ? 's' : ''} across {totalMarkets} market{totalMarkets !== 1 ? 's' : ''}</p>
         </div>
         <Link to="/" className="btn-secondary text-xs px-3 py-1.5 shrink-0 !min-h-0">
           Browse Markets
@@ -177,19 +205,47 @@ export default function Portfolio() {
 
       {/* Summary stats */}
       {positions.length > 0 && (
-        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-          <div className="card p-3.5 col-span-2 sm:col-span-1">
-            <span className="text-2xs text-dark-500 font-medium uppercase tracking-wider">Total Deposited</span>
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3 max-w-5xl mx-auto">
+          <div className="card p-3.5">
+            <span className="text-2xs text-dark-500 font-medium uppercase tracking-wider">Total Volume</span>
             <p className="text-base sm:text-lg font-bold text-white mt-0.5 tabular-nums flex items-center gap-1.5 truncate"><UsdcIcon size={16} />{formatCompactUSDC(totalDeposited)} <span className="text-2xs text-dark-500">USDC</span></p>
+          </div>
+          <div className="card p-3.5">
+            <span className="text-2xs text-dark-500 font-medium uppercase tracking-wider">Total Markets</span>
+            <p className="text-base sm:text-lg font-bold text-white mt-0.5">{totalMarkets}</p>
+          </div>
+          <div className="card p-3.5">
+            <span className="text-2xs text-dark-500 font-medium uppercase tracking-wider">Active Deposits</span>
+            <p className="text-base sm:text-lg font-bold text-primary-400 mt-0.5 tabular-nums flex items-center gap-1.5 truncate"><UsdcIcon size={16} />{formatCompactUSDC(activeDeposits)} <span className="text-2xs text-dark-500">USDC</span></p>
           </div>
           <div className="card p-3.5">
             <span className="text-2xs text-dark-500 font-medium uppercase tracking-wider">Active</span>
             <p className="text-base sm:text-lg font-bold text-white mt-0.5">{activePositions}</p>
           </div>
           <div className="card p-3.5">
-            <span className="text-2xs text-dark-500 font-medium uppercase tracking-wider">Claimable</span>
-            <p className={`text-base sm:text-lg font-bold mt-0.5 ${claimable > 0 ? 'text-emerald-400' : 'text-white'}`}>{claimable}</p>
+            <span className="text-2xs text-dark-500 font-medium uppercase tracking-wider">Estimated Claimable</span>
+            <p className={`text-base sm:text-lg font-bold mt-0.5 ${claimableWinnings + claimableRefunds > 0 ? 'text-emerald-400' : 'text-white'}`}>
+              {claimableWinnings + claimableRefunds > 0 ? claimableWinnings + claimableRefunds : <span className="text-dark-500">—</span>}
+            </p>
           </div>
+        </div>
+      )}
+
+      {/* Tab Chips */}
+      {positions.length > 0 && (
+        <div className="flex items-center gap-2 overflow-x-auto pb-2 -mx-4 px-4 sm:mx-0 sm:px-0 scrollbar-hide">
+          {(['all', 'active', 'winnings', 'refunds', 'claimed'] as TabType[]).map((tab) => (
+            <button
+              key={tab}
+              onClick={() => setActiveTab(tab)}
+              className={`chip shrink-0 ${activeTab === tab ? 'chip-active' : ''}`}
+            >
+              {tab === 'winnings' ? 'Est. Winnings' : tab === 'refunds' ? 'Est. Refunds' : tab.charAt(0).toUpperCase() + tab.slice(1)}
+              <span className="ml-1.5 px-1.5 py-0.5 rounded bg-white/20 text-2xs">
+                {tabCounts[tab]}
+              </span>
+            </button>
+          ))}
         </div>
       )}
 
@@ -203,15 +259,27 @@ export default function Portfolio() {
       )}
 
       {/* Positions */}
-      {positions.length === 0 ? (
+      {filteredPositions.length === 0 ? (
         <EmptyState
-          title="No positions yet"
-          description="You haven't traded in any prediction markets yet. Browse markets to get started."
-          action={<Link to="/" className="btn-primary text-sm">Browse Markets</Link>}
+          title={activeTab === 'all' ? "No positions yet" : `No ${activeTab} positions`}
+          description={
+            activeTab === 'all' 
+              ? "You haven't traded in any prediction markets yet. Browse markets to get started."
+              : activeTab === 'active'
+              ? "You don't have any active positions right now."
+              : activeTab === 'claimed'
+              ? "You haven't claimed any winnings or refunds yet."
+              : activeTab === 'winnings'
+              ? "You don't have any estimated winnings to claim right now."
+              : activeTab === 'refunds'
+              ? "You don't have any estimated refunds to claim right now."
+              : `You don't have any ${activeTab} to claim right now.`
+          }
+          action={activeTab === 'all' ? <Link to="/" className="btn-primary text-sm">Browse Markets</Link> : undefined}
         />
       ) : (
         <div className="space-y-3">
-          {positions.map((pos, idx) => (
+          {filteredPositions.map((pos, idx) => (
             <div key={pos.market} className="card p-4 sm:p-5 animate-fade-in-up" style={{ animationDelay: `${idx * 50}ms`, animationFillMode: 'both' }}>
               {/* Title + Badge */}
               <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2 sm:gap-3 mb-3">
