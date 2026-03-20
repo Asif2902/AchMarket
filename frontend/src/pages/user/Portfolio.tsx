@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import { ethers } from 'ethers';
 import { useWallet } from '../../context/WalletContext';
 import { usePendingClaims } from '../../hooks/usePendingClaims';
-import { FACTORY_ADDRESS, LENS_ADDRESS, STAGE_LABELS, STAGE_COLORS } from '../../config/network';
+import { NETWORK, FACTORY_ADDRESS, LENS_ADDRESS, STAGE_LABELS, STAGE_COLORS } from '../../config/network';
 import { FACTORY_ABI, LENS_ABI, MARKET_ABI } from '../../config/abis';
 import { PageLoader } from '../../components/LoadingSpinner';
 import EmptyState from '../../components/EmptyState';
@@ -24,6 +24,8 @@ interface Position {
   hasRedeemed: boolean;
   hasRefunded: boolean;
   stage: number;
+  totalDepositsWei?: bigint;
+  totalWithdrawalsWei?: bigint;
 }
 
 type TabType = 'all' | 'active' | 'winnings' | 'refunds' | 'claimed';
@@ -72,6 +74,39 @@ export default function Portfolio() {
           addrToId.set((s.market as string).toLowerCase(), Number(s.marketId));
         }
 
+        // Get market addresses for P&L calculation
+        const marketAddresses = new Set<string>();
+        for (const s of summaries) {
+          marketAddresses.add((s.market as string).toLowerCase());
+        }
+
+        // Fetch P&L from API
+        let totalDepositsWei = 0n;
+        let totalWithdrawalsWei = 0n;
+        try {
+          const apiUrl = `${NETWORK.blockscoutApi}/addresses/${address}/internal-transactions`;
+          const response = await window.fetch(apiUrl);
+          if (response.ok) {
+            const data: { items?: Array<{ to?: { hash?: string }; from?: { hash?: string }; value?: string }> } = await response.json();
+            for (const tx of data.items || []) {
+              const toAddr = tx.to?.hash?.toLowerCase() || '';
+              const fromAddr = tx.from?.hash?.toLowerCase() || '';
+              const value = BigInt(tx.value || '0');
+              
+              // User deposited (sent to market contract)
+              if (marketAddresses.has(toAddr) && fromAddr === address.toLowerCase()) {
+                totalDepositsWei += value;
+              }
+              // User received payout (from market contract)
+              if (marketAddresses.has(fromAddr) && toAddr === address.toLowerCase()) {
+                totalWithdrawalsWei += value;
+              }
+            }
+          }
+        } catch (apiErr) {
+          console.warn('Failed to fetch P&L from API, using lens data:', apiErr);
+        }
+
         setPositions(portfolio.map((p: Record<string, unknown>) => ({
           market: p.market as string,
           marketId: addrToId.get((p.market as string).toLowerCase()) ?? 0,
@@ -85,6 +120,8 @@ export default function Portfolio() {
           hasRedeemed: p.hasRedeemed as boolean,
           hasRefunded: p.hasRefunded as boolean,
           stage: Number(p.stage),
+          totalDepositsWei,
+          totalWithdrawalsWei,
         })));
       } catch (err) {
         console.error('Failed to fetch portfolio:', err);
@@ -164,31 +201,24 @@ export default function Portfolio() {
     const totalDeposited = positions.reduce((acc, p) => acc + p.netDepositedWei, 0n);
     const activeDeposits = positions.filter(p => p.stage === 0).reduce((acc, p) => acc + p.netDepositedWei, 0n);
     
-    // For P&L calculation, only consider claimed positions to make resolvedDeposits and totalWinnings comparable
-    // This follows the suggestion to "restrict profit/roi to only include claimedPositions so numbers are comparable"
-    const claimedPositions = positions.filter(p => p.hasRedeemed || p.hasRefunded);
-    const resolvedDepositsWei = claimedPositions.reduce((acc, p) => acc + p.netDepositedWei, 0n);
-    
     const totalMarkets = new Set(positions.map(p => p.market)).size;
     const activePositions = positions.filter(p => p.stage === 0).length;
     const claimableWinnings = positions.filter(p => p.canRedeem).length;
     const claimableRefunds = positions.filter(p => p.canRefund).length;
     
-    // Calculate totalWinnings as the actual proceeds from claimed positions
-    // Use floating point to avoid bigint truncation issues
-    const resolvedDepositsNum = Number(ethers.formatEther(resolvedDepositsWei));
-    let totalWinningsNum = 0;
-    claimedPositions.forEach(p => {
-      if (p.hasRedeemed || p.hasRefunded) {
-        const deposited = Number(ethers.formatEther(p.netDepositedWei));
-        totalWinningsNum += deposited * 0.9975; // 99.75% after 0.25% fee
-      }
-    });
+    // P&L calculation from API transaction data
+    // Get total deposits and withdrawals from the first position (all positions share the same API data)
+    const apiDeposits = positions[0]?.totalDepositsWei || 0n;
+    const apiWithdrawals = positions[0]?.totalWithdrawalsWei || 0n;
     
-    // Convert back to wei for display
-    const totalWinningsWei = ethers.parseEther(totalWinningsNum.toString());
-    const profitWei = totalWinningsWei - resolvedDepositsWei;
-    const roi = resolvedDepositsNum > 0 ? ((totalWinningsNum - resolvedDepositsNum) / resolvedDepositsNum) * 100 : 0;
+    // Calculate profit from actual transactions
+    const profitWei = apiWithdrawals - apiDeposits;
+    const roi = apiDeposits > 0n ? (Number(profitWei) / Number(apiDeposits)) * 100 : 0;
+    
+    // Total winnings = total withdrawals (actual payouts received)
+    const totalWinningsWei = apiWithdrawals;
+    // Use deposits from lens for display consistency
+    const resolvedDepositsWei = totalDeposited;
   
   // Filter positions based on tab
   const filteredPositions = positions.filter(p => {
