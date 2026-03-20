@@ -80,26 +80,36 @@ export default function Portfolio() {
           marketAddresses.add((s.market as string).toLowerCase());
         }
 
-        // Fetch P&L from API - use blockscout v2 API
+        // Fetch P&L from API using Blockscout logs (same format as charts)
         let totalDepositsWei = 0n;
         let totalWithdrawalsWei = 0n;
+        const REDEEMED_TOPIC = ethers.id('Redeemed(address,uint256)');
+        const REFUNDED_TOPIC = ethers.id('Refunded(address,uint256)');
+        
         try {
-          const apiUrl = `${NETWORK.blockscoutApi}/v2/addresses/${address}/internal-transactions`;
-          const response = await window.fetch(apiUrl);
-          if (response.ok) {
-            const data: { items?: Array<{ to?: { hash?: string }; from?: { hash?: string }; value?: string }> } = await response.json();
-            for (const tx of data.items || []) {
-              const toAddr = tx.to?.hash?.toLowerCase() || '';
-              const fromAddr = tx.from?.hash?.toLowerCase() || '';
-              const value = BigInt(tx.value || '0');
-              
-              // User deposited (sent to market contract)
-              if (marketAddresses.has(toAddr) && fromAddr === address.toLowerCase()) {
-                totalDepositsWei += value;
+          for (const marketAddr of marketAddresses) {
+            const redeemUrl = `${NETWORK.blockscoutApi}?module=logs&action=getLogs&address=${marketAddr}&fromBlock=0&toBlock=latest&topic0=${REDEEMED_TOPIC}&topic1=${address.slice(2).toLowerCase().padStart(64, '0')}`;
+            const refundUrl = `${NETWORK.blockscoutApi}?module=logs&action=getLogs&address=${marketAddr}&fromBlock=0&toBlock=latest&topic0=${REFUNDED_TOPIC}&topic1=${address.slice(2).toLowerCase().padStart(64, '0')}`;
+            
+            const redeemRes = await window.fetch(redeemUrl);
+            const refundRes = await window.fetch(refundUrl);
+            
+            const redeemData = await redeemRes.json();
+            const refundData = await refundRes.json();
+            
+            // Parse Redeemed events (winnings)
+            if (redeemData.status === '1' && Array.isArray(redeemData.result)) {
+              for (const log of redeemData.result) {
+                const amount = BigInt('0x' + (log.data || '').slice(2, 66));
+                totalWithdrawalsWei += amount;
               }
-              // User received payout (from market contract)
-              if (marketAddresses.has(fromAddr) && toAddr === address.toLowerCase()) {
-                totalWithdrawalsWei += value;
+            }
+            
+            // Parse Refunded events (refunds)
+            if (refundData.status === '1' && Array.isArray(refundData.result)) {
+              for (const log of refundData.result) {
+                const amount = BigInt('0x' + (log.data || '').slice(2, 66));
+                totalWithdrawalsWei += amount;
               }
             }
           }
