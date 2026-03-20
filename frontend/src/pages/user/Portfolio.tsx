@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import { ethers } from 'ethers';
 import { useWallet } from '../../context/WalletContext';
 import { usePendingClaims } from '../../hooks/usePendingClaims';
-import { NETWORK, FACTORY_ADDRESS, LENS_ADDRESS, STAGE_LABELS, STAGE_COLORS } from '../../config/network';
+import { FACTORY_ADDRESS, LENS_ADDRESS, STAGE_LABELS, STAGE_COLORS } from '../../config/network';
 import { FACTORY_ABI, LENS_ABI, MARKET_ABI } from '../../config/abis';
 import { PageLoader } from '../../components/LoadingSpinner';
 import EmptyState from '../../components/EmptyState';
@@ -24,8 +24,6 @@ interface Position {
   hasRedeemed: boolean;
   hasRefunded: boolean;
   stage: number;
-  totalDepositsWei?: bigint;
-  totalWithdrawalsWei?: bigint;
 }
 
 type TabType = 'all' | 'active' | 'winnings' | 'refunds' | 'claimed';
@@ -74,60 +72,6 @@ export default function Portfolio() {
           addrToId.set((s.market as string).toLowerCase(), Number(s.marketId));
         }
 
-        // Get market addresses for P&L calculation
-        const marketAddresses = new Set<string>();
-        for (const s of summaries) {
-          marketAddresses.add((s.market as string).toLowerCase());
-        }
-
-        // Fetch P&L from API using Blockscout logs (same format as charts)
-        let totalDepositsWei = 0n;
-        let totalWithdrawalsWei = 0n;
-        const REDEEMED_TOPIC = ethers.id('Redeemed(address,uint256)');
-        const REFUNDED_TOPIC = ethers.id('Refunded(address,uint256)');
-        const userAddrLower = address.toLowerCase();
-        
-        try {
-          for (const marketAddr of marketAddresses) {
-            // Fetch all Redeemed/Refunded logs without topic1 filter (blockscout may not support it)
-            const [redeemUrl, refundUrl] = [
-              `${NETWORK.blockscoutApi}?module=logs&action=getLogs&address=${marketAddr}&fromBlock=0&toBlock=latest&topic0=${REDEEMED_TOPIC}`,
-              `${NETWORK.blockscoutApi}?module=logs&action=getLogs&address=${marketAddr}&fromBlock=0&toBlock=latest&topic0=${REFUNDED_TOPIC}`,
-            ];
-            
-            const redeemRes = await window.fetch(redeemUrl);
-            const refundRes = await window.fetch(refundUrl);
-            
-            const redeemData = await redeemRes.json();
-            const refundData = await refundRes.json();
-            
-            // Parse Redeemed events - filter by user address in topics[1]
-            if (redeemData.status === '1' && Array.isArray(redeemData.result)) {
-              for (const log of redeemData.result) {
-                // topics[1] contains the indexed user address (padded)
-                const logUser = '0x' + ((log.topics?.[1] as string) || '').slice(26);
-                if (logUser.toLowerCase() === userAddrLower) {
-                  const amount = BigInt('0x' + ((log.data as string) || '').slice(2, 66));
-                  totalWithdrawalsWei += amount;
-                }
-              }
-            }
-            
-            // Parse Refunded events - filter by user address in topics[1]
-            if (refundData.status === '1' && Array.isArray(refundData.result)) {
-              for (const log of refundData.result) {
-                const logUser = '0x' + ((log.topics?.[1] as string) || '').slice(26);
-                if (logUser.toLowerCase() === userAddrLower) {
-                  const amount = BigInt('0x' + ((log.data as string) || '').slice(2, 66));
-                  totalWithdrawalsWei += amount;
-                }
-              }
-            }
-          }
-        } catch (apiErr) {
-          console.warn('Failed to fetch P&L from API:', apiErr);
-        }
-
         setPositions(portfolio.map((p: Record<string, unknown>) => ({
           market: p.market as string,
           marketId: addrToId.get((p.market as string).toLowerCase()) ?? 0,
@@ -141,8 +85,6 @@ export default function Portfolio() {
           hasRedeemed: p.hasRedeemed as boolean,
           hasRefunded: p.hasRefunded as boolean,
           stage: Number(p.stage),
-          totalDepositsWei,
-          totalWithdrawalsWei,
         })));
       } catch (err) {
         console.error('Failed to fetch portfolio:', err);
@@ -227,19 +169,6 @@ export default function Portfolio() {
     const claimableWinnings = positions.filter(p => p.canRedeem).length;
     const claimableRefunds = positions.filter(p => p.canRefund).length;
     
-    // P&L calculation from API transaction data
-    // Get withdrawals from the first position (all positions share the same API data)
-    const apiWithdrawals = positions[0]?.totalWithdrawalsWei || 0n;
-    
-    // Use totalDeposited from lens as the deposit base
-    // Profit = actual withdrawals (from Redeemed/Refunded events) - total deposited
-    const profitWei = apiWithdrawals - totalDeposited;
-    const roi = totalDeposited > 0n ? (Number(profitWei) / Number(totalDeposited)) * 100 : 0;
-    
-    // Total winnings = actual payouts from API
-    const totalWinningsWei = apiWithdrawals;
-    // For display consistency
-    const resolvedDepositsWei = totalDeposited;
   
   // Filter positions based on tab
   const filteredPositions = positions.filter(p => {
@@ -294,23 +223,6 @@ export default function Portfolio() {
             <span className="text-2xs text-dark-500 font-medium uppercase tracking-wider">Claimable</span>
             <p className={`text-base sm:text-lg font-bold mt-0.5 ${claimableWinnings + claimableRefunds > 0 ? 'text-emerald-400' : 'text-white'}`}>
               {claimableWinnings + claimableRefunds > 0 ? claimableWinnings + claimableRefunds : <span className="text-dark-500">—</span>}
-            </p>
-          </div>
-          <div className="card p-3.5 lg:col-span-2 xl:col-span-1">
-            <span className="text-2xs text-dark-500 font-medium uppercase tracking-wider">Total Winnings</span>
-            <p className="text-lg sm:text-xl font-bold text-emerald-400 mt-0.5 tabular-nums flex items-center gap-1.5 truncate"><UsdcIcon size={18} />{formatCompactUSDC(totalWinningsWei)} <span className="text-2xs text-dark-500">USDC</span></p>
-          </div>
-          <div className={`card p-3.5 lg:col-span-2 ${profitWei >= 0n ? 'bg-emerald-500/5 border-emerald-500/20' : 'bg-red-500/5 border-red-500/20'} border`}>
-            <div className="flex items-center justify-between">
-              <span className="text-2xs text-dark-500 font-medium uppercase tracking-wider">P&L</span>
-              <span className={`text-2xs px-1.5 py-0.5 rounded ${roi >= 0 ? 'bg-emerald-500/20 text-emerald-400' : 'bg-red-500/20 text-red-400'}`}>
-                {roi >= 0 ? '+' : ''}{roi.toFixed(2)}%
-              </span>
-            </div>
-            <p className={`text-lg sm:text-xl font-bold mt-0.5 tabular-nums flex items-center gap-1.5 truncate ${profitWei >= 0n ? 'text-emerald-400' : 'text-red-400'}`}>
-              <UsdcIcon size={18} />
-              {profitWei >= 0n ? '+' : ''}{formatCompactUSDC(profitWei)}
-              <span className="text-2xs text-dark-500">USDC</span>
             </p>
           </div>
         </div>
