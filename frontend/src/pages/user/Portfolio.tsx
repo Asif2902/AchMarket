@@ -167,7 +167,7 @@ export default function Portfolio() {
     // For P&L calculation, only consider claimed positions to make resolvedDeposits and totalWinnings comparable
     // This follows the suggestion to "restrict profit/roi to only include claimedPositions so numbers are comparable"
     const claimedPositions = positions.filter(p => p.hasRedeemed || p.hasRefunded);
-    const resolvedDeposits = claimedPositions.reduce((acc, p) => acc + p.netDepositedWei, 0n);
+    const resolvedDepositsWei = claimedPositions.reduce((acc, p) => acc + p.netDepositedWei, 0n);
     
     const totalMarkets = new Set(positions.map(p => p.market)).size;
     const activePositions = positions.filter(p => p.stage === 0).length;
@@ -175,19 +175,20 @@ export default function Portfolio() {
     const claimableRefunds = positions.filter(p => p.canRefund).length;
     
     // Calculate totalWinnings as the actual proceeds from claimed positions
-    // For now, use a more accurate fee assumption: platform fee is 25 bps = 0.25%
-    // NOTE: This is still an approximation as actual payout depends on share distribution at resolution time
-    let totalWinnings = 0n;
+    // Use floating point to avoid bigint truncation issues
+    const resolvedDepositsNum = Number(ethers.formatEther(resolvedDepositsWei));
+    let totalWinningsNum = 0;
     claimedPositions.forEach(p => {
       if (p.hasRedeemed || p.hasRefunded) {
-        // For claimed positions, approximate proceeds as 99.75% of deposit (0.25% fee)
-        // This assumes the position was resolved recently enough that the pool hasn't changed significantly
-        totalWinnings += (p.netDepositedWei * 9975n) / 10000n;
+        const deposited = Number(ethers.formatEther(p.netDepositedWei));
+        totalWinningsNum += deposited * 0.9975; // 99.75% after 0.25% fee
       }
     });
     
-    const profit = totalWinnings - resolvedDeposits;
-    const roi = resolvedDeposits > 0 ? ((totalWinnings - resolvedDeposits) * 10000n) / resolvedDeposits : 0;
+    // Convert back to wei for display
+    const totalWinningsWei = ethers.parseEther(totalWinningsNum.toString());
+    const profitWei = totalWinningsWei - resolvedDepositsWei;
+    const roi = resolvedDepositsNum > 0 ? ((totalWinningsNum - resolvedDepositsNum) / resolvedDepositsNum) * 100 : 0;
   
   // Filter positions based on tab
   const filteredPositions = positions.filter(p => {
@@ -246,18 +247,18 @@ export default function Portfolio() {
           </div>
           <div className="card p-3.5 lg:col-span-2 xl:col-span-1">
             <span className="text-2xs text-dark-500 font-medium uppercase tracking-wider">Total Winnings</span>
-            <p className="text-lg sm:text-xl font-bold text-emerald-400 mt-0.5 tabular-nums flex items-center gap-1.5 truncate"><UsdcIcon size={18} />{formatCompactUSDC(totalWinnings)} <span className="text-2xs text-dark-500">USDC</span></p>
+            <p className="text-lg sm:text-xl font-bold text-emerald-400 mt-0.5 tabular-nums flex items-center gap-1.5 truncate"><UsdcIcon size={18} />{formatCompactUSDC(totalWinningsWei)} <span className="text-2xs text-dark-500">USDC</span></p>
           </div>
-          <div className={`card p-3.5 lg:col-span-2 ${profit >= 0 ? 'bg-emerald-500/5 border-emerald-500/20' : 'bg-red-500/5 border-red-500/20'} border`}>
+          <div className={`card p-3.5 lg:col-span-2 ${profitWei >= 0n ? 'bg-emerald-500/5 border-emerald-500/20' : 'bg-red-500/5 border-red-500/20'} border`}>
             <div className="flex items-center justify-between">
               <span className="text-2xs text-dark-500 font-medium uppercase tracking-wider">P&L</span>
-              <span className={`text-2xs px-1.5 py-0.5 rounded ${profit >= 0 ? 'bg-emerald-500/20 text-emerald-400' : 'bg-red-500/20 text-red-400'}`}>
-                {roi >= 0 ? '+' : ''}{Number(roi) / 100}%
+              <span className={`text-2xs px-1.5 py-0.5 rounded ${roi >= 0 ? 'bg-emerald-500/20 text-emerald-400' : 'bg-red-500/20 text-red-400'}`}>
+                {roi >= 0 ? '+' : ''}{roi.toFixed(2)}%
               </span>
             </div>
-            <p className={`text-lg sm:text-xl font-bold mt-0.5 tabular-nums flex items-center gap-1.5 truncate ${profit >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+            <p className={`text-lg sm:text-xl font-bold mt-0.5 tabular-nums flex items-center gap-1.5 truncate ${profitWei >= 0n ? 'text-emerald-400' : 'text-red-400'}`}>
               <UsdcIcon size={18} />
-              {profit >= 0 ? '+' : ''}{formatCompactUSDC(profit)}
+              {profitWei >= 0n ? '+' : ''}{formatCompactUSDC(profitWei)}
               <span className="text-2xs text-dark-500">USDC</span>
             </p>
           </div>
