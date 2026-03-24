@@ -102,8 +102,9 @@ export default function Analytics() {
           totalVolume += r.volume;
           totalParticipants += Number(r.participants);
 
-          if (r.stage === 0) activeMarkets++;
-          else if (r.stage === 2) resolvedMarkets++;
+          const stageNum = Number(r.stage);
+          if (stageNum === 0) activeMarkets++;
+          else if (stageNum === 2) resolvedMarkets++;
           else cancelledOrExpired++;
 
           const createdDate = new Date(Number(r.created) * 1000);
