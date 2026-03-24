@@ -64,9 +64,24 @@ export default function Analytics() {
         "function createdAt() view returns (uint256)",
       ];
 
-      const BATCH_SIZE = 5;
+      const marketPromises = marketAddrs.map(async (addr) => {
+        try {
+          const market = new ethers.Contract(addr, marketAbi, readProvider);
+          const [volume, participants, stage, created] = await Promise.all([
+            market.totalVolumeWei(),
+            market.participantCount(),
+            market.stage(),
+            market.createdAt(),
+          ]);
+          return { volume, participants, stage, created, addr };
+        } catch {
+          return null;
+        }
+      });
+
+      const results = await Promise.all(marketPromises);
+
       let totalVolume = 0n;
-      let totalParticipants = 0;
       let activeMarkets = 0;
       let resolvedMarkets = 0;
       let cancelledOrExpired = 0;
@@ -78,35 +93,16 @@ export default function Analytics() {
         dailyMap.set(dateStr, { volume: 0n, trades: 0 });
       }
 
-      for (let i = 0; i < marketAddrs.length; i += BATCH_SIZE) {
-        const batch = marketAddrs.slice(i, i + BATCH_SIZE);
-        const results = await Promise.all(
-          batch.map(async (addr) => {
-            try {
-              const market = new ethers.Contract(addr, marketAbi, readProvider);
-              const [volume, participants, stage, created] = await Promise.all([
-                market.totalVolumeWei(),
-                market.participantCount(),
-                market.stage(),
-                market.createdAt(),
-              ]);
-              return { volume, participants, stage, created, addr };
-            } catch {
-              return null;
-            }
-          })
-        );
+      for (const r of results) {
+        if (!r) continue;
+        totalVolume += r.volume;
 
-        for (const r of results) {
-          if (!r) continue;
-          totalVolume += r.volume;
-          totalParticipants += Number(r.participants);
+        const stageNum = Number(r.stage);
+        if (stageNum === 0) activeMarkets++;
+        else if (stageNum === 2) resolvedMarkets++;
+        else cancelledOrExpired++;
 
-          const stageNum = Number(r.stage);
-          if (stageNum === 0) activeMarkets++;
-          else if (stageNum === 2) resolvedMarkets++;
-          else cancelledOrExpired++;
-
+        if (r.participants > 0n) {
           const createdDate = new Date(Number(r.created) * 1000);
           const dateStr = createdDate.toISOString().split('T')[0];
           const dayData = dailyMap.get(dateStr);
@@ -114,6 +110,23 @@ export default function Analytics() {
             dayData.volume += r.volume;
             dayData.trades += 1;
           }
+        }
+      }
+
+      const uniqueParticipantPromises = marketAddrs.map(async (addr) => {
+        try {
+          const market = new ethers.Contract(addr, ["function getMarketInfo() view returns (string,string,string,string,string,string[],uint8,uint256,uint256,uint256,uint256,uint256,string,string)"], readProvider);
+          return market.getMarketInfo();
+        } catch {
+          return null;
+        }
+      });
+
+      const marketInfos = await Promise.all(uniqueParticipantPromises);
+      let totalParticipants = 0;
+      for (const info of marketInfos) {
+        if (info) {
+          totalParticipants += Number(info[10]);
         }
       }
 
