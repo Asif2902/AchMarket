@@ -32,6 +32,19 @@ export default function Analytics() {
   const [error, setError] = useState<string | null>(null);
   const [dailyVolume, setDailyVolume] = useState<DailyVolume[]>([]);
 
+  const generateEmptyDailyVolumes = (): DailyVolume[] => {
+    const now = Date.now();
+    return Array.from({ length: 7 }, (_, i) => {
+      const date = new Date(now - (6 - i) * 24 * 60 * 60 * 1000);
+      return {
+        date: date.toISOString().split('T')[0],
+        dayLabel: date.toLocaleDateString('en-US', { weekday: 'short' }),
+        volume: 0,
+        trades: 0,
+      };
+    });
+  };
+
   const fetchStats = useCallback(async () => {
     try {
       setLoading(true);
@@ -60,19 +73,17 @@ export default function Analytics() {
 
       const marketAbi = [
         "function totalVolumeWei() view returns (uint256)",
-        "function participantCount() view returns (uint256)",
         "function stage() view returns (uint8)",
       ];
 
       const marketPromises = marketAddrs.map(async (addr) => {
         try {
           const market = new ethers.Contract(addr, marketAbi, readProvider);
-          const [volume, participants, stage] = await Promise.all([
+          const [volume, stage] = await Promise.all([
             market.totalVolumeWei(),
-            market.participantCount(),
             market.stage(),
           ]);
-          return { volume, participants, stage, addr };
+          return { volume, stage, addr };
         } catch {
           return null;
         }
@@ -98,6 +109,7 @@ export default function Analytics() {
 
         const stageNum = Number(r.stage);
         if (stageNum === 0) activeMarkets++;
+        else if (stageNum === 1) {} // Suspended - not counted
         else if (stageNum === 2) resolvedMarkets++;
         else cancelledOrExpired++;
       }
@@ -164,19 +176,6 @@ export default function Analytics() {
       setLoading(false);
     }
   }, [readProvider]);
-
-  const generateEmptyDailyVolumes = (): DailyVolume[] => {
-    const now = Date.now();
-    return Array.from({ length: 7 }, (_, i) => {
-      const date = new Date(now - (6 - i) * 24 * 60 * 60 * 1000);
-      return {
-        date: date.toISOString().split('T')[0],
-        dayLabel: date.toLocaleDateString('en-US', { weekday: 'short' }),
-        volume: 0,
-        trades: 0,
-      };
-    });
-  };
 
   useEffect(() => {
     fetchStats();
