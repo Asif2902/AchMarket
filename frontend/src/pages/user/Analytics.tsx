@@ -128,7 +128,7 @@ export default function Analytics() {
       const dailyData: DailyVolume[] = Array.from(dailyMap.entries()).map(([date, data]) => ({
         date,
         dayLabel: new Date(date).toLocaleDateString('en-US', { weekday: 'short' }),
-        volume: Number(data.volume) / 1e12,
+        volume: Number(data.volume) / 1e18,
         trades: data.trades,
       }));
       setDailyVolume(dailyData);
