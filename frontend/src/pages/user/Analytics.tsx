@@ -126,7 +126,7 @@ export default function Analytics() {
       let totalParticipants = 0;
       for (const info of marketInfos) {
         if (info) {
-          totalParticipants += Number(info[10]);
+          totalParticipants += Number(info[11]);
         }
       }
 
