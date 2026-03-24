@@ -96,11 +96,12 @@ export default function Analytics() {
       let resolvedMarkets = 0;
       let cancelledOrExpired = 0;
 
-      const dailyMap = new Map<string, { volume: bigint; trades: number }>();
+      const dailyMap = new Map<string, { volume: bigint; trades: number; dayLabel: string }>();
       for (let i = 6; i >= 0; i--) {
         const date = new Date(Date.now() - i * 24 * 60 * 60 * 1000);
         const dateStr = date.toISOString().split('T')[0];
-        dailyMap.set(dateStr, { volume: 0n, trades: 0 });
+        const dayLabel = date.toLocaleDateString('en-US', { weekday: 'short' });
+        dailyMap.set(dateStr, { volume: 0n, trades: 0, dayLabel });
       }
 
       for (const r of results) {
@@ -123,9 +124,11 @@ export default function Analytics() {
       });
 
       const eventResults = await Promise.all(eventPromises);
+      const sevenDaysAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
       
       for (const { events } of eventResults) {
         for (const event of events) {
+          if (event.timestamp * 1000 < sevenDaysAgo) continue;
           const date = new Date(event.timestamp * 1000);
           const dateStr = date.toISOString().split('T')[0];
           const dayData = dailyMap.get(dateStr);
@@ -136,20 +139,20 @@ export default function Analytics() {
         }
       }
 
-      const uniqueParticipantPromises = marketAddrs.map(async (addr) => {
+      const participantPromises = marketAddrs.map(async (addr) => {
         try {
-          const market = new ethers.Contract(addr, ["function getMarketInfo() view returns (string,string,string,string,string,string[],uint8,uint256,uint256,uint256,uint256,uint256,string,string)"], readProvider);
-          return market.getMarketInfo();
+          const market = new ethers.Contract(addr, ["function participantCount() view returns (uint256)"], readProvider);
+          return market.participantCount();
         } catch {
           return null;
         }
       });
 
-      const marketInfos = await Promise.all(uniqueParticipantPromises);
+      const participantCounts = await Promise.all(participantPromises);
       let totalParticipants = 0;
-      for (const info of marketInfos) {
-        if (info) {
-          totalParticipants += Number(info[11]);
+      for (const count of participantCounts) {
+        if (count) {
+          totalParticipants += Number(count);
         }
       }
 
@@ -164,7 +167,7 @@ export default function Analytics() {
 
       const dailyData: DailyVolume[] = Array.from(dailyMap.entries()).map(([date, data]) => ({
         date,
-        dayLabel: new Date(date).toLocaleDateString('en-US', { weekday: 'short' }),
+        dayLabel: data.dayLabel,
         volume: Number(data.volume) / 1e18,
         trades: data.trades,
       }));
