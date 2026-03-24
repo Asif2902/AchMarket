@@ -20,7 +20,7 @@ interface GlobalStats {
 interface DailyVolume {
   date: string;
   dayLabel: string;
-  volume: bigint;
+  volume: number;
   trades: number;
 }
 
@@ -71,11 +71,11 @@ export default function Analytics() {
       let resolvedMarkets = 0;
       let cancelledOrExpired = 0;
 
-      const dailyMap = new Map<string, { volume: bigint; trades: number }>();
+      const dailyMap = new Map<string, { volume: number; trades: number }>();
       for (let i = 6; i >= 0; i--) {
         const date = new Date(Date.now() - i * 24 * 60 * 60 * 1000);
         const dateStr = date.toISOString().split('T')[0];
-        dailyMap.set(dateStr, { volume: 0n, trades: 0 });
+        dailyMap.set(dateStr, { volume: 0, trades: 0 });
       }
 
       for (let i = 0; i < marketAddrs.length; i += BATCH_SIZE) {
@@ -110,7 +110,7 @@ export default function Analytics() {
           const dateStr = createdDate.toISOString().split('T')[0];
           const dayData = dailyMap.get(dateStr);
           if (dayData && Number(r.volume) > 0) {
-            dayData.volume += r.volume;
+            dayData.volume += Number(r.volume);
             dayData.trades += 1;
           }
         }
@@ -128,7 +128,7 @@ export default function Analytics() {
       const dailyData: DailyVolume[] = Array.from(dailyMap.entries()).map(([date, data]) => ({
         date,
         dayLabel: new Date(date).toLocaleDateString('en-US', { weekday: 'short' }),
-        volume: data.volume,
+        volume: Number(data.volume),
         trades: data.trades,
       }));
       setDailyVolume(dailyData);
@@ -147,7 +147,7 @@ export default function Analytics() {
       return {
         date: date.toISOString().split('T')[0],
         dayLabel: date.toLocaleDateString('en-US', { weekday: 'short' }),
-        volume: BigInt(0),
+        volume: 0,
         trades: 0,
       };
     });
@@ -227,7 +227,7 @@ export default function Analytics() {
                         borderRadius: '8px',
                         color: '#F9FAFB'
                       }}
-                      formatter={(value) => [formatCompactUSDC(BigInt(value as number)), 'Volume']}
+                      formatter={(value: number) => [`$${formatCompact(value)}`, 'Volume']}
                       labelStyle={{ color: '#9CA3AF' }}
                     />
                     <Bar dataKey="volume" radius={[4, 4, 0, 0]}>
