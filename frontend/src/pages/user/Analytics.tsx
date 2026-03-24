@@ -1,11 +1,13 @@
 import { useState, useEffect, useCallback } from 'react';
 import { ethers } from 'ethers';
 import { useWallet } from '../../context/WalletContext';
-import { LENS_ADDRESS } from '../../config/network';
-import { LENS_ABI } from '../../config/abis';
+import { FACTORY_ADDRESS, LENS_ADDRESS } from '../../config/network';
+import { LENS_ABI, FACTORY_ABI } from '../../config/abis';
 import EmptyState from '../../components/EmptyState';
 import UsdcIcon from '../../components/UsdcIcon';
 import { formatUSDC, formatCompact, formatCompactUSDC } from '../../utils/format';
+import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts';
+import { fetchTradeEvents } from '../../services/blockscout';
 
 interface GlobalStats {
   totalMarkets: number;
@@ -16,31 +18,166 @@ interface GlobalStats {
   cancelledOrExpiredMarkets: number;
 }
 
+interface DailyVolume {
+  date: string;
+  dayLabel: string;
+  volume: number;
+  trades: number;
+}
+
 export default function Analytics() {
   const { readProvider } = useWallet();
   const [stats, setStats] = useState<GlobalStats | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [dailyVolume, setDailyVolume] = useState<DailyVolume[]>([]);
+
+  const generateEmptyDailyVolumes = (): DailyVolume[] => {
+    const now = Date.now();
+    return Array.from({ length: 7 }, (_, i) => {
+      const date = new Date(now - (6 - i) * 24 * 60 * 60 * 1000);
+      return {
+        date: date.toISOString().split('T')[0],
+        dayLabel: date.toLocaleDateString('en-US', { weekday: 'short' }),
+        volume: 0,
+        trades: 0,
+      };
+    });
+  };
 
   const fetchStats = useCallback(async () => {
     try {
       setLoading(true);
       setError(null);
       
-      const lens = new ethers.Contract(LENS_ADDRESS, LENS_ABI, readProvider);
-      const statsResult = await lens.getGlobalStats();
+      const factory = new ethers.Contract(FACTORY_ADDRESS, FACTORY_ABI, readProvider);
+      const totalMarkets = Number(await factory.totalMarkets());
+
+      if (totalMarkets === 0) {
+        setStats({
+          totalMarkets: 0,
+          totalVolumeWei: 0n,
+          totalParticipants: 0,
+          activeMarkets: 0,
+          resolvedMarkets: 0,
+          cancelledOrExpiredMarkets: 0,
+        });
+        setDailyVolume(generateEmptyDailyVolumes());
+        setLoading(false);
+        return;
+      }
+
+      const marketAddrs = await Promise.all(
+        Array.from({ length: totalMarkets }, (_, i) => factory.markets(i))
+      );
+
+      const marketAbi = [
+        "function totalVolumeWei() view returns (uint256)",
+        "function stage() view returns (uint8)",
+      ];
+
+      const marketPromises = marketAddrs.map(async (addr) => {
+        try {
+          const market = new ethers.Contract(addr, marketAbi, readProvider);
+          const [volume, stage] = await Promise.all([
+            market.totalVolumeWei(),
+            market.stage(),
+          ]);
+          return { volume, stage, addr };
+        } catch {
+          return null;
+        }
+      });
+
+      const results = await Promise.all(marketPromises);
+
+      let totalVolume = 0n;
+      let activeMarkets = 0;
+      let resolvedMarkets = 0;
+      let cancelledOrExpired = 0;
+
+      const dailyMap = new Map<string, { volume: bigint; trades: number; dayLabel: string }>();
+      for (let i = 6; i >= 0; i--) {
+        const date = new Date(Date.now() - i * 24 * 60 * 60 * 1000);
+        const dateStr = date.toISOString().split('T')[0];
+        const dayLabel = date.toLocaleDateString('en-US', { weekday: 'short' });
+        dailyMap.set(dateStr, { volume: 0n, trades: 0, dayLabel });
+      }
+
+      for (const r of results) {
+        if (!r) continue;
+        totalVolume += r.volume;
+
+        const stageNum = Number(r.stage);
+        if (stageNum === 0) activeMarkets++;
+        else if (stageNum === 1) {} // Suspended - not counted
+        else if (stageNum === 2) resolvedMarkets++;
+        else cancelledOrExpired++;
+      }
+
+      const blockNumber = await readProvider.getBlockNumber();
+      const avgBlockTime = 0.5;
+      const blocksPerDay = Math.floor(86400 / avgBlockTime);
+      const startBlock = blockNumber - (blocksPerDay * 7);
+
+      const eventPromises = marketAddrs.map(async (addr) => {
+        try {
+          return { addr, events: await fetchTradeEvents(addr, { startBlock }) };
+        } catch {
+          return { addr, events: [] };
+        }
+      });
+
+      const eventResults = await Promise.all(eventPromises);
+      
+      for (const { events } of eventResults) {
+        for (const event of events) {
+          const date = new Date(event.timestamp * 1000);
+          const dateStr = date.toISOString().split('T')[0];
+          const dayData = dailyMap.get(dateStr);
+          if (dayData) {
+            dayData.volume += event.costOrProceedsWei;
+            dayData.trades += 1;
+          }
+        }
+      }
+
+      const participantPromises = marketAddrs.map(async (addr) => {
+        try {
+          const market = new ethers.Contract(addr, ["function participantCount() view returns (uint256)"], readProvider);
+          return market.participantCount();
+        } catch {
+          return null;
+        }
+      });
+
+      const participantCounts = await Promise.all(participantPromises);
+      let totalParticipants = 0;
+      for (const count of participantCounts) {
+        if (count) {
+          totalParticipants += Number(count);
+        }
+      }
 
       setStats({
-        totalMarkets: Number(statsResult.totalMarkets),
-        totalVolumeWei: statsResult.totalVolumeWei,
-        totalParticipants: Number(statsResult.totalParticipants),
-        activeMarkets: Number(statsResult.activeMarkets),
-        resolvedMarkets: Number(statsResult.resolvedMarkets),
-        cancelledOrExpiredMarkets: Number(statsResult.cancelledOrExpiredMarkets),
+        totalMarkets,
+        totalVolumeWei: totalVolume,
+        totalParticipants,
+        activeMarkets,
+        resolvedMarkets,
+        cancelledOrExpiredMarkets: cancelledOrExpired,
       });
+
+      const dailyData: DailyVolume[] = Array.from(dailyMap.entries()).map(([date, data]) => ({
+        date,
+        dayLabel: data.dayLabel,
+        volume: Number(data.volume) / 1e18,
+        trades: data.trades,
+      }));
+      setDailyVolume(dailyData);
     } catch (err) {
       console.error('Failed to fetch analytics:', err);
-      setError('Failed to load analytics data');
+      setError(err instanceof Error ? err.message : 'Failed to load analytics data');
     } finally {
       setLoading(false);
     }
@@ -95,6 +232,47 @@ export default function Analytics() {
           />
         ) : stats ? (
           <div className="space-y-8">
+            {/* Daily Bar Volume Chart */}
+            <div className="card p-4 md:p-6">
+              <h2 className="section-header mb-4 md:mb-5">Daily Bar Volume (7 Days)</h2>
+              <div className="h-64">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={dailyVolume} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+                    <XAxis 
+                      dataKey="dayLabel" 
+                      axisLine={false} 
+                      tickLine={false} 
+                      tick={{ fill: '#9CA3AF', fontSize: 12 }}
+                    />
+                    <YAxis 
+                      axisLine={false} 
+                      tickLine={false} 
+                      tick={{ fill: '#9CA3AF', fontSize: 12 }}
+                      tickFormatter={(value) => `$${formatCompact(value)}`}
+                    />
+                    <Tooltip
+                      contentStyle={{ 
+                        backgroundColor: '#1F2937', 
+                        border: '1px solid #374151',
+                        borderRadius: '8px',
+                        color: '#F9FAFB'
+                      }}
+                      formatter={(value: number) => [`$${formatCompact(value)}`, 'Volume']}
+                      labelStyle={{ color: '#9CA3AF' }}
+                    />
+                    <Bar dataKey="volume" radius={[4, 4, 0, 0]}>
+                      {dailyVolume.map((entry, index) => (
+                        <Cell 
+                          key={`cell-${index}`} 
+                          fill={entry.trades > 0 ? '#10B981' : '#374151'} 
+                        />
+                      ))}
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+
             {/* Main Stats Grid */}
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4">
               <StatCard

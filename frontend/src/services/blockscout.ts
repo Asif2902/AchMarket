@@ -34,16 +34,20 @@ const SHARES_SOLD_TOPIC = ethers.id('SharesSold(address,uint256,uint256,uint256)
 
 /* ─── Fetch trade events from BlockScout ─── */
 
-export async function fetchTradeEvents(marketAddress: string): Promise<TradeEvent[]> {
+export async function fetchTradeEvents(
+  marketAddress: string,
+  options?: { startBlock?: number }
+): Promise<TradeEvent[]> {
   const baseUrl = NETWORK.blockscoutApi;
+  const fromBlock = options?.startBlock ?? 0;
 
   // Fetch buy and sell logs in parallel using topic0 filter
   const [buyRes, sellRes] = await Promise.all([
     fetch(
-      `${baseUrl}?module=logs&action=getLogs&address=${marketAddress}&fromBlock=0&toBlock=latest&topic0=${SHARES_BOUGHT_TOPIC}`
+      `${baseUrl}?module=logs&action=getLogs&address=${marketAddress}&fromBlock=${fromBlock}&toBlock=latest&topic0=${SHARES_BOUGHT_TOPIC}`
     ),
     fetch(
-      `${baseUrl}?module=logs&action=getLogs&address=${marketAddress}&fromBlock=0&toBlock=latest&topic0=${SHARES_SOLD_TOPIC}`
+      `${baseUrl}?module=logs&action=getLogs&address=${marketAddress}&fromBlock=${fromBlock}&toBlock=latest&topic0=${SHARES_SOLD_TOPIC}`
     ),
   ]);
 
