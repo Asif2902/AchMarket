@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { ethers } from 'ethers';
 import { useWallet } from '../../context/WalletContext';
 import { LENS_ADDRESS } from '../../config/network';
@@ -6,6 +6,7 @@ import { LENS_ABI } from '../../config/abis';
 import EmptyState from '../../components/EmptyState';
 import UsdcIcon from '../../components/UsdcIcon';
 import { formatUSDC, formatCompact, formatCompactUSDC } from '../../utils/format';
+import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts';
 
 interface GlobalStats {
   totalMarkets: number;
@@ -16,11 +17,30 @@ interface GlobalStats {
   cancelledOrExpiredMarkets: number;
 }
 
+interface MarketSummary {
+  market: string;
+  marketId: number;
+  title: string;
+  category: string;
+  stage: number;
+  createdAt: number;
+  totalVolumeWei: bigint;
+  participants: number;
+}
+
+interface DailyVolume {
+  date: string;
+  dayLabel: string;
+  volume: bigint;
+  markets: number;
+}
+
 export default function Analytics() {
   const { readProvider } = useWallet();
   const [stats, setStats] = useState<GlobalStats | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [dailyVolume, setDailyVolume] = useState<DailyVolume[]>([]);
 
   const fetchStats = useCallback(async () => {
     try {
@@ -38,6 +58,15 @@ export default function Analytics() {
         resolvedMarkets: Number(statsResult.resolvedMarkets),
         cancelledOrExpiredMarkets: Number(statsResult.cancelledOrExpiredMarkets),
       });
+
+      const totalMarkets = Number(statsResult.totalMarkets);
+      if (totalMarkets > 0) {
+        const marketSummaries = await lens.getMarketSummaries(0, totalMarkets);
+        const volumes = calculateDailyVolumes(marketSummaries);
+        setDailyVolume(volumes);
+      } else {
+        setDailyVolume(generateEmptyDailyVolumes());
+      }
     } catch (err) {
       console.error('Failed to fetch analytics:', err);
       setError('Failed to load analytics data');
@@ -45,6 +74,43 @@ export default function Analytics() {
       setLoading(false);
     }
   }, [readProvider]);
+
+  const calculateDailyVolumes = (markets: MarketSummary[]): DailyVolume[] => {
+    const now = Date.now();
+    const days: DailyVolume[] = [];
+    
+    for (let i = 6; i >= 0; i--) {
+      const date = new Date(now - i * 24 * 60 * 60 * 1000);
+      const dateStr = date.toISOString().split('T')[0];
+      const dayLabel = date.toLocaleDateString('en-US', { weekday: 'short' });
+      days.push({ date: dateStr, dayLabel, volume: BigInt(0), markets: 0 });
+    }
+
+    markets.forEach((market) => {
+      const createdDate = new Date(Number(market.createdAt) * 1000);
+      const dateStr = createdDate.toISOString().split('T')[0];
+      const day = days.find(d => d.date === dateStr);
+      if (day) {
+        day.volume += market.totalVolumeWei;
+        day.markets += 1;
+      }
+    });
+
+    return days;
+  };
+
+  const generateEmptyDailyVolumes = (): DailyVolume[] => {
+    const now = Date.now();
+    return Array.from({ length: 7 }, (_, i) => {
+      const date = new Date(now - (6 - i) * 24 * 60 * 60 * 1000);
+      return {
+        date: date.toISOString().split('T')[0],
+        dayLabel: date.toLocaleDateString('en-US', { weekday: 'short' }),
+        volume: BigInt(0),
+        markets: 0,
+      };
+    });
+  };
 
   useEffect(() => {
     fetchStats();
@@ -95,6 +161,47 @@ export default function Analytics() {
           />
         ) : stats ? (
           <div className="space-y-8">
+            {/* Daily Bar Volume Chart */}
+            <div className="card p-4 md:p-6">
+              <h2 className="section-header mb-4 md:mb-5">Daily Bar Volume (7 Days)</h2>
+              <div className="h-64">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={dailyVolume} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+                    <XAxis 
+                      dataKey="dayLabel" 
+                      axisLine={false} 
+                      tickLine={false} 
+                      tick={{ fill: '#9CA3AF', fontSize: 12 }}
+                    />
+                    <YAxis 
+                      axisLine={false} 
+                      tickLine={false} 
+                      tick={{ fill: '#9CA3AF', fontSize: 12 }}
+                      tickFormatter={(value) => `$${formatCompact(value)}`}
+                    />
+                    <Tooltip
+                      contentStyle={{ 
+                        backgroundColor: '#1F2937', 
+                        border: '1px solid #374151',
+                        borderRadius: '8px',
+                        color: '#F9FAFB'
+                      }}
+                      formatter={(value) => [formatCompactUSDC(BigInt(value as number)), 'Volume']}
+                      labelStyle={{ color: '#9CA3AF' }}
+                    />
+                    <Bar dataKey="volume" radius={[4, 4, 0, 0]}>
+                      {dailyVolume.map((entry, index) => (
+                        <Cell 
+                          key={`cell-${index}`} 
+                          fill={entry.markets > 0 ? '#10B981' : '#374151'} 
+                        />
+                      ))}
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+
             {/* Main Stats Grid */}
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4">
               <StatCard
