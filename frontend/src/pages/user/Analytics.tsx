@@ -22,10 +22,15 @@ interface MarketSummary {
   marketId: number;
   title: string;
   category: string;
+  imageUri: string;
+  outcomeLabels: string[];
+  impliedProbabilitiesWad: bigint[];
   stage: number;
-  createdAt: number;
+  winningOutcome: number;
+  marketDeadline: bigint;
   totalVolumeWei: bigint;
   participants: number;
+  bWad: bigint;
 }
 
 interface DailyVolume {
@@ -69,7 +74,7 @@ export default function Analytics() {
       }
     } catch (err) {
       console.error('Failed to fetch analytics:', err);
-      setError('Failed to load analytics data');
+      setError(err instanceof Error ? err.message : 'Failed to load analytics data');
     } finally {
       setLoading(false);
     }
@@ -87,8 +92,8 @@ export default function Analytics() {
     }
 
     markets.forEach((market) => {
-      const createdDate = new Date(Number(market.createdAt) * 1000);
-      const dateStr = createdDate.toISOString().split('T')[0];
+      const marketDate = new Date(Number(market.marketDeadline) * 1000);
+      const dateStr = marketDate.toISOString().split('T')[0];
       const day = days.find(d => d.date === dateStr);
       if (day) {
         day.volume += market.totalVolumeWei;
