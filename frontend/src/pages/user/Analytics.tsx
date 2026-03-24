@@ -7,6 +7,7 @@ import EmptyState from '../../components/EmptyState';
 import UsdcIcon from '../../components/UsdcIcon';
 import { formatUSDC, formatCompact, formatCompactUSDC } from '../../utils/format';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts';
+import { fetchTradeEvents } from '../../services/blockscout';
 
 interface GlobalStats {
   totalMarkets: number;
@@ -61,19 +62,17 @@ export default function Analytics() {
         "function totalVolumeWei() view returns (uint256)",
         "function participantCount() view returns (uint256)",
         "function stage() view returns (uint8)",
-        "function createdAt() view returns (uint256)",
       ];
 
       const marketPromises = marketAddrs.map(async (addr) => {
         try {
           const market = new ethers.Contract(addr, marketAbi, readProvider);
-          const [volume, participants, stage, created] = await Promise.all([
+          const [volume, participants, stage] = await Promise.all([
             market.totalVolumeWei(),
             market.participantCount(),
             market.stage(),
-            market.createdAt(),
           ]);
-          return { volume, participants, stage, created, addr };
+          return { volume, participants, stage, addr };
         } catch {
           return null;
         }
@@ -101,13 +100,25 @@ export default function Analytics() {
         if (stageNum === 0) activeMarkets++;
         else if (stageNum === 2) resolvedMarkets++;
         else cancelledOrExpired++;
+      }
 
-        if (r.participants > 0n) {
-          const createdDate = new Date(Number(r.created) * 1000);
-          const dateStr = createdDate.toISOString().split('T')[0];
+      const eventPromises = marketAddrs.map(async (addr) => {
+        try {
+          return { addr, events: await fetchTradeEvents(addr) };
+        } catch {
+          return { addr, events: [] };
+        }
+      });
+
+      const eventResults = await Promise.all(eventPromises);
+      
+      for (const { events } of eventResults) {
+        for (const event of events) {
+          const date = new Date(event.timestamp * 1000);
+          const dateStr = date.toISOString().split('T')[0];
           const dayData = dailyMap.get(dateStr);
-          if (dayData && r.volume > 0n) {
-            dayData.volume += r.volume;
+          if (dayData) {
+            dayData.volume += event.costOrProceedsWei;
             dayData.trades += 1;
           }
         }
