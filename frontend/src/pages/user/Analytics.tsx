@@ -1,12 +1,13 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { ethers } from 'ethers';
 import { useWallet } from '../../context/WalletContext';
-import { LENS_ADDRESS } from '../../config/network';
-import { LENS_ABI } from '../../config/abis';
+import { FACTORY_ADDRESS, LENS_ADDRESS } from '../../config/network';
+import { LENS_ABI, FACTORY_ABI } from '../../config/abis';
 import EmptyState from '../../components/EmptyState';
 import UsdcIcon from '../../components/UsdcIcon';
 import { formatUSDC, formatCompact, formatCompactUSDC } from '../../utils/format';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts';
+import { fetchTradeEvents } from '../../services/blockscout';
 
 interface GlobalStats {
   totalMarkets: number;
@@ -17,27 +18,11 @@ interface GlobalStats {
   cancelledOrExpiredMarkets: number;
 }
 
-interface MarketSummary {
-  market: string;
-  marketId: number;
-  title: string;
-  category: string;
-  imageUri: string;
-  outcomeLabels: string[];
-  impliedProbabilitiesWad: bigint[];
-  stage: number;
-  winningOutcome: number;
-  marketDeadline: bigint;
-  totalVolumeWei: bigint;
-  participants: number;
-  bWad: bigint;
-}
-
 interface DailyVolume {
   date: string;
   dayLabel: string;
   volume: bigint;
-  markets: number;
+  trades: number;
 }
 
 export default function Analytics() {
@@ -52,26 +37,94 @@ export default function Analytics() {
       setLoading(true);
       setError(null);
       
-      const lens = new ethers.Contract(LENS_ADDRESS, LENS_ABI, readProvider);
-      const statsResult = await lens.getGlobalStats();
+      const factory = new ethers.Contract(FACTORY_ADDRESS, FACTORY_ABI, readProvider);
+      const totalMarkets = Number(await factory.totalMarkets());
+
+      if (totalMarkets === 0) {
+        setStats({
+          totalMarkets: 0,
+          totalVolumeWei: 0n,
+          totalParticipants: 0,
+          activeMarkets: 0,
+          resolvedMarkets: 0,
+          cancelledOrExpiredMarkets: 0,
+        });
+        setDailyVolume(generateEmptyDailyVolumes());
+        setLoading(false);
+        return;
+      }
+
+      const marketAddresses: string[] = [];
+      for (let i = 0; i < totalMarkets; i++) {
+        const addr = await factory.markets(i);
+        marketAddresses.push(addr);
+      }
+
+      let totalVolume = 0n;
+      let totalParticipants = 0;
+      let activeMarkets = 0;
+      let resolvedMarkets = 0;
+      let cancelledOrExpired = 0;
+
+      const dailyMap = new Map<string, { volume: bigint; trades: number }>();
+      for (let i = 6; i >= 0; i--) {
+        const date = new Date(Date.now() - i * 24 * 60 * 60 * 1000);
+        const dateStr = date.toISOString().split('T')[0];
+        dailyMap.set(dateStr, { volume: 0n, trades: 0 });
+      }
+
+      for (const marketAddr of marketAddresses) {
+        const market = new ethers.Contract(marketAddr, [
+          "function totalVolumeWei() view returns (uint256)",
+          "function participantCount() view returns (uint256)",
+          "function stage() view returns (uint8)",
+        ], readProvider);
+
+        const [volume, participants, stage] = await Promise.all([
+          market.totalVolumeWei(),
+          market.participantCount(),
+          market.stage(),
+        ]);
+
+        totalVolume += volume;
+        totalParticipants += Number(participants);
+
+        if (stage === 0) activeMarkets++;
+        else if (stage === 2) resolvedMarkets++;
+        else cancelledOrExpired++;
+
+        try {
+          const events = await fetchTradeEvents(marketAddr);
+          events.forEach((event) => {
+            const date = new Date(event.timestamp * 1000);
+            const dateStr = date.toISOString().split('T')[0];
+            const dayData = dailyMap.get(dateStr);
+            if (dayData) {
+              dayData.volume += event.costOrProceedsWei;
+              dayData.trades += 1;
+            }
+          });
+        } catch (e) {
+          console.warn(`Failed to fetch events for ${marketAddr}:`, e);
+        }
+      }
 
       setStats({
-        totalMarkets: Number(statsResult.totalMarkets),
-        totalVolumeWei: statsResult.totalVolumeWei,
-        totalParticipants: Number(statsResult.totalParticipants),
-        activeMarkets: Number(statsResult.activeMarkets),
-        resolvedMarkets: Number(statsResult.resolvedMarkets),
-        cancelledOrExpiredMarkets: Number(statsResult.cancelledOrExpiredMarkets),
+        totalMarkets,
+        totalVolumeWei: totalVolume,
+        totalParticipants,
+        activeMarkets,
+        resolvedMarkets,
+        cancelledOrExpiredMarkets: cancelledOrExpired,
       });
 
-      const totalMarkets = Number(statsResult.totalMarkets);
-      if (totalMarkets > 0) {
-        const marketSummaries = await lens.getMarketSummaries(0, totalMarkets);
-        const volumes = calculateDailyVolumes(marketSummaries);
-        setDailyVolume(volumes);
-      } else {
-        setDailyVolume(generateEmptyDailyVolumes());
-      }
+      const dailyData: DailyVolume[] = Array.from(dailyMap.entries()).map(([date, data]) => ({
+        date,
+        dayLabel: new Date(date).toLocaleDateString('en-US', { weekday: 'short' }),
+        volume: data.volume,
+        trades: data.trades,
+      }));
+      setDailyVolume(dailyData);
     } catch (err) {
       console.error('Failed to fetch analytics:', err);
       setError(err instanceof Error ? err.message : 'Failed to load analytics data');
@@ -79,30 +132,6 @@ export default function Analytics() {
       setLoading(false);
     }
   }, [readProvider]);
-
-  const calculateDailyVolumes = (markets: MarketSummary[]): DailyVolume[] => {
-    const now = Date.now();
-    const days: DailyVolume[] = [];
-    
-    for (let i = 6; i >= 0; i--) {
-      const date = new Date(now - i * 24 * 60 * 60 * 1000);
-      const dateStr = date.toISOString().split('T')[0];
-      const dayLabel = date.toLocaleDateString('en-US', { weekday: 'short' });
-      days.push({ date: dateStr, dayLabel, volume: BigInt(0), markets: 0 });
-    }
-
-    markets.forEach((market) => {
-      const marketDate = new Date(Number(market.marketDeadline) * 1000);
-      const dateStr = marketDate.toISOString().split('T')[0];
-      const day = days.find(d => d.date === dateStr);
-      if (day) {
-        day.volume += market.totalVolumeWei;
-        day.markets += 1;
-      }
-    });
-
-    return days;
-  };
 
   const generateEmptyDailyVolumes = (): DailyVolume[] => {
     const now = Date.now();
@@ -112,7 +141,7 @@ export default function Analytics() {
         date: date.toISOString().split('T')[0],
         dayLabel: date.toLocaleDateString('en-US', { weekday: 'short' }),
         volume: BigInt(0),
-        markets: 0,
+        trades: 0,
       };
     });
   };
@@ -198,7 +227,7 @@ export default function Analytics() {
                       {dailyVolume.map((entry, index) => (
                         <Cell 
                           key={`cell-${index}`} 
-                          fill={entry.markets > 0 ? '#10B981' : '#374151'} 
+                          fill={entry.trades > 0 ? '#10B981' : '#374151'} 
                         />
                       ))}
                     </Bar>
