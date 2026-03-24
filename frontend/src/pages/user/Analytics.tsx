@@ -115,20 +115,23 @@ export default function Analytics() {
         else cancelledOrExpired++;
       }
 
+      const blockNumber = await readProvider.getBlockNumber();
+      const avgBlockTime = 0.5;
+      const blocksPerDay = Math.floor(86400 / avgBlockTime);
+      const startBlock = blockNumber - (blocksPerDay * 7);
+
       const eventPromises = marketAddrs.map(async (addr) => {
         try {
-          return { addr, events: await fetchTradeEvents(addr) };
+          return { addr, events: await fetchTradeEvents(addr, { startBlock }) };
         } catch {
           return { addr, events: [] };
         }
       });
 
       const eventResults = await Promise.all(eventPromises);
-      const sevenDaysAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
       
       for (const { events } of eventResults) {
         for (const event of events) {
-          if (event.timestamp * 1000 < sevenDaysAgo) continue;
           const date = new Date(event.timestamp * 1000);
           const dateStr = date.toISOString().split('T')[0];
           const dayData = dailyMap.get(dateStr);
