@@ -71,11 +71,11 @@ export default function Analytics() {
       let resolvedMarkets = 0;
       let cancelledOrExpired = 0;
 
-      const dailyMap = new Map<string, { volume: number; trades: number }>();
+      const dailyMap = new Map<string, { volume: bigint; trades: number }>();
       for (let i = 6; i >= 0; i--) {
         const date = new Date(Date.now() - i * 24 * 60 * 60 * 1000);
         const dateStr = date.toISOString().split('T')[0];
-        dailyMap.set(dateStr, { volume: 0, trades: 0 });
+        dailyMap.set(dateStr, { volume: 0n, trades: 0 });
       }
 
       for (let i = 0; i < marketAddrs.length; i += BATCH_SIZE) {
@@ -109,8 +109,8 @@ export default function Analytics() {
           const createdDate = new Date(Number(r.created) * 1000);
           const dateStr = createdDate.toISOString().split('T')[0];
           const dayData = dailyMap.get(dateStr);
-          if (dayData && Number(r.volume) > 0) {
-            dayData.volume += Number(r.volume);
+          if (dayData && r.volume > 0n) {
+            dayData.volume += r.volume;
             dayData.trades += 1;
           }
         }
@@ -128,7 +128,7 @@ export default function Analytics() {
       const dailyData: DailyVolume[] = Array.from(dailyMap.entries()).map(([date, data]) => ({
         date,
         dayLabel: new Date(date).toLocaleDateString('en-US', { weekday: 'short' }),
-        volume: Number(data.volume),
+        volume: Number(data.volume) / 1e12,
         trades: data.trades,
       }));
       setDailyVolume(dailyData);
