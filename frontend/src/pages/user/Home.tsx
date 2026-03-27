@@ -262,7 +262,7 @@ export default function Home() {
             </button>
           </div>
 
-          <div className="view-toggle">
+          <div className="view-toggle shrink-0 self-start sm:self-auto">
             <button
               onClick={() => setViewMode('grid')}
               className={viewMode === 'grid' ? 'active' : ''}
@@ -463,7 +463,7 @@ export default function Home() {
                       <button
                         key={sf.value}
                         onClick={() => { setStabilityFilter(sf.value); setPage(0); }}
-                        className={`px-2.5 py-2 rounded-lg text-xs border text-left transition-all duration-150 ${
+                        className={`px-3 py-2.5 rounded-lg text-xs border text-left transition-all duration-150 min-h-[44px] ${
                           stabilityFilter === sf.value
                             ? 'bg-[#00d46a] border-[#00d46a] text-white font-semibold'
                             : 'bg-[var(--bg-base)] border-[var(--bg-border)] text-white/60 hover:text-white hover:border-white/20'
