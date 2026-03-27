@@ -230,12 +230,12 @@ export default function Home() {
           />
         </div>
 
-        <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
           <div className="flex items-center gap-2 flex-wrap">
             <select
               value={sortBy}
               onChange={(e) => setSortBy(e.target.value)}
-              className="select-field text-sm w-40"
+              className="select-field text-sm flex-1 sm:flex-none sm:w-40 min-h-[44px]"
             >
               {SORT_OPTIONS.map((opt) => (
                 <option key={opt.value} value={opt.value}>{opt.label}</option>
@@ -244,7 +244,7 @@ export default function Home() {
             <select
               value={stageFilter}
               onChange={(e) => { setStageFilter(Number(e.target.value)); setPage(0); }}
-              className="select-field text-sm w-32"
+              className="select-field text-sm flex-1 sm:flex-none sm:w-32 min-h-[44px]"
             >
               {STAGE_FILTERS.map((sf) => (
                 <option key={sf.value} value={sf.value}>{sf.label}</option>
@@ -253,7 +253,7 @@ export default function Home() {
 
             <button
               onClick={() => setFiltersOpen(true)}
-              className="inline-flex items-center gap-1.5 text-sm px-4 py-3 rounded-lg border bg-[var(--bg-card)] text-white/80 hover:text-white hover:border-white/20 transition-all duration-150"
+              className="inline-flex items-center gap-1.5 text-sm px-4 py-3 rounded-lg border bg-[var(--bg-card)] text-white/80 hover:text-white hover:border-white/20 transition-all duration-150 min-h-[44px]"
             >
               <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M3 4h18M4 9h16M6 14h12M9 19h6" />
@@ -339,7 +339,7 @@ export default function Home() {
         )}
 
         {loading ? (
-          <div className={viewMode === 'grid' ? 'grid grid-cols-1 sm:grid-cols-2 gap-4 items-start' : 'space-y-3'}>
+          <div className={viewMode === 'grid' ? 'market-grid items-start' : 'space-y-3'}>
             {Array.from({ length: 6 }).map((_, i) => (
               <SkeletonCard key={i} />
             ))}
@@ -354,7 +354,7 @@ export default function Home() {
         ) : (
           <>
             {viewMode === 'grid' ? (
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 items-start">
+              <div className="market-grid items-start">
                 {paginated.map((market, i) => (
                   <div
                     key={market.market}
@@ -436,12 +436,13 @@ export default function Home() {
         )}
 
         {filtersOpen && (
-          <div className="fixed inset-0 z-40 flex items-end sm:items-center justify-center">
+          <div className="fixed inset-0 z-40 flex items-end sm:items-center justify-center animate-fade-in">
             <div
-              className="absolute inset-0 bg-black/60"
+              className="absolute inset-0 bg-black/60 backdrop-blur-sm"
               onClick={() => setFiltersOpen(false)}
             />
-            <div className="relative w-full sm:max-w-md bg-[var(--bg-card)] border border-[var(--bg-border)] rounded-t-2xl sm:rounded-2xl p-5 sm:p-6 z-50">
+            <div className="relative w-full sm:max-w-md bg-[var(--bg-card)] border border-[var(--bg-border)] sm:border rounded-t-2xl sm:rounded-2xl p-5 sm:p-6 z-50 max-h-[85vh] sm:max-h-[80vh] flex flex-col">
+
               <div className="flex items-center justify-between mb-4">
                 <h2 className="text-sm font-semibold text-white">Filters</h2>
                 <button

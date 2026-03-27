@@ -2,6 +2,7 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { WalletProvider, useWallet } from './context/WalletContext';
 import Header from './components/Header';
 import Footer from './components/Footer';
+import MobileBottomNav from './components/MobileBottomNav';
 import ToastContainer from './components/Toast';
 import Home from './pages/user/Home';
 import MarketDetail from './pages/user/MarketDetail';
@@ -71,10 +72,11 @@ export default function App() {
       <WalletProvider>
         <div className="min-h-screen flex flex-col">
           <Header />
-          <main className="flex-1">
+          <main className="flex-1 pb-16 md:pb-0">
             <AppRoutes />
           </main>
           <Footer />
+          <MobileBottomNav />
           <ToastContainer />
         </div>
       </WalletProvider>

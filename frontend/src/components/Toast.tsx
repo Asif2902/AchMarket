@@ -58,7 +58,7 @@ function ToastItem({ toast, onRemove }: { toast: ToastData; onRemove: (id: strin
       className={`relative flex items-start gap-3 p-4 rounded-2xl border backdrop-blur-xl shadow-2xl transition-all duration-300 ${borderColor} bg-dark-900/95 ${
         exiting ? 'opacity-0 translate-x-8' : 'opacity-100 translate-x-0'
       }`}
-      style={{ width: 'min(92vw, 420px)' }}
+      style={{ width: 'min(100%, 420px)' }}
       role={toast.type === 'error' ? 'alert' : 'status'}
       aria-atomic="true"
     >
@@ -143,7 +143,7 @@ export default function ToastContainer() {
   if (toasts.length === 0) return null;
 
   return (
-    <div className="fixed top-4 right-4 z-[9999] flex flex-col gap-3 pointer-events-none" aria-live="polite" aria-atomic="true">
+    <div className="fixed top-4 right-4 z-[9999] flex flex-col gap-3 pointer-events-none toast-container sm:top-4 sm:right-4 sm:left-auto sm:bottom-auto max-sm:top-auto max-sm:bottom-[4.5rem] max-sm:left-3 max-sm:right-3" aria-live="polite" aria-atomic="true">
       {toasts.map(toast => (
         <div key={toast.id} className="pointer-events-auto animate-slide-in-right">
           <ToastItem toast={toast} onRemove={removeToast} />

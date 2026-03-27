@@ -234,8 +234,8 @@ export default function Analytics() {
           <div className="space-y-8">
             {/* Daily Bar Volume Chart */}
             <div className="card p-4 md:p-6">
-              <h2 className="section-header mb-4 md:mb-5">Daily Bar Volume (7 Days)</h2>
-              <div className="h-64">
+              <h2 className="section-header mb-4 md:mb-5">Daily Volume (7 Days)</h2>
+              <div className="h-48 sm:h-64">
                 <ResponsiveContainer width="100%" height="100%">
                   <BarChart data={dailyVolume} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
                     <XAxis 
@@ -274,7 +274,7 @@ export default function Analytics() {
             </div>
 
             {/* Main Stats Grid */}
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4">
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4">
               <StatCard
                 label="Total Markets"
                 value={formatCompact(stats.totalMarkets)}

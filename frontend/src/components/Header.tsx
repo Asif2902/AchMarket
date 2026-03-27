@@ -63,41 +63,37 @@ export default function Header() {
             </Link>
 
             <div className="flex items-center gap-2">
-              {isConnected && isOwner && (
-                <>
-                  <Link
-                    to="/"
-                    className={`hidden sm:flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium transition-all ${
-                      location.pathname === '/' || location.pathname.startsWith('/market') || location.pathname === '/portfolio'
-                        ? 'bg-primary-500/15 text-primary-400'
-                        : 'text-dark-400 hover:text-white hover:bg-white/[0.06]'
-                    }`}
-                  >
+              <nav className="hidden md:flex items-center gap-1">
+                <NavLink to="/" active={location.pathname === '/' || location.pathname.startsWith('/market')} icon={
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6A2.25 2.25 0 016 3.75h2.25A2.25 2.25 0 0110.5 6v2.25a2.25 2.25 0 01-2.25 2.25H6a2.25 2.25 0 01-2.25-2.25V6zM3.75 15.75A2.25 2.25 0 016 13.5h2.25a2.25 2.25 0 012.25 2.25V18a2.25 2.25 0 01-2.25 2.25H6A2.25 2.25 0 013.75 18v-2.25zM13.5 6a2.25 2.25 0 012.25-2.25H18A2.25 2.25 0 0120.25 6v2.25A2.25 2.25 0 0118 10.5h-2.25a2.25 2.25 0 01-2.25-2.25V6zM13.5 15.75a2.25 2.25 0 012.25-2.25H18a2.25 2.25 0 012.25 2.25V18A2.25 2.25 0 0118 20.25h-2.25A2.25 2.25 0 0113.5 18v-2.25z" />
+                  </svg>
+                }>Markets</NavLink>
+                <NavLink to="/analytics" active={location.pathname === '/analytics'} icon={
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 013 19.875v-6.75zM9.75 8.625c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V8.625zM16.5 4.125c0-.621.504-1.125 1.125-1.125h2.25C20.496 3 21 3.504 21 4.125v15.75c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V4.125z" />
+                  </svg>
+                }>Analytics</NavLink>
+                {isConnected && (
+                  <NavLink to="/portfolio" active={location.pathname === '/portfolio'} icon={
                     <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 15.75l5.159-5.159a2.25 2.25 0 013.182 0l5.159 5.159m-1.5-1.5l1.409-1.409a2.25 2.25 0 013.182 0l2.909 2.909m-18 3.75h16.5a1.5 1.5 0 001.5-1.5V6a1.5 1.5 0 00-1.5-1.5H3.75A1.5 1.5 0 002.25 6v12a1.5 1.5 0 001.5 1.5zm10.5-11.25h.008v.008h-.008V8.25zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0z" />
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M21 12a2.25 2.25 0 00-2.25-2.25H15a3 3 0 11-6 0H5.25A2.25 2.25 0 003 12m18 0v6a2.25 2.25 0 01-2.25 2.25H5.25A2.25 2.25 0 013 18v-6m18 0V9M3 12V9m18 0a2.25 2.25 0 00-2.25-2.25H5.25A2.25 2.25 0 003 9m18 0V6a2.25 2.25 0 00-2.25-2.25H5.25A2.25 2.25 0 003 6v3" />
                     </svg>
-                    Markets
-                  </Link>
-                  <Link
-                    to="/owner"
-                    className={`hidden sm:flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium transition-all ${
-                      location.pathname.startsWith('/owner')
-                        ? 'bg-primary-500/15 text-primary-400'
-                        : 'text-dark-400 hover:text-white hover:bg-white/[0.06]'
-                    }`}
-                  >
+                  } badge={pendingCount > 0 ? pendingCount : undefined}>Portfolio</NavLink>
+                )}
+                {isConnected && isOwner && (
+                  <NavLink to="/owner" active={location.pathname.startsWith('/owner')} icon={
                     <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
                       <path strokeLinecap="round" strokeLinejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
                       <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
                     </svg>
-                    Admin
-                  </Link>
-                </>
-              )}
+                  }>Admin</NavLink>
+                )}
+              </nav>
               <ConnectButton showBalance={false} />
               <button
                 onClick={() => setMobileMenuOpen(true)}
-                className="w-9 h-9 rounded-lg bg-dark-800/50 border border-white/[0.08] flex items-center justify-center text-dark-300 hover:bg-dark-800/70 hover:text-white transition-all duration-200 relative"
+                className="w-9 h-9 md:hidden rounded-lg bg-dark-800/50 border border-white/[0.08] flex items-center justify-center text-dark-300 hover:bg-dark-800/70 hover:text-white transition-all duration-200 relative"
                 aria-label="Open menu"
               >
                 <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -275,5 +271,34 @@ function MobileExternalLink({ href, children, icon }: { href: string; children: 
         <path strokeLinecap="round" strokeLinejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
       </svg>
     </a>
+  );
+}
+
+function NavLink({ to, active, children, icon, badge }: {
+  to: string;
+  active: boolean;
+  children: React.ReactNode;
+  icon: React.ReactNode;
+  badge?: number;
+}) {
+  return (
+    <Link
+      to={to}
+      className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium transition-all duration-200 ${
+        active
+          ? 'bg-primary-500/15 text-primary-400'
+          : 'text-dark-400 hover:text-white hover:bg-white/[0.06]'
+      }`}
+    >
+      <span className="relative">
+        {icon}
+        {badge !== undefined && badge > 0 && (
+          <span className="absolute -top-1.5 -right-2 min-w-[16px] h-4 px-1 bg-amber-500 rounded-full flex items-center justify-center text-[9px] font-bold text-dark-950">
+            {badge > 9 ? '9+' : badge}
+          </span>
+        )}
+      </span>
+      {children}
+    </Link>
   );
 }

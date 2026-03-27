@@ -672,7 +672,7 @@ export default function MarketDetail() {
 
       {/* Two-column layout */}
       <div className="max-w-[1600px] mx-auto px-4 pt-5 md:pt-6 pb-8">
-        <div className="flex flex-col gap-5 md:grid md:grid-cols-[1fr_380px] md:gap-6">
+        <div className="flex flex-col gap-5 lg:grid lg:grid-cols-[1fr_380px] lg:gap-6">
           {/* Left Column — Market Info (scrollable) */}
           <div className="space-y-4 md:space-y-5">
             {/* Quick stats */}
@@ -1054,7 +1054,7 @@ export default function MarketDetail() {
           </div>
 
           {/* Right Column — Trade Panel (sticky) */}
-          <div className="md:sticky md:top-4 md:self-start space-y-4 md:space-y-5">
+          <div className="lg:sticky lg:top-4 lg:self-start space-y-4 lg:space-y-5">
             {/* Outcome Probabilities Card */}
             <div className="card p-5">
               <h2 className="section-header mb-4">Outcome Probabilities</h2>
@@ -1460,7 +1460,7 @@ function ProbabilityChart({
         <div className="flex items-center justify-between mb-3">
           <h2 className="section-header">Price History</h2>
           {/* Time range selector */}
-          <div className="flex items-center rounded-lg bg-dark-900/60 p-0.5 border border-white/[0.06]">
+          <div className="flex items-center rounded-lg bg-dark-900/60 p-0.5 border border-white/[0.06] overflow-x-auto scrollbar-hide">
             {TIME_RANGES.map(range => (
               <button
                 key={range.key}
@@ -1531,7 +1531,7 @@ function ProbabilityChart({
       </div>
 
       {/* Chart */}
-      <div className="h-64 sm:h-72 px-2 pb-3">
+      <div className="h-56 sm:h-72 px-2 pb-3">
         <ResponsiveContainer width="100%" height="100%">
           <AreaChart
             data={filteredHistory}

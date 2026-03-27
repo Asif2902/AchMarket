@@ -428,6 +428,81 @@
     }
   }
 
+  /* Safe area for notch devices */
+  .safe-area-inset-bottom {
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+
+  /* Focus visible styles for accessibility */
+  *:focus-visible {
+    outline: 2px solid hsl(var(--primary) / 0.6);
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+
+  /* Smooth page transitions */
+  .page-enter {
+    animation: fadeIn 0.2s ease-out;
+  }
+
+  /* Responsive grid improvements */
+  .market-grid {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 1rem;
+  }
+  @media (min-width: 640px) {
+    .market-grid {
+      grid-template-columns: repeat(2, 1fr);
+    }
+  }
+  @media (min-width: 1024px) {
+    .market-grid {
+      grid-template-columns: repeat(3, 1fr);
+    }
+  }
+  @media (min-width: 1280px) {
+    .market-grid {
+      grid-template-columns: repeat(4, 1fr);
+    }
+  }
+
+  /* Touch device optimizations */
+  @media (hover: none) and (pointer: coarse) {
+    .card-hover:hover {
+      border-color: var(--bg-border);
+      box-shadow: 0 2px 12px -2px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(255, 255, 255, 0.03);
+    }
+    .card-hover:active {
+      border-color: rgba(255, 255, 255, 0.12);
+      transform: scale(0.98);
+    }
+  }
+
+  /* Improved modal backdrop for mobile */
+  @media (max-width: 640px) {
+    .mobile-drawer {
+      width: 100%;
+      max-width: 100%;
+      border-left: none;
+      border-radius: 1rem 1rem 0 0;
+      bottom: 0;
+      top: auto;
+      max-height: 85vh;
+      animation: slideUp 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+  }
+
+  /* Toast responsive positioning */
+  @media (max-width: 640px) {
+    .toast-container {
+      top: auto !important;
+      bottom: 4.5rem !important;
+      left: 1rem !important;
+      right: 1rem !important;
+    }
+  }
+
   .mobile-overlay {
     @apply fixed inset-0 z-50;
     background: rgba(0, 0, 0, 0.7);

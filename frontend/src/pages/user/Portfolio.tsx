@@ -205,7 +205,7 @@ export default function Portfolio() {
 
       {/* Summary stats */}
       {positions.length > 0 && (
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3 max-w-5xl mx-auto">
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
           <div className="card p-3.5">
             <span className="text-2xs text-dark-500 font-medium uppercase tracking-wider">Total Volume</span>
             <p className="text-base sm:text-lg font-bold text-white mt-0.5 tabular-nums flex items-center gap-1.5 truncate"><UsdcIcon size={16} />{formatCompactUSDC(totalDeposited)} <span className="text-2xs text-dark-500">USDC</span></p>

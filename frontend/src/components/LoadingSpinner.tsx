@@ -35,7 +35,7 @@ export function PageLoader() {
 export function SkeletonCard() {
   return (
     <div className="card overflow-hidden">
-      <div className="skeleton h-36 sm:h-40 w-full rounded-none" />
+      <div className="skeleton h-32 sm:h-36 lg:h-40 w-full rounded-none" />
       <div className="p-4 space-y-3">
         <div className="skeleton h-4 w-4/5 rounded" />
         <div className="skeleton h-4 w-3/5 rounded" />
