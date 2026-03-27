@@ -7,6 +7,8 @@ export default function MobileBottomNav() {
   const { isConnected, isOwner } = useWallet();
   const { pendingCount } = usePendingClaims();
 
+  if (location.pathname.startsWith('/owner')) return null;
+
   const isActive = (path: string) => {
     if (path === '/') return location.pathname === '/' || location.pathname.startsWith('/market');
     return location.pathname === path;
