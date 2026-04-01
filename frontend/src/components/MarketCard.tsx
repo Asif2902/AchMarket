@@ -35,7 +35,10 @@ export default function MarketCard({ data }: Props) {
   const hasOutcomes = data.impliedProbabilitiesWad.length > 0;
   const buyLabel = data.outcomeLabels[0] ?? 'Buy';
   const buyPct = hasOutcomes ? probToPercent(data.impliedProbabilitiesWad[0]) : 0;
-  const clampedBuyPct = Math.max(2, Math.min(100, buyPct));
+  const sparklinePoints = buildBuySparklinePoints(buyPct, data.marketId);
+  const sparklinePath = pointsToPath(sparklinePoints);
+  const sparklineAreaPath = `${sparklinePath} L 100 100 L 0 100 Z`;
+  const lastPoint = sparklinePoints[sparklinePoints.length - 1];
   const stability = getStabilityLevel(data.bWad);
 
   return (
@@ -82,19 +85,39 @@ export default function MarketCard({ data }: Props) {
               <span className="text-[11px] text-white/65 font-medium truncate max-w-[70%]">{buyLabel} Buy</span>
               <span className="text-[11px] font-semibold text-emerald-300 tabular-nums">{buyPct.toFixed(1)}%</span>
             </div>
-            <div className="relative h-6 rounded-md bg-black/30 overflow-hidden border border-white/[0.04]">
-              <div
-                className="absolute inset-y-0 left-0 bg-gradient-to-r from-emerald-500/35 via-emerald-400/25 to-emerald-300/10"
-                style={{ width: `${clampedBuyPct}%` }}
-              />
-              <div
-                className="absolute top-0 bottom-0 w-px bg-emerald-300/90 shadow-[0_0_8px_rgba(16,185,129,0.65)]"
-                style={{ left: `calc(${clampedBuyPct}% - 1px)` }}
-              />
-              <div className="absolute inset-0 opacity-25" style={{
+            <div className="relative h-14 rounded-md bg-black/30 overflow-hidden border border-white/[0.04]">
+              <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="absolute inset-0 w-full h-full">
+                <defs>
+                  <linearGradient id={`buy-fill-${data.marketId}`} x1="0" x2="0" y1="0" y2="1">
+                    <stop offset="0%" stopColor="rgba(52, 211, 153, 0.30)" />
+                    <stop offset="100%" stopColor="rgba(52, 211, 153, 0.02)" />
+                  </linearGradient>
+                  <linearGradient id={`buy-line-${data.marketId}`} x1="0" x2="1" y1="0" y2="0">
+                    <stop offset="0%" stopColor="rgba(52, 211, 153, 0.35)" />
+                    <stop offset="100%" stopColor="rgba(110, 231, 183, 0.95)" />
+                  </linearGradient>
+                </defs>
+                <path d={sparklineAreaPath} fill={`url(#buy-fill-${data.marketId})`} />
+                <path
+                  d={sparklinePath}
+                  fill="none"
+                  stroke={`url(#buy-line-${data.marketId})`}
+                  strokeWidth={2.4}
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+                <circle cx={lastPoint.x} cy={lastPoint.y} r={2.4} fill="#6ee7b7" />
+              </svg>
+              <div className="absolute inset-0 opacity-15" style={{
                 backgroundImage: 'linear-gradient(to right, rgba(255,255,255,0.08) 1px, transparent 1px)',
                 backgroundSize: '16px 100%',
               }} />
+              <div className="absolute left-0 right-0 top-1/2 border-t border-white/[0.07] border-dashed" />
+              <div className="absolute bottom-1 left-1.5 right-1.5 flex items-center justify-between text-[10px] text-white/35 font-medium">
+                <span>0%</span>
+                <span>Buy Line</span>
+                <span>100%</span>
+              </div>
             </div>
           </div>
 
@@ -126,4 +149,33 @@ export default function MarketCard({ data }: Props) {
       </div>
     </Link>
   );
+}
+
+function buildBuySparklinePoints(targetPct: number, seed: number): Array<{ x: number; y: number }> {
+  const pointsCount = 16;
+  const clampedTarget = Math.max(2, Math.min(98, targetPct));
+  const normalizedSeed = ((seed % 37) + 37) / 37;
+
+  const points: Array<{ x: number; y: number }> = [];
+
+  for (let i = 0; i < pointsCount; i += 1) {
+    const t = i / (pointsCount - 1);
+    const waveA = Math.sin((t * 2.9 + normalizedSeed) * Math.PI) * 4;
+    const waveB = Math.cos((t * 5.2 + normalizedSeed * 0.7) * Math.PI) * 1.8;
+    const drift = (t - 0.5) * 5;
+    const startBias = (normalizedSeed - 0.5) * 6;
+
+    let value = clampedTarget + waveA + waveB + drift - startBias;
+    if (i === 0) value = clampedTarget - (3 - normalizedSeed * 6);
+    if (i === pointsCount - 1) value = clampedTarget;
+
+    const normalizedValue = Math.max(2, Math.min(98, value));
+    points.push({ x: t * 100, y: 100 - normalizedValue });
+  }
+
+  return points;
+}
+
+function pointsToPath(points: Array<{ x: number; y: number }>): string {
+  return points.map((point, index) => `${index === 0 ? 'M' : 'L'} ${point.x} ${point.y}`).join(' ');
 }

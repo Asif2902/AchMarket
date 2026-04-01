@@ -1,9 +1,9 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { ethers } from 'ethers';
 import { useWallet } from '../../context/WalletContext';
 import { usePendingClaims } from '../../hooks/usePendingClaims';
-import { FACTORY_ADDRESS, LENS_ADDRESS, STAGE_LABELS, STAGE_COLORS } from '../../config/network';
+import { FACTORY_ADDRESS, LENS_ADDRESS, STAGE, STAGE_LABELS, STAGE_COLORS } from '../../config/network';
 import { FACTORY_ABI, LENS_ABI, MARKET_ABI } from '../../config/abis';
 import { PageLoader } from '../../components/LoadingSpinner';
 import EmptyState from '../../components/EmptyState';
@@ -27,6 +27,7 @@ interface Position {
 }
 
 type TabType = 'all' | 'active' | 'winnings' | 'refunds' | 'claimed';
+type SortBy = 'highest_deposit' | 'lowest_deposit' | 'newest' | 'oldest' | 'title_az' | 'title_za' | 'claimable_first';
 
 export default function Portfolio() {
   const { address, readProvider, signer, isConnected } = useWallet();
@@ -36,6 +37,8 @@ export default function Portfolio() {
   const [txPending, setTxPending] = useState<string | null>(null);
   const [txMsg, setTxMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [activeTab, setActiveTab] = useState<TabType>('all');
+  const [sortBy, setSortBy] = useState<SortBy>('claimable_first');
+  const [categoryFilter, setCategoryFilter] = useState('All');
   const txMsgTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
@@ -162,10 +165,10 @@ export default function Portfolio() {
 
     // Compute summary stats
     const totalDeposited = positions.reduce((acc, p) => acc + p.netDepositedWei, 0n);
-    const activeDeposits = positions.filter(p => p.stage === 0).reduce((acc, p) => acc + p.netDepositedWei, 0n);
+    const activeDeposits = positions.filter(p => p.stage === STAGE.Active).reduce((acc, p) => acc + p.netDepositedWei, 0n);
     
     const totalMarkets = new Set(positions.map(p => p.market)).size;
-    const activePositions = positions.filter(p => p.stage === 0).length;
+    const activePositions = positions.filter(p => p.stage === STAGE.Active).length;
     // Use same filtering logic as usePendingClaims to be consistent:
     // - Exclude already-claimed positions
     // - Exclude zero-deposit refunds
@@ -173,79 +176,148 @@ export default function Portfolio() {
     const claimableRefunds = positions.filter(p => p.canRefund && !p.hasRefunded && p.netDepositedWei > 0n).length;
     
   
-  // Filter positions based on tab - use same logic as usePendingClaims
-  const filteredPositions = positions.filter(p => {
-    if (activeTab === 'winnings') return p.canRedeem && !p.hasRedeemed;
-    if (activeTab === 'refunds') return p.canRefund && !p.hasRefunded && p.netDepositedWei > 0n;
-    if (activeTab === 'active') return p.stage === 0;
-    if (activeTab === 'claimed') return p.hasRedeemed || p.hasRefunded;
-    return true;
-  });
+  const categoryCounts = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const pos of positions) {
+      const key = pos.category.trim() || 'Other';
+      map.set(key, (map.get(key) ?? 0) + 1);
+    }
+    return ['All', ...Array.from(map.keys()).sort((a, b) => a.localeCompare(b))];
+  }, [positions]);
+
+  useEffect(() => {
+    if (!categoryCounts.includes(categoryFilter)) {
+      setCategoryFilter('All');
+    }
+  }, [categoryCounts, categoryFilter]);
+
+  const filteredPositions = useMemo(() => {
+    return positions
+      .filter((p) => {
+        if (activeTab === 'winnings') return p.canRedeem && !p.hasRedeemed;
+        if (activeTab === 'refunds') return p.canRefund && !p.hasRefunded && p.netDepositedWei > 0n;
+        if (activeTab === 'active') return p.stage === STAGE.Active;
+        if (activeTab === 'claimed') return p.hasRedeemed || p.hasRefunded;
+        return true;
+      })
+      .filter((p) => {
+        if (categoryFilter === 'All') return true;
+        return p.category.toLowerCase() === categoryFilter.toLowerCase();
+      })
+      .sort((a, b) => {
+        if (sortBy === 'highest_deposit') {
+          if (a.netDepositedWei === b.netDepositedWei) return b.marketId - a.marketId;
+          return a.netDepositedWei > b.netDepositedWei ? -1 : 1;
+        }
+
+        if (sortBy === 'lowest_deposit') {
+          if (a.netDepositedWei === b.netDepositedWei) return b.marketId - a.marketId;
+          return a.netDepositedWei < b.netDepositedWei ? -1 : 1;
+        }
+
+        if (sortBy === 'newest') return b.marketId - a.marketId;
+        if (sortBy === 'oldest') return a.marketId - b.marketId;
+        if (sortBy === 'title_az') return a.title.localeCompare(b.title);
+        if (sortBy === 'title_za') return b.title.localeCompare(a.title);
+
+        const aClaimable = (a.canRedeem && !a.hasRedeemed) || (a.canRefund && !a.hasRefunded && a.netDepositedWei > 0n);
+        const bClaimable = (b.canRedeem && !b.hasRedeemed) || (b.canRefund && !b.hasRefunded && b.netDepositedWei > 0n);
+        if (aClaimable !== bClaimable) return aClaimable ? -1 : 1;
+        if (a.netDepositedWei === b.netDepositedWei) return b.marketId - a.marketId;
+        return a.netDepositedWei > b.netDepositedWei ? -1 : 1;
+      });
+  }, [positions, activeTab, categoryFilter, sortBy]);
 
   const tabCounts = {
     all: positions.length,
-    active: positions.filter(p => p.stage === 0).length,
+    active: positions.filter(p => p.stage === STAGE.Active).length,
     winnings: positions.filter(p => p.canRedeem && !p.hasRedeemed).length,
     refunds: positions.filter(p => p.canRefund && !p.hasRefunded && p.netDepositedWei > 0n).length,
     claimed: positions.filter(p => p.hasRedeemed || p.hasRefunded).length,
   };
 
+  const claimableValue = positions
+    .filter((p) => (p.canRedeem && !p.hasRedeemed) || (p.canRefund && !p.hasRefunded && p.netDepositedWei > 0n))
+    .reduce((acc, p) => acc + p.netDepositedWei, 0n);
+
+  const resolvedCount = positions.filter((p) => p.stage === STAGE.Resolved).length;
+  const cancelledCount = positions.filter((p) => p.stage === STAGE.Cancelled || p.stage === STAGE.Expired).length;
+  const activeRatio = totalMarkets > 0 ? (activePositions / totalMarkets) * 100 : 0;
+
   return (
-    <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8 space-y-6 animate-fade-in">
+    <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8 space-y-6 animate-fade-in">
       {/* Header */}
-      <div className="flex items-start sm:items-center justify-between gap-3">
+      <div className="card p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 bg-gradient-to-br from-primary-500/[0.07] via-transparent to-emerald-500/[0.05]">
         <div>
           <h1 className="text-xl sm:text-2xl font-bold text-white">Portfolio</h1>
           <p className="text-xs text-dark-400 mt-0.5">{positions.length} position{positions.length !== 1 ? 's' : ''} across {totalMarkets} market{totalMarkets !== 1 ? 's' : ''}</p>
+          <div className="mt-2 flex flex-wrap items-center gap-2 text-2xs">
+            <span className="px-2 py-1 rounded-md bg-emerald-500/15 text-emerald-300 border border-emerald-500/25">{claimableWinnings + claimableRefunds} claimable</span>
+            <span className="px-2 py-1 rounded-md bg-blue-500/12 text-blue-300 border border-blue-500/25">{resolvedCount} resolved</span>
+            <span className="px-2 py-1 rounded-md bg-amber-500/12 text-amber-300 border border-amber-500/25">{activeRatio.toFixed(0)}% active</span>
+          </div>
         </div>
-        <Link to="/" className="btn-secondary text-xs px-3 py-1.5 shrink-0 !min-h-0">
+        <Link to="/" className="btn-secondary text-xs px-3 py-2 shrink-0 !min-h-0">
           Browse Markets
         </Link>
       </div>
 
       {/* Summary stats */}
       {positions.length > 0 && (
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
-          <div className="card p-3.5">
-            <span className="text-2xs text-dark-500 font-medium uppercase tracking-wider">Total Volume</span>
-            <p className="text-base sm:text-lg font-bold text-white mt-0.5 tabular-nums flex items-center gap-1.5 truncate"><UsdcIcon size={16} />{formatCompactUSDC(totalDeposited)} <span className="text-2xs text-dark-500">USDC</span></p>
-          </div>
-          <div className="card p-3.5">
-            <span className="text-2xs text-dark-500 font-medium uppercase tracking-wider">Total Markets</span>
-            <p className="text-base sm:text-lg font-bold text-white mt-0.5">{totalMarkets}</p>
-          </div>
-          <div className="card p-3.5">
-            <span className="text-2xs text-dark-500 font-medium uppercase tracking-wider">Active Deposits</span>
-            <p className="text-base sm:text-lg font-bold text-primary-400 mt-0.5 tabular-nums flex items-center gap-1.5 truncate"><UsdcIcon size={16} />{formatCompactUSDC(activeDeposits)} <span className="text-2xs text-dark-500">USDC</span></p>
-          </div>
-          <div className="card p-3.5">
-            <span className="text-2xs text-dark-500 font-medium uppercase tracking-wider">Active</span>
-            <p className="text-base sm:text-lg font-bold text-white mt-0.5">{activePositions}</p>
-          </div>
-          <div className="card p-3.5">
-            <span className="text-2xs text-dark-500 font-medium uppercase tracking-wider">Estimated Claimable</span>
-            <p className={`text-base sm:text-lg font-bold mt-0.5 ${claimableWinnings + claimableRefunds > 0 ? 'text-emerald-400' : 'text-white'}`}>
-              {claimableWinnings + claimableRefunds > 0 ? claimableWinnings + claimableRefunds : <span className="text-dark-500">—</span>}
-            </p>
-          </div>
+        <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-3">
+          <SummaryCard label="Total Deposited" value={formatCompactUSDC(totalDeposited)} suffix="USDC" icon={<UsdcIcon size={16} />} accent="neutral" />
+          <SummaryCard label="Active Deposits" value={formatCompactUSDC(activeDeposits)} suffix="USDC" icon={<UsdcIcon size={16} />} accent="primary" />
+          <SummaryCard label="Claimable Value" value={formatCompactUSDC(claimableValue)} suffix="USDC" icon={<UsdcIcon size={16} />} accent="success" />
+          <SummaryCard label="Markets" value={`${totalMarkets}`} icon={<MiniMarketIcon />} accent="neutral" />
+          <SummaryCard label="Active" value={`${activePositions}`} icon={<MiniBoltIcon />} accent="info" />
+          <SummaryCard label="Cancelled" value={`${cancelledCount}`} icon={<MiniCloseIcon />} accent="danger" />
         </div>
       )}
 
       {/* Tab Chips */}
       {positions.length > 0 && (
-        <div className="flex items-center gap-2 overflow-x-auto pb-2 -mx-4 px-4 sm:mx-0 sm:px-0 scrollbar-hide">
-          {(['all', 'active', 'winnings', 'refunds', 'claimed'] as TabType[]).map((tab) => (
-            <button
-              key={tab}
-              onClick={() => setActiveTab(tab)}
-              className={`chip shrink-0 ${activeTab === tab ? 'chip-active' : ''}`}
-            >
-              {tab === 'winnings' ? 'Est. Winnings' : tab === 'refunds' ? 'Est. Refunds' : tab.charAt(0).toUpperCase() + tab.slice(1)}
-              <span className="ml-1.5 px-1.5 py-0.5 rounded bg-white/20 text-2xs">
-                {tabCounts[tab]}
-              </span>
-            </button>
-          ))}
+        <div className="card p-3 sm:p-4">
+          <div className="flex flex-col lg:flex-row gap-3 lg:items-center lg:justify-between">
+            <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-hide">
+              {(['all', 'active', 'winnings', 'refunds', 'claimed'] as TabType[]).map((tab) => (
+                <button
+                  key={tab}
+                  onClick={() => setActiveTab(tab)}
+                  className={`chip shrink-0 ${activeTab === tab ? 'chip-active' : ''}`}
+                >
+                  {tab === 'winnings' ? 'Est. Winnings' : tab === 'refunds' ? 'Est. Refunds' : tab.charAt(0).toUpperCase() + tab.slice(1)}
+                  <span className="ml-1.5 px-1.5 py-0.5 rounded bg-white/20 text-2xs">
+                    {tabCounts[tab]}
+                  </span>
+                </button>
+              ))}
+            </div>
+
+            <div className="flex flex-col sm:flex-row gap-2 sm:items-center sm:justify-end">
+              <select
+                value={categoryFilter}
+                onChange={(e) => setCategoryFilter(e.target.value)}
+                className="select-field text-xs sm:text-sm min-h-[40px] sm:min-h-[42px] sm:w-44"
+              >
+                {categoryCounts.map((category) => (
+                  <option key={category} value={category}>{category}</option>
+                ))}
+              </select>
+              <select
+                value={sortBy}
+                onChange={(e) => setSortBy(e.target.value as SortBy)}
+                className="select-field text-xs sm:text-sm min-h-[40px] sm:min-h-[42px] sm:w-56"
+              >
+                <option value="claimable_first">Claimable First</option>
+                <option value="highest_deposit">Highest Deposit</option>
+                <option value="lowest_deposit">Lowest Deposit</option>
+                <option value="newest">Newest Markets</option>
+                <option value="oldest">Oldest Markets</option>
+                <option value="title_az">Title A-Z</option>
+                <option value="title_za">Title Z-A</option>
+              </select>
+            </div>
+          </div>
         </div>
       )}
 
@@ -278,9 +350,9 @@ export default function Portfolio() {
           action={activeTab === 'all' ? <Link to="/" className="btn-primary text-sm">Browse Markets</Link> : undefined}
         />
       ) : (
-        <div className="space-y-3">
+         <div className="space-y-3">
           {filteredPositions.map((pos, idx) => (
-            <div key={pos.market} className="card p-4 sm:p-5 animate-fade-in-up" style={{ animationDelay: `${idx * 50}ms`, animationFillMode: 'both' }}>
+            <div key={pos.market} className="card p-4 sm:p-5 animate-fade-in-up bg-gradient-to-br from-white/[0.015] to-transparent" style={{ animationDelay: `${idx * 50}ms`, animationFillMode: 'both' }}>
               {/* Title + Badge */}
               <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2 sm:gap-3 mb-3">
                 <div className="min-w-0 flex-1">
@@ -290,9 +362,15 @@ export default function Portfolio() {
                   >
                     {pos.title}
                   </Link>
-                  <div className="flex items-center gap-2 mt-1.5">
+                  <div className="flex items-center gap-2 mt-1.5 flex-wrap">
                     <span className={`badge text-2xs ${STAGE_COLORS[pos.stage]}`}>{STAGE_LABELS[pos.stage]}</span>
                     <span className="text-2xs text-dark-500">{pos.category}</span>
+                    {(pos.canRedeem && !pos.hasRedeemed) && (
+                      <span className="badge text-2xs bg-emerald-500/15 text-emerald-300 border-emerald-500/25">Claim Winnings</span>
+                    )}
+                    {(pos.canRefund && !pos.hasRefunded && pos.netDepositedWei > 0n) && (
+                      <span className="badge text-2xs bg-cyan-500/15 text-cyan-300 border-cyan-500/25">Claim Refund</span>
+                    )}
                   </div>
                 </div>
                 <div className="flex items-center sm:items-end gap-1.5 sm:flex-col sm:text-right shrink-0">
@@ -379,5 +457,66 @@ export default function Portfolio() {
         </div>
       )}
     </div>
+  );
+}
+
+function SummaryCard({
+  label,
+  value,
+  suffix,
+  icon,
+  accent,
+}: {
+  label: string;
+  value: string;
+  suffix?: string;
+  icon: React.ReactNode;
+  accent: 'neutral' | 'primary' | 'success' | 'info' | 'danger';
+}) {
+  const accentStyles = {
+    neutral: 'bg-white/[0.02] border-white/[0.08] text-white',
+    primary: 'bg-primary-500/[0.08] border-primary-500/25 text-primary-200',
+    success: 'bg-emerald-500/[0.08] border-emerald-500/25 text-emerald-200',
+    info: 'bg-blue-500/[0.08] border-blue-500/25 text-blue-200',
+    danger: 'bg-red-500/[0.08] border-red-500/25 text-red-200',
+  };
+
+  return (
+    <div className={`card p-3.5 border ${accentStyles[accent]}`}>
+      <div className="flex items-center gap-2 text-2xs uppercase tracking-wider text-white/55 mb-1.5">
+        <span className="w-5 h-5 rounded-md bg-black/25 border border-white/[0.08] flex items-center justify-center">
+          {icon}
+        </span>
+        {label}
+      </div>
+      <p className="text-lg font-bold tabular-nums text-white leading-none">
+        {value}
+        {suffix ? <span className="text-2xs font-medium text-white/45 ml-1.5">{suffix}</span> : null}
+      </p>
+    </div>
+  );
+}
+
+function MiniMarketIcon() {
+  return (
+    <svg className="w-3.5 h-3.5 text-white/75" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6A2.25 2.25 0 016 3.75h2.25A2.25 2.25 0 0110.5 6v2.25a2.25 2.25 0 01-2.25 2.25H6a2.25 2.25 0 01-2.25-2.25V6zM13.5 6a2.25 2.25 0 012.25-2.25H18A2.25 2.25 0 0120.25 6v2.25A2.25 2.25 0 0118 10.5h-2.25a2.25 2.25 0 01-2.25-2.25V6zM3.75 15.75A2.25 2.25 0 016 13.5h12A2.25 2.25 0 0120.25 15.75V18A2.25 2.25 0 0118 20.25H6A2.25 2.25 0 013.75 18v-2.25z" />
+    </svg>
+  );
+}
+
+function MiniBoltIcon() {
+  return (
+    <svg className="w-3.5 h-3.5 text-blue-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M13 3L4 14h6l-1 7 9-11h-6l1-7z" />
+    </svg>
+  );
+}
+
+function MiniCloseIcon() {
+  return (
+    <svg className="w-3.5 h-3.5 text-red-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M6 6l12 12M6 18L18 6" />
+    </svg>
   );
 }
