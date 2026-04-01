@@ -101,4 +101,4 @@ npm run dev
 
 ## License
 
-GNU General Public License v3.0 - see LICENSE file for details
+GNU General Public License v3.0 - see LICENSE file for detail
