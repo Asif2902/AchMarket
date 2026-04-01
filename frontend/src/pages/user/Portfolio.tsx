@@ -145,37 +145,14 @@ export default function Portfolio() {
     }
   };
 
-  if (!isConnected) {
-    return (
-      <div className="max-w-4xl mx-auto px-4 py-20">
-        <EmptyState
-          title="Connect Wallet"
-          description="Connect your wallet to view your portfolio and positions."
-          icon={
-            <svg className="w-7 h-7 text-primary-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M21 12a2.25 2.25 0 00-2.25-2.25H15a3 3 0 11-6 0H5.25A2.25 2.25 0 003 12m18 0v6a2.25 2.25 0 01-2.25 2.25H5.25A2.25 2.25 0 013 18v-6m18 0V9M3 12V9m18 0a2.25 2.25 0 00-2.25-2.25H5.25A2.25 2.25 0 003 9m18 0V6a2.25 2.25 0 00-2.25-2.25H5.25A2.25 2.25 0 003 6v3" />
-            </svg>
-          }
-        />
-      </div>
-    );
-  }
+  const totalDeposited = positions.reduce((acc, p) => acc + p.netDepositedWei, 0n);
+  const activeDeposits = positions.filter((p) => p.stage === STAGE.Active).reduce((acc, p) => acc + p.netDepositedWei, 0n);
 
-  if (loading) return <PageLoader />;
+  const totalMarkets = new Set(positions.map((p) => p.market)).size;
+  const activePositions = positions.filter((p) => p.stage === STAGE.Active).length;
+  const claimableWinnings = positions.filter((p) => p.canRedeem && !p.hasRedeemed).length;
+  const claimableRefunds = positions.filter((p) => p.canRefund && !p.hasRefunded && p.netDepositedWei > 0n).length;
 
-    // Compute summary stats
-    const totalDeposited = positions.reduce((acc, p) => acc + p.netDepositedWei, 0n);
-    const activeDeposits = positions.filter(p => p.stage === STAGE.Active).reduce((acc, p) => acc + p.netDepositedWei, 0n);
-    
-    const totalMarkets = new Set(positions.map(p => p.market)).size;
-    const activePositions = positions.filter(p => p.stage === STAGE.Active).length;
-    // Use same filtering logic as usePendingClaims to be consistent:
-    // - Exclude already-claimed positions
-    // - Exclude zero-deposit refunds
-    const claimableWinnings = positions.filter(p => p.canRedeem && !p.hasRedeemed).length;
-    const claimableRefunds = positions.filter(p => p.canRefund && !p.hasRefunded && p.netDepositedWei > 0n).length;
-    
-  
   const categoryCounts = useMemo(() => {
     const map = new Map<string, number>();
     for (const pos of positions) {
@@ -243,6 +220,24 @@ export default function Portfolio() {
   const resolvedCount = positions.filter((p) => p.stage === STAGE.Resolved).length;
   const cancelledCount = positions.filter((p) => p.stage === STAGE.Cancelled || p.stage === STAGE.Expired).length;
   const activeRatio = totalMarkets > 0 ? (activePositions / totalMarkets) * 100 : 0;
+
+  if (!isConnected) {
+    return (
+      <div className="max-w-4xl mx-auto px-4 py-20">
+        <EmptyState
+          title="Connect Wallet"
+          description="Connect your wallet to view your portfolio and positions."
+          icon={
+            <svg className="w-7 h-7 text-primary-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M21 12a2.25 2.25 0 00-2.25-2.25H15a3 3 0 11-6 0H5.25A2.25 2.25 0 003 12m18 0v6a2.25 2.25 0 01-2.25 2.25H5.25A2.25 2.25 0 013 18v-6m18 0V9M3 12V9m18 0a2.25 2.25 0 00-2.25-2.25H5.25A2.25 2.25 0 003 9m18 0V6a2.25 2.25 0 00-2.25-2.25H5.25A2.25 2.25 0 003 6v3" />
+            </svg>
+          }
+        />
+      </div>
+    );
+  }
+
+  if (loading) return <PageLoader />;
 
   return (
     <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8 space-y-6 animate-fade-in">
