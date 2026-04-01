@@ -15,8 +15,10 @@ export default function MobileBottomNav() {
   };
 
   return (
-    <nav className="fixed bottom-0 left-0 right-0 z-50 md:hidden bg-dark-950/95 backdrop-blur-xl border-t border-white/[0.06] safe-area-inset-bottom">
-      <div className="flex items-center justify-around h-14 px-2">
+    <nav className="fixed bottom-0 left-0 right-0 z-50 md:hidden px-3 pb-2 pt-1 safe-area-inset-bottom pointer-events-none">
+      <div className="max-w-md mx-auto pointer-events-auto">
+        <div className="relative flex items-center justify-around h-16 px-2 rounded-2xl border border-white/[0.08] bg-[#090d14]/92 backdrop-blur-2xl shadow-[0_10px_30px_rgba(0,0,0,0.6)]">
+          <div className="absolute inset-x-12 top-0 h-px bg-gradient-to-r from-transparent via-emerald-300/45 to-transparent" />
         <NavLink
           to="/"
           active={isActive('/')}
@@ -63,6 +65,7 @@ export default function MobileBottomNav() {
             label="Admin"
           />
         )}
+        </div>
       </div>
     </nav>
   );
@@ -80,8 +83,8 @@ function NavLink({ to, active, icon, label, badge }: {
       to={to}
       className={`relative flex flex-col items-center justify-center gap-0.5 px-3 py-1.5 rounded-xl transition-all duration-200 min-w-[56px] ${
         active
-          ? 'text-primary-400'
-          : 'text-dark-500 hover:text-dark-300'
+          ? 'text-primary-300'
+          : 'text-dark-400 hover:text-white'
       }`}
     >
       <span className="relative">
@@ -96,7 +99,10 @@ function NavLink({ to, active, icon, label, badge }: {
         {label}
       </span>
       {active && (
-        <span className="absolute -top-px left-1/2 -translate-x-1/2 w-6 h-0.5 rounded-full bg-primary-500" />
+        <>
+          <span className="absolute -top-px left-1/2 -translate-x-1/2 w-6 h-0.5 rounded-full bg-primary-400" />
+          <span className="absolute inset-0 -z-10 rounded-xl bg-primary-500/12 border border-primary-500/20" />
+        </>
       )}
     </Link>
   );

@@ -42,6 +42,7 @@ export default function Footer() {
             <a href="https://trade.achswap.app" target="_blank" rel="noopener noreferrer" className="hover:text-white transition-colors">Swap</a>
             <a href="https://trade.achswap.app/bridge" target="_blank" rel="noopener noreferrer" className="hover:text-white transition-colors">Bridge</a>
             <a href="https://docs.achswap.app" target="_blank" rel="noopener noreferrer" className="hover:text-white transition-colors">Docs</a>
+            <a href="https://x.com/AchPredict" target="_blank" rel="noopener noreferrer" className="hover:text-white transition-colors">X (Twitter)</a>
           </div>
 
           <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-dark-900/40 border border-white/[0.06]">
