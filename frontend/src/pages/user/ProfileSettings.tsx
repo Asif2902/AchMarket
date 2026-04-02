@@ -157,6 +157,12 @@ export default function ProfileSettings() {
               </p>
             </div>
 
+            {!hasProfileSetup && (
+              <div className="rounded-xl border border-amber-500/25 bg-amber-500/10 px-3 py-2.5">
+                <p className="text-xs text-amber-200 font-medium">Complete your setup to unlock your public profile page.</p>
+              </div>
+            )}
+
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               <div>
                 <label className="label">Display Name</label>
@@ -241,7 +247,7 @@ export default function ProfileSettings() {
       </div>
 
       <div className="flex items-center gap-2">
-        <Link to="/portfolio" className="btn-secondary text-xs px-3 py-2">Back to Portfolio</Link>
+        <Link to="/profile" className="btn-secondary text-xs px-3 py-2">Back to Profile</Link>
       </div>
     </div>
   );
