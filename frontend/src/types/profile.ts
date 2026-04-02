@@ -1,5 +1,6 @@
 export interface PublicProfile {
   address: string;
+  profileSlug: string;
   displayName: string;
   avatarUrl: string;
   twitterUrl: string;

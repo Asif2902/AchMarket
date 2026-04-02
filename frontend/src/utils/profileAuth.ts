@@ -16,6 +16,16 @@ export const EMPTY_PROFILE_PAYLOAD: ProfilePayload = {
   telegramUrl: '',
 };
 
+export function normalizeProfileSlug(value: string): string {
+  return value
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9_-]/g, '')
+    .replace(/_{2,}/g, '_')
+    .replace(/-{2,}/g, '-')
+    .slice(0, 40);
+}
+
 const MAX_NAME_LENGTH = 40;
 const MAX_URL_LENGTH = 300;
 

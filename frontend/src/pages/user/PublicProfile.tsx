@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useLocation, useParams } from 'react-router-dom';
 import { ethers } from 'ethers';
 import { useWallet } from '../../context/WalletContext';
 import { FACTORY_ADDRESS, LENS_ADDRESS, STAGE, STAGE_LABELS, STAGE_COLORS } from '../../config/network';
@@ -9,7 +9,7 @@ import EmptyState from '../../components/EmptyState';
 import ImageWithFallback from '../../components/ImageWithFallback';
 import UsdcIcon from '../../components/UsdcIcon';
 import { formatCompactUSDC, makeMarketSlug } from '../../utils/format';
-import { fetchProfileByAddress } from '../../services/profile';
+import { fetchProfileByAddress, fetchProfileBySlug } from '../../services/profile';
 import type { PublicProfile as PublicProfileType, PortfolioStats } from '../../types/profile';
 
 interface PositionItem {
@@ -42,11 +42,13 @@ function isAddress(value: string | undefined): value is string {
 
 export default function PublicProfile() {
   const { address: routeAddress } = useParams<{ address: string }>();
+  const location = useLocation();
   const { readProvider } = useWallet();
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [data, setData] = useState<PublicProfileData>({ profile: null, stats: EMPTY_STATS, positions: [] });
+  const [resolvedAddress, setResolvedAddress] = useState<string | null>(null);
 
   const targetAddress = useMemo(() => {
     if (!isAddress(routeAddress)) return null;
@@ -57,23 +59,42 @@ export default function PublicProfile() {
     }
   }, [routeAddress]);
 
-  const fetchData = useCallback(async () => {
-    if (!targetAddress) {
-      setLoading(false);
-      setError('Invalid profile address');
-      return;
-    }
+  const slugFromQuery = useMemo(() => {
+    const query = location.search.startsWith('?') ? location.search.slice(1) : '';
+    return decodeURIComponent(query || '').trim();
+  }, [location.search]);
 
+  const fetchData = useCallback(async () => {
     try {
       setLoading(true);
       setError(null);
 
+      let profileResponse;
+      let resolvedAddress = targetAddress;
+
+      if (slugFromQuery) {
+        profileResponse = await fetchProfileBySlug(slugFromQuery);
+        resolvedAddress = profileResponse.profile?.address ?? null;
+      } else {
+        if (!targetAddress) {
+          setLoading(false);
+          setError('Invalid profile address');
+          return;
+        }
+        profileResponse = await fetchProfileByAddress(targetAddress);
+      }
+
+      if (!resolvedAddress) {
+        setError('Profile not found');
+        setLoading(false);
+        return;
+      }
+
       const factory = new ethers.Contract(FACTORY_ADDRESS, FACTORY_ABI, readProvider);
       const lens = new ethers.Contract(LENS_ADDRESS, LENS_ABI, readProvider);
 
-      const [profileResponse, portfolio, totalMarkets] = await Promise.all([
-        fetchProfileByAddress(targetAddress),
-        lens.getUserPortfolio(targetAddress),
+      const [portfolio, totalMarkets] = await Promise.all([
+        lens.getUserPortfolio(resolvedAddress),
         factory.totalMarkets(),
       ]);
 
@@ -102,13 +123,14 @@ export default function PublicProfile() {
         stats: profileResponse.stats,
         positions,
       });
+      setResolvedAddress(resolvedAddress);
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to load profile';
       setError(message);
     } finally {
       setLoading(false);
     }
-  }, [readProvider, targetAddress]);
+  }, [readProvider, slugFromQuery, targetAddress]);
 
   useEffect(() => {
     fetchData();
@@ -116,7 +138,7 @@ export default function PublicProfile() {
 
   if (loading) return <PageLoader />;
 
-  if (error || !targetAddress) {
+  if (error || (!targetAddress && !slugFromQuery)) {
     return (
       <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
         <EmptyState
@@ -128,7 +150,8 @@ export default function PublicProfile() {
     );
   }
 
-  const displayName = data.profile?.displayName?.trim() || `${targetAddress.slice(0, 6)}...${targetAddress.slice(-4)}`;
+  const safeAddress = resolvedAddress ?? targetAddress ?? '';
+  const displayName = data.profile?.displayName?.trim() || `${safeAddress.slice(0, 6)}...${safeAddress.slice(-4)}`;
   const avatarUrl = data.profile?.avatarUrl?.trim() || '';
 
   const socials = [
@@ -138,6 +161,8 @@ export default function PublicProfile() {
   ].filter((item) => item.value.trim().length > 0);
 
   const activeTrades = data.positions.filter((p) => p.stage === STAGE.Active).length;
+  const profileSlug = data.profile?.profileSlug ?? '';
+  const sharedPath = profileSlug ? `/profile?${profileSlug}` : '';
 
   return (
     <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8 space-y-5 animate-fade-in">
@@ -155,7 +180,8 @@ export default function PublicProfile() {
 
           <div className="min-w-0 flex-1">
             <h1 className="text-xl sm:text-2xl font-bold text-white truncate">{displayName}</h1>
-            <p className="text-xs text-dark-400 mt-1 break-all">{targetAddress}</p>
+            <p className="text-xs text-dark-400 mt-1 break-all">{safeAddress}</p>
+            {sharedPath && <p className="text-2xs text-dark-500 mt-1">Share link: {sharedPath}</p>}
 
             {socials.length > 0 && (
               <div className="mt-3 flex flex-wrap items-center gap-2">

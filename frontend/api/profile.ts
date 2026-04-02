@@ -6,6 +6,7 @@ import {
   buildProfileSigningMessage,
   EMPTY_PROFILE_PAYLOAD,
   normalizeAddress,
+  normalizeProfileSlug,
   sanitizeProfilePayload,
   type ProfilePayload,
 } from '../src/utils/profileAuth';
@@ -35,13 +36,14 @@ type PortfolioPosition = {
 
 type ProfileDocument = ProfilePayload & {
   address: string;
+  profileSlug: string;
   createdAt: Date;
   updatedAt: Date;
 };
 
 interface ApiRequest {
   method?: string;
-  query?: { address?: string };
+  query?: { address?: string; slug?: string };
   body?: {
     address?: string;
     payload?: ProfilePayload;
@@ -78,6 +80,7 @@ async function getMongoClient(): Promise<MongoClient> {
   const db = cachedClient.db(MONGO_DB_NAME);
   const collection = db.collection<ProfileDocument>(PROFILES_COLLECTION);
   await collection.createIndex({ address: 1 }, { unique: true });
+  await collection.createIndex({ profileSlug: 1 }, { unique: true });
 
   return cachedClient;
 }
@@ -167,6 +170,7 @@ async function getProfile(address: string) {
   return {
     profile: {
       address: profile.address,
+      profileSlug: profile.profileSlug,
       displayName: profile.displayName,
       avatarUrl: profile.avatarUrl,
       twitterUrl: profile.twitterUrl,
@@ -203,6 +207,18 @@ async function upsertProfile(
 
   const now = new Date();
   const existing = await collection.findOne({ address: normalizedAddress });
+  const preferredSlug = normalizeProfileSlug(
+    sanitizedPayload.displayName || existing?.displayName || normalizedAddress.slice(2, 10),
+  );
+
+  if (!preferredSlug) {
+    throw new Error('Display name must include letters or numbers.');
+  }
+
+  const conflicting = await collection.findOne({ profileSlug: preferredSlug });
+  if (conflicting && conflicting.address !== normalizedAddress) {
+    throw new Error('That display name is already taken.');
+  }
 
   const finalPayload: ProfilePayload = {
     ...EMPTY_PROFILE_PAYLOAD,
@@ -215,6 +231,7 @@ async function upsertProfile(
     {
       $set: {
         address: normalizedAddress,
+        profileSlug: preferredSlug,
         ...finalPayload,
         updatedAt: now,
       },
@@ -238,8 +255,25 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
   try {
     if (req.method === 'GET') {
       const address = req.query?.address;
+      const slug = req.query?.slug;
+
+      if (slug) {
+        const normalizedSlug = normalizeProfileSlug(slug);
+        if (!normalizedSlug) {
+          return res.status(400).json({ error: 'invalid slug' });
+        }
+        const client = await getMongoClient();
+        const collection = client.db(MONGO_DB_NAME).collection<ProfileDocument>(PROFILES_COLLECTION);
+        const profileBySlug = await collection.findOne({ profileSlug: normalizedSlug });
+        if (!profileBySlug) {
+          return res.status(404).json({ error: 'Profile not found' });
+        }
+        const data = await getProfile(profileBySlug.address);
+        return res.status(200).json(data);
+      }
+
       if (!address) {
-        return res.status(400).json({ error: 'address query param is required' });
+        return res.status(400).json({ error: 'address or slug query param is required' });
       }
       const data = await getProfile(address);
       return res.status(200).json(data);

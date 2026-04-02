@@ -8,6 +8,7 @@ import ToastContainer from './components/Toast';
 import Home from './pages/user/Home';
 import MarketDetail from './pages/user/MarketDetail';
 import Portfolio from './pages/user/Portfolio';
+import ProfileSettings from './pages/user/ProfileSettings';
 import Analytics from './pages/user/Analytics';
 import PublicProfile from './pages/user/PublicProfile';
 import OwnerLayout from './pages/owner/OwnerLayout';
@@ -24,6 +25,7 @@ const sharedRoutes = (
     <Route path="/analytics" element={<Analytics />} />
     <Route path="/market/:slug" element={<MarketDetail />} />
     <Route path="/portfolio" element={<Portfolio />} />
+    <Route path="/profile/settings" element={<ProfileSettings />} />
     <Route path="/profile/:address" element={<PublicProfile />} />
   </>
 );

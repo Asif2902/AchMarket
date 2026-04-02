@@ -24,6 +24,11 @@ export async function fetchProfileByAddress(address: string): Promise<PublicProf
   return parseApiResponse<PublicProfileResponse>(response);
 }
 
+export async function fetchProfileBySlug(slug: string): Promise<PublicProfileResponse> {
+  const response = await fetch(`${PROFILE_API_PATH}?slug=${encodeURIComponent(slug)}`);
+  return parseApiResponse<PublicProfileResponse>(response);
+}
+
 export async function saveProfileBySignature(
   address: string,
   payload: Partial<ProfilePayload>,
