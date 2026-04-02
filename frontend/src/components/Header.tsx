@@ -4,7 +4,7 @@ import { useWallet } from '../context/WalletContext';
 import { usePendingClaims } from '../hooks/usePendingClaims';
 
 export default function Header() {
-  const { isOwner } = useWallet();
+  const { isOwner, isConnected } = useWallet();
   const location = useLocation();
   const { pendingCount } = usePendingClaims();
 
@@ -34,6 +34,11 @@ export default function Header() {
               <NavLink to="/portfolio" active={location.pathname === '/portfolio'} badge={pendingCount > 0 ? pendingCount : undefined}>
                 Portfolio
               </NavLink>
+              {isConnected && (
+                <NavLink to="/profile" active={location.pathname === '/profile' || location.pathname.startsWith('/profile/')}>
+                  Profile
+                </NavLink>
+              )}
               <NavLink to="/analytics" active={location.pathname === '/analytics'}>
                 Analytics
               </NavLink>

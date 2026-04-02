@@ -35,14 +35,9 @@ const EMPTY_STATS: PortfolioStats = {
   activeDepositsWei: '0',
 };
 
-function isAddress(value: string | undefined): value is string {
-  if (!value) return false;
-  return /^0x[a-fA-F0-9]{40}$/.test(value);
-}
-
 export default function PublicProfile() {
   const { slug: routeSlug } = useParams<{ slug: string }>();
-  const { readProvider } = useWallet();
+  const { readProvider, address: connectedAddress } = useWallet();
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -154,6 +149,7 @@ export default function PublicProfile() {
   const activeTrades = data.positions.filter((p) => p.stage === STAGE.Active).length;
   const profileSlug = data.profile?.profileSlug ?? routeSlug ?? '';
   const sharedPath = profileSlug ? `/profile/${profileSlug}` : '';
+  const canEdit = Boolean(connectedAddress && safeAddress && connectedAddress.toLowerCase() === safeAddress.toLowerCase());
 
   return (
     <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8 space-y-5 animate-fade-in">
@@ -182,19 +178,34 @@ export default function PublicProfile() {
                     href={social.value}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-white/[0.12] bg-white/[0.03] text-xs text-white/80 hover:text-white hover:border-white/20 transition-all"
+                    className="w-9 h-9 rounded-lg border border-white/[0.12] bg-white/[0.03] text-white/75 hover:text-white hover:border-white/25 flex items-center justify-center transition-all"
+                    aria-label={social.label}
+                    title={social.label}
                   >
-                    {social.label}
-                    <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M14 3h7m0 0v7m0-7L10 14M5 5h5M5 5v5m0-5l9 9" />
-                    </svg>
+                    {social.label === 'Twitter' ? (
+                      <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z" /></svg>
+                    ) : social.label === 'Discord' ? (
+                      <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M20.317 4.369A19.791 19.791 0 0015.885 3c-.191.34-.403.79-.554 1.152a18.27 18.27 0 00-5.663 0A12.64 12.64 0 009.114 3a19.736 19.736 0 00-4.433 1.37C1.884 8.58 1.128 12.684 1.5 16.73a19.9 19.9 0 005.427 2.765c.441-.606.834-1.249 1.174-1.924a12.97 12.97 0 01-1.846-.88c.155-.114.306-.233.452-.357 3.56 1.676 7.43 1.676 10.948 0 .147.124.298.243.452.357-.59.344-1.207.64-1.847.88.34.675.733 1.318 1.175 1.924a19.87 19.87 0 005.426-2.765c.438-4.69-.755-8.758-3.543-12.36z" /></svg>
+                    ) : (
+                      <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M9.999 15.17l-.397 5.59c.568 0 .814-.244 1.109-.537l2.661-2.545 5.516 4.04c1.012.564 1.726.267 1.999-.932L24 3.77l-.001-.001c.321-1.496-.54-2.081-1.528-1.713L1.51 10.17c-1.433.559-1.412 1.357-.244 1.715l5.354 1.67L19.052 5.77c.585-.387 1.118-.173.68.214" /></svg>
+                    )}
                   </a>
                 ))}
               </div>
             )}
           </div>
 
-          <Link to="/portfolio" className="btn-secondary text-xs px-3 py-2 self-start">My Portfolio</Link>
+          <div className="flex items-center gap-2 self-start">
+            {canEdit && (
+              <Link to="/profile/settings" className="w-9 h-9 rounded-lg border border-white/[0.14] bg-white/[0.04] text-white/75 hover:text-white hover:border-white/25 flex items-center justify-center transition-all" title="Profile settings" aria-label="Profile settings">
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                </svg>
+              </Link>
+            )}
+            <Link to="/portfolio" className="btn-secondary text-xs px-3 py-2">My Portfolio</Link>
+          </div>
         </div>
       </div>
 

@@ -251,10 +251,8 @@ export default function Portfolio() {
   const cancelledCount = positions.filter((p) => p.stage === STAGE.Cancelled || p.stage === STAGE.Expired).length;
   const activeRatio = totalMarkets > 0 ? (activePositions / totalMarkets) * 100 : 0;
 
-  const profileSlug = profileSummary?.profileSlug ?? '';
-  const publicProfilePath = profileSlug ? `/profile/${profileSlug}` : '/profile/settings';
-  const publicProfileShareHref = profileSlug ? `/profile/${profileSlug}` : '';
-  const showProfileCard = Boolean(profileSummary && ((profileSummary.displayName ?? '').trim() || (profileSummary.avatarUrl ?? '').trim()));
+  const profileName = (profileSummary?.displayName ?? '').trim();
+  const greetingName = profileName || (address ? `${address.slice(0, 6)}...${address.slice(-4)}` : 'Trader');
 
   if (!isConnected) {
     return (
@@ -276,40 +274,14 @@ export default function Portfolio() {
 
   return (
     <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8 space-y-6 animate-fade-in">
-      {showProfileCard && (
-        <div className="card p-4 flex items-center justify-between gap-3 bg-white/[0.02] border-white/[0.08]">
-          <div className="flex items-center gap-3 min-w-0">
-            <div className="w-10 h-10 rounded-xl overflow-hidden border border-white/[0.10] bg-dark-900 shrink-0">
-              {profileSummary?.avatarUrl?.trim() ? (
-                <img src={profileSummary.avatarUrl} alt={profileSummary.displayName || 'Profile'} className="w-full h-full object-cover" />
-              ) : (
-                <div className="w-full h-full flex items-center justify-center text-sm font-semibold text-cyan-300">
-                  {(profileSummary?.displayName || address || 'U').charAt(0).toUpperCase()}
-                </div>
-              )}
-            </div>
-            <div className="min-w-0">
-              <p className="text-sm text-white font-semibold truncate">{profileSummary?.displayName || 'Profile ready'}</p>
-              <p className="text-2xs text-dark-500 truncate">Public slug: {profileSlug}</p>
-            </div>
-          </div>
-          {publicProfileShareHref && (
-            <a href={publicProfileShareHref} className="btn-secondary text-xs px-3 py-2 shrink-0">Public Link</a>
-          )}
-        </div>
-      )}
-
-      <div className="card p-3 sm:p-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 bg-gradient-to-r from-cyan-500/[0.08] via-transparent to-primary-500/[0.06] border-cyan-400/20">
+      <div className="card p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 bg-gradient-to-r from-cyan-500/[0.10] via-transparent to-primary-500/[0.08] border-cyan-400/20">
         <div>
-          <p className="text-sm font-semibold text-white">Your portfolio is now focused on positions.</p>
-          <p className="text-2xs text-dark-400 mt-0.5">Manage name, avatar, and socials from your profile settings page.</p>
+          <p className="text-lg sm:text-xl font-semibold text-white">Hi {greetingName}, here is your portfolio.</p>
+          <p className="text-xs text-dark-400 mt-1">Track positions, claim outcomes, and keep your momentum rolling.</p>
         </div>
         <div className="flex items-center gap-2">
-          <Link to="/profile/settings" className="btn-primary text-xs px-3 py-2">
-            Edit Profile
-          </Link>
-          <Link to={publicProfilePath} className="btn-secondary text-xs px-3 py-2">
-            View Public Profile
+          <Link to="/profile" className="btn-secondary text-xs px-3 py-2">
+            Open Profile
           </Link>
         </div>
       </div>

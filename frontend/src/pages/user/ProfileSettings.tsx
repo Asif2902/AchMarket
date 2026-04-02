@@ -127,6 +127,8 @@ export default function ProfileSettings() {
 
   if (loading) return <PageLoader />;
 
+  const hasProfileSetup = Boolean(profileSlug);
+
   return (
     <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8 space-y-5 animate-fade-in">
       <div className="card p-5 sm:p-6 bg-gradient-to-br from-cyan-500/[0.10] via-transparent to-primary-500/[0.08] border-cyan-400/20">
@@ -148,7 +150,11 @@ export default function ProfileSettings() {
           <div className="flex-1 space-y-3">
             <div>
               <h1 className="text-xl font-bold text-white">Profile Settings</h1>
-              <p className="text-xs text-dark-400 mt-1">Update your public identity shown on shared profile links.</p>
+              <p className="text-xs text-dark-400 mt-1">
+                {hasProfileSetup
+                  ? 'Update your public identity shown on shared profile links.'
+                  : 'Set up your public profile to unlock your shareable profile page.'}
+              </p>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
