@@ -98,11 +98,7 @@ async function getMongoClient(): Promise<MongoClient> {
         await col.createIndex({ address: 1 }, { unique: true, name: 'uniq_address' });
         await col.createIndex(
           { profileSlug: 1 },
-          {
-            unique: true,
-            name: 'uniq_profile_slug',
-            partialFilterExpression: { profileSlug: { $exists: true, $type: 'string', $ne: '' } },
-          },
+          { unique: true, name: 'uniq_profile_slug' },
         );
         indexesReady = true;
       }
@@ -127,11 +123,7 @@ async function getMongoClient(): Promise<MongoClient> {
   await col.createIndex({ address: 1 }, { unique: true, name: 'uniq_address' });
   await col.createIndex(
     { profileSlug: 1 },
-    {
-      unique: true,
-      name: 'uniq_profile_slug',
-      partialFilterExpression: { profileSlug: { $exists: true, $type: 'string', $ne: '' } },
-    },
+    { unique: true, name: 'uniq_profile_slug' },
   );
   indexesReady = true;
 
