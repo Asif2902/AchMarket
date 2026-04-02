@@ -18,14 +18,19 @@ async function parseApiResponse<T>(response: Response): Promise<T> {
   return body as T;
 }
 
+function withCacheBust(url: string): string {
+  const separator = url.includes('?') ? '&' : '?';
+  return `${url}${separator}t=${Date.now()}`;
+}
+
 export async function fetchProfileByAddress(address: string): Promise<PublicProfileResponse> {
   const normalized = ethers.getAddress(address);
-  const response = await fetch(`${PROFILE_API_PATH}?address=${encodeURIComponent(normalized)}`);
+  const response = await fetch(withCacheBust(`${PROFILE_API_PATH}?address=${encodeURIComponent(normalized)}`));
   return parseApiResponse<PublicProfileResponse>(response);
 }
 
 export async function fetchProfileBySlug(slug: string): Promise<PublicProfileResponse> {
-  const response = await fetch(`${PROFILE_API_PATH}?slug=${encodeURIComponent(slug)}`);
+  const response = await fetch(withCacheBust(`${PROFILE_API_PATH}?slug=${encodeURIComponent(slug)}`));
   return parseApiResponse<PublicProfileResponse>(response);
 }
 

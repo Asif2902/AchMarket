@@ -105,7 +105,10 @@ export default function ProfileSettings() {
       setMsg({ type: 'success', text: 'Profile updated.' });
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to save profile';
-      setMsg({ type: 'error', text: message });
+      const friendly = message === 'Request failed'
+        ? 'Profile API failed. Check Vercel env vars and function logs.'
+        : message;
+      setMsg({ type: 'error', text: friendly });
     } finally {
       setSaving(false);
     }

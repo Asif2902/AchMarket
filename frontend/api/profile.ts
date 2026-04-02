@@ -80,7 +80,15 @@ async function getMongoClient(): Promise<MongoClient> {
   const db = cachedClient.db(MONGO_DB_NAME);
   const collection = db.collection<ProfileDocument>(PROFILES_COLLECTION);
   await collection.createIndex({ address: 1 }, { unique: true });
-  await collection.createIndex({ profileSlug: 1 }, { unique: true });
+  await collection.createIndex(
+    { profileSlug: 1 },
+    {
+      unique: true,
+      partialFilterExpression: {
+        profileSlug: { $exists: true, $type: 'string', $ne: '' },
+      },
+    },
+  );
 
   return cachedClient;
 }
@@ -170,7 +178,7 @@ async function getProfile(address: string) {
   return {
     profile: {
       address: profile.address,
-      profileSlug: profile.profileSlug,
+      profileSlug: profile.profileSlug ?? '',
       displayName: profile.displayName,
       avatarUrl: profile.avatarUrl,
       twitterUrl: profile.twitterUrl,
@@ -280,11 +288,19 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
     }
 
     if (req.method === 'POST') {
-      const body = req.body ?? {};
-      const address = body.address;
-      const payload = body.payload ?? EMPTY_PROFILE_PAYLOAD;
-      const timestamp = Number(body.timestamp);
-      const signature = body.signature ?? '';
+      let body: ApiRequest['body'] = req.body ?? {};
+      if (typeof body === 'string') {
+        try {
+          body = JSON.parse(body) as ApiRequest['body'];
+        } catch {
+          return res.status(400).json({ error: 'Invalid JSON body' });
+        }
+      }
+      const parsedBody = body ?? {};
+      const address = parsedBody.address;
+      const payload = parsedBody.payload ?? EMPTY_PROFILE_PAYLOAD;
+      const timestamp = Number(parsedBody.timestamp);
+      const signature = parsedBody.signature ?? '';
 
       if (!address || !signature) {
         return res.status(400).json({ error: 'address and signature are required' });
