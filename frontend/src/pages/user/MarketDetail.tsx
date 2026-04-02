@@ -461,7 +461,7 @@ export default function MarketDetail() {
 
     const baseUrl = window.location.origin;
     const marketUrl = `${baseUrl}/market/${slug}`;
-    const imageUrl = `${baseUrl}/api/og-image?slug=${encodeURIComponent(slug)}`;
+    const imageUrl = `${baseUrl}/og/markets/${marketId ?? 'default'}.svg`;
     const title = `${detail.title} | AchMarket`;
     const descriptionSource = parseDescription(detail.description).description;
     const description = (descriptionSource || DEFAULT_META_DESCRIPTION).slice(0, 180);
@@ -473,6 +473,7 @@ export default function MarketDetail() {
     setMetaTag('property', 'og:type', 'website');
     setMetaTag('property', 'og:url', marketUrl);
     setMetaTag('property', 'og:image', imageUrl);
+    setMetaTag('property', 'og:image:type', 'image/svg+xml');
     setMetaTag('name', 'twitter:card', 'summary_large_image');
     setMetaTag('name', 'twitter:title', title);
     setMetaTag('name', 'twitter:description', description);
@@ -481,19 +482,20 @@ export default function MarketDetail() {
 
     return () => {
       const homeUrl = `${baseUrl}/`;
-      const defaultImage = `${baseUrl}/og.png`;
+      const defaultImage = `${baseUrl}/og/markets/default.svg`;
       document.title = DEFAULT_META_TITLE;
       setMetaTag('name', 'description', DEFAULT_META_DESCRIPTION);
       setMetaTag('property', 'og:title', DEFAULT_META_TITLE);
       setMetaTag('property', 'og:description', DEFAULT_META_DESCRIPTION);
       setMetaTag('property', 'og:url', homeUrl);
       setMetaTag('property', 'og:image', defaultImage);
+      setMetaTag('property', 'og:image:type', 'image/svg+xml');
       setMetaTag('name', 'twitter:title', DEFAULT_META_TITLE);
       setMetaTag('name', 'twitter:description', DEFAULT_META_DESCRIPTION);
       setMetaTag('name', 'twitter:image', defaultImage);
       setCanonicalUrl(homeUrl);
     };
-  }, [detail, slug]);
+  }, [detail, marketId, slug]);
 
   const currentInputKey = `${tradeTab}:${selectedOutcome}:${shareAmount}`;
 
