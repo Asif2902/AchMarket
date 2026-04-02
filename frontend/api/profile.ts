@@ -1,5 +1,5 @@
 import { ethers, JsonRpcProvider, Contract } from 'ethers';
-import { MongoClient } from 'mongodb';
+import { MongoClient, MongoServerError } from 'mongodb';
 import { FACTORY_ADDRESS, LENS_ADDRESS, STAGE } from '../src/config/network';
 import { FACTORY_ABI, LENS_ABI } from '../src/config/abis';
 import {
@@ -18,6 +18,7 @@ const PROFILES_COLLECTION = 'profiles';
 const SIG_VALIDITY_MS = 10 * 60 * 1000;
 
 let cachedClient: MongoClient | null = null;
+let indexesReady = false;
 
 type PortfolioStats = {
   totalPositions: number;
@@ -36,7 +37,7 @@ type PortfolioPosition = {
 
 type ProfileDocument = ProfilePayload & {
   address: string;
-  profileSlug: string;
+  profileSlug?: string;
   createdAt: Date;
   updatedAt: Date;
 };
@@ -44,12 +45,7 @@ type ProfileDocument = ProfilePayload & {
 interface ApiRequest {
   method?: string;
   query?: { address?: string; slug?: string };
-  body?: {
-    address?: string;
-    payload?: ProfilePayload;
-    timestamp?: number;
-    signature?: string;
-  };
+  body?: unknown;
 }
 
 interface ApiResponse {
@@ -63,32 +59,65 @@ function setCors(res: ApiResponse): void {
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 }
 
-async function getMongoClient(): Promise<MongoClient> {
-  if (!MONGO_URI) {
-    throw new Error('MONGO_URI is not configured.');
+function parseMongoUri(rawUri: string): URL {
+  try {
+    return new URL(rawUri);
+  } catch {
+    throw new Error('MONGO_URI is not a valid URL');
+  }
+}
+
+function validateMongoUri(rawUri: string): void {
+  const parsed = parseMongoUri(rawUri);
+
+  if (parsed.protocol !== 'mongodb+srv:' && parsed.protocol !== 'mongodb:') {
+    throw new Error('MONGO_URI must start with mongodb+srv:// or mongodb://');
   }
 
-  if (cachedClient) return cachedClient;
+  if (!parsed.username || !parsed.password) {
+    throw new Error('MONGO_URI must include username and password');
+  }
 
-  cachedClient = new MongoClient(MONGO_URI, {
-    maxPoolSize: 8,
-    minPoolSize: 1,
-  });
+  if (!parsed.hostname) {
+    throw new Error('MONGO_URI must include a cluster hostname');
+  }
+}
 
-  await cachedClient.connect();
+async function getMongoClient(): Promise<MongoClient> {
+  if (!MONGO_URI) {
+    throw new Error('MONGO_URI is not configured');
+  }
 
-  const db = cachedClient.db(MONGO_DB_NAME);
-  const collection = db.collection<ProfileDocument>(PROFILES_COLLECTION);
-  await collection.createIndex({ address: 1 }, { unique: true });
-  await collection.createIndex(
-    { profileSlug: 1 },
-    {
-      unique: true,
-      partialFilterExpression: {
-        profileSlug: { $exists: true, $type: 'string', $ne: '' },
+  validateMongoUri(MONGO_URI);
+
+  if (!cachedClient) {
+    cachedClient = new MongoClient(MONGO_URI, {
+      maxPoolSize: 8,
+      minPoolSize: 1,
+      serverSelectionTimeoutMS: 12000,
+      connectTimeoutMS: 12000,
+      socketTimeoutMS: 12000,
+      retryWrites: true,
+    });
+    await cachedClient.connect();
+  }
+
+  if (!indexesReady) {
+    const db = cachedClient.db(MONGO_DB_NAME);
+    const collection = db.collection<ProfileDocument>(PROFILES_COLLECTION);
+    await collection.createIndex({ address: 1 }, { unique: true, name: 'uniq_address' });
+    await collection.createIndex(
+      { profileSlug: 1 },
+      {
+        unique: true,
+        name: 'uniq_profile_slug',
+        partialFilterExpression: {
+          profileSlug: { $exists: true, $type: 'string', $ne: '' },
+        },
       },
-    },
-  );
+    );
+    indexesReady = true;
+  }
 
   return cachedClient;
 }
@@ -116,7 +145,7 @@ async function getPortfolioStats(address: string): Promise<PortfolioStats> {
     const factory = new Contract(FACTORY_ADDRESS, FACTORY_ABI, provider);
     const lens = new Contract(LENS_ADDRESS, LENS_ABI, provider);
 
-    const [portfolio, totalMarketsRaw] = await Promise.all([
+    const [portfolio] = await Promise.all([
       lens.getUserPortfolio(address),
       factory.totalMarkets(),
     ]);
@@ -158,7 +187,21 @@ async function getPortfolioStats(address: string): Promise<PortfolioStats> {
   }
 }
 
-async function getProfile(address: string) {
+function serializeProfile(profile: ProfileDocument) {
+  return {
+    address: profile.address,
+    profileSlug: profile.profileSlug ?? '',
+    displayName: profile.displayName,
+    avatarUrl: profile.avatarUrl,
+    twitterUrl: profile.twitterUrl,
+    discordUrl: profile.discordUrl,
+    telegramUrl: profile.telegramUrl,
+    createdAt: profile.createdAt.toISOString(),
+    updatedAt: profile.updatedAt.toISOString(),
+  };
+}
+
+async function getProfileByAddress(address: string) {
   const client = await getMongoClient();
   const collection = client.db(MONGO_DB_NAME).collection<ProfileDocument>(PROFILES_COLLECTION);
   const normalized = normalizeAddress(address);
@@ -168,27 +211,34 @@ async function getProfile(address: string) {
     getPortfolioStats(normalized),
   ]);
 
-  if (!profile) {
-    return {
-      profile: null,
-      stats,
-    };
-  }
-
   return {
-    profile: {
-      address: profile.address,
-      profileSlug: profile.profileSlug ?? '',
-      displayName: profile.displayName,
-      avatarUrl: profile.avatarUrl,
-      twitterUrl: profile.twitterUrl,
-      discordUrl: profile.discordUrl,
-      telegramUrl: profile.telegramUrl,
-      createdAt: profile.createdAt.toISOString(),
-      updatedAt: profile.updatedAt.toISOString(),
-    },
+    profile: profile ? serializeProfile(profile) : null,
     stats,
   };
+}
+
+async function getProfileBySlug(slug: string) {
+  const normalizedSlug = normalizeProfileSlug(slug);
+  if (!normalizedSlug) {
+    throw new Error('Invalid profile slug');
+  }
+
+  const client = await getMongoClient();
+  const collection = client.db(MONGO_DB_NAME).collection<ProfileDocument>(PROFILES_COLLECTION);
+  const profile = await collection.findOne({ profileSlug: normalizedSlug });
+
+  if (!profile) {
+    return null;
+  }
+
+  return getProfileByAddress(profile.address);
+}
+
+function ensureUniqueSlug(baseSlug: string, attempt: number): string {
+  if (attempt <= 0) return baseSlug;
+  const suffix = `-${attempt + 1}`;
+  const trimmedBase = baseSlug.slice(0, Math.max(1, 40 - suffix.length));
+  return `${trimmedBase}${suffix}`;
 }
 
 async function upsertProfile(
@@ -215,18 +265,6 @@ async function upsertProfile(
 
   const now = new Date();
   const existing = await collection.findOne({ address: normalizedAddress });
-  const preferredSlug = normalizeProfileSlug(
-    sanitizedPayload.displayName || existing?.displayName || normalizedAddress.slice(2, 10),
-  );
-
-  if (!preferredSlug) {
-    throw new Error('Display name must include letters or numbers.');
-  }
-
-  const conflicting = await collection.findOne({ profileSlug: preferredSlug });
-  if (conflicting && conflicting.address !== normalizedAddress) {
-    throw new Error('That display name is already taken.');
-  }
 
   const finalPayload: ProfilePayload = {
     ...EMPTY_PROFILE_PAYLOAD,
@@ -234,23 +272,83 @@ async function upsertProfile(
     ...sanitizedPayload,
   };
 
-  await collection.updateOne(
-    { address: normalizedAddress },
-    {
-      $set: {
-        address: normalizedAddress,
-        profileSlug: preferredSlug,
-        ...finalPayload,
-        updatedAt: now,
-      },
-      $setOnInsert: {
-        createdAt: now,
-      },
-    },
-    { upsert: true },
+  const baseSlug = normalizeProfileSlug(
+    finalPayload.displayName || existing?.profileSlug || normalizedAddress.slice(2, 10),
   );
 
-  return getProfile(normalizedAddress);
+  if (!baseSlug) {
+    throw new Error('Display name must include letters or numbers.');
+  }
+
+  let lastError: unknown = null;
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    const candidateSlug = ensureUniqueSlug(baseSlug, attempt);
+
+    try {
+      await collection.updateOne(
+        { address: normalizedAddress },
+        {
+          $set: {
+            address: normalizedAddress,
+            profileSlug: candidateSlug,
+            ...finalPayload,
+            updatedAt: now,
+          },
+          $setOnInsert: {
+            createdAt: now,
+          },
+        },
+        { upsert: true },
+      );
+
+      return getProfileByAddress(normalizedAddress);
+    } catch (error) {
+      lastError = error;
+      if (error instanceof MongoServerError && error.code === 11000) {
+        continue;
+      }
+      throw error;
+    }
+  }
+
+  if (lastError instanceof MongoServerError && lastError.code === 11000) {
+    throw new Error('That display name is taken. Try a different one.');
+  }
+
+  throw new Error('Failed to save profile. Please retry.');
+}
+
+function parseBody(rawBody: unknown): {
+  address?: string;
+  payload?: ProfilePayload;
+  timestamp?: number;
+  signature?: string;
+} {
+  if (!rawBody) return {};
+
+  if (typeof rawBody === 'string') {
+    try {
+      return JSON.parse(rawBody) as {
+        address?: string;
+        payload?: ProfilePayload;
+        timestamp?: number;
+        signature?: string;
+      };
+    } catch {
+      throw new Error('Invalid JSON body');
+    }
+  }
+
+  if (typeof rawBody === 'object') {
+    return rawBody as {
+      address?: string;
+      payload?: ProfilePayload;
+      timestamp?: number;
+      signature?: string;
+    };
+  }
+
+  throw new Error('Invalid request body');
 }
 
 export default async function handler(req: ApiRequest, res: ApiResponse) {
@@ -266,41 +364,27 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
       const slug = req.query?.slug;
 
       if (slug) {
-        const normalizedSlug = normalizeProfileSlug(slug);
-        if (!normalizedSlug) {
-          return res.status(400).json({ error: 'invalid slug' });
-        }
-        const client = await getMongoClient();
-        const collection = client.db(MONGO_DB_NAME).collection<ProfileDocument>(PROFILES_COLLECTION);
-        const profileBySlug = await collection.findOne({ profileSlug: normalizedSlug });
-        if (!profileBySlug) {
+        const data = await getProfileBySlug(slug);
+        if (!data) {
           return res.status(404).json({ error: 'Profile not found' });
         }
-        const data = await getProfile(profileBySlug.address);
         return res.status(200).json(data);
       }
 
       if (!address) {
         return res.status(400).json({ error: 'address or slug query param is required' });
       }
-      const data = await getProfile(address);
+
+      const data = await getProfileByAddress(address);
       return res.status(200).json(data);
     }
 
     if (req.method === 'POST') {
-      let body: ApiRequest['body'] = req.body ?? {};
-      if (typeof body === 'string') {
-        try {
-          body = JSON.parse(body) as ApiRequest['body'];
-        } catch {
-          return res.status(400).json({ error: 'Invalid JSON body' });
-        }
-      }
-      const parsedBody = body ?? {};
-      const address = parsedBody.address;
-      const payload = parsedBody.payload ?? EMPTY_PROFILE_PAYLOAD;
-      const timestamp = Number(parsedBody.timestamp);
-      const signature = parsedBody.signature ?? '';
+      const body = parseBody(req.body);
+      const address = body.address;
+      const payload = body.payload ?? EMPTY_PROFILE_PAYLOAD;
+      const timestamp = Number(body.timestamp);
+      const signature = body.signature ?? '';
 
       if (!address || !signature) {
         return res.status(400).json({ error: 'address and signature are required' });
@@ -313,6 +397,11 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
     return res.status(405).json({ error: 'Method not allowed' });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unexpected error';
-    return res.status(500).json({ error: message });
+    const statusCode =
+      message.includes('MONGO_URI') || message.includes('Invalid JSON body') || message.includes('required')
+        ? 400
+        : 500;
+
+    return res.status(statusCode).json({ error: message });
   }
 }
