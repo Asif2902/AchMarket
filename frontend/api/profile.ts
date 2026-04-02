@@ -19,6 +19,7 @@ const SIG_VALIDITY_MS = 10 * 60 * 1000;
 
 let cachedClient: MongoClient | null = null;
 let indexesReady = false;
+let clientInitPromise: Promise<MongoClient> | null = null;
 
 type PortfolioStats = {
   totalPositions: number;
@@ -91,15 +92,27 @@ async function getMongoClient(): Promise<MongoClient> {
   validateMongoUri(MONGO_URI);
 
   if (!cachedClient) {
-    cachedClient = new MongoClient(MONGO_URI, {
-      maxPoolSize: 8,
-      minPoolSize: 1,
-      serverSelectionTimeoutMS: 12000,
-      connectTimeoutMS: 12000,
-      socketTimeoutMS: 12000,
-      retryWrites: true,
-    });
-    await cachedClient.connect();
+    if (!clientInitPromise) {
+      clientInitPromise = (async () => {
+        const client = new MongoClient(MONGO_URI, {
+          maxPoolSize: 8,
+          minPoolSize: 1,
+          serverSelectionTimeoutMS: 12000,
+          connectTimeoutMS: 12000,
+          socketTimeoutMS: 12000,
+          retryWrites: true,
+          tls: true,
+        });
+        await client.connect();
+        cachedClient = client;
+        return client;
+      })().catch((error) => {
+        clientInitPromise = null;
+        throw error;
+      });
+    }
+
+    cachedClient = await clientInitPromise;
   }
 
   if (!indexesReady) {
@@ -351,8 +364,40 @@ function parseBody(rawBody: unknown): {
   throw new Error('Invalid request body');
 }
 
+function toSafeErrorMessage(error: unknown): string {
+  if (error instanceof MongoServerError) {
+    if (error.code === 18) {
+      return 'Mongo authentication failed. Verify username/password in MONGO_URI.';
+    }
+    if (error.code === 13) {
+      return 'Mongo authorization failed. DB user needs readWrite permissions.';
+    }
+  }
+
+  if (error instanceof Error) {
+    const msg = error.message;
+    if (msg.includes('querySrv ENOTFOUND')) {
+      return 'Mongo DNS lookup failed. Check cluster hostname in MONGO_URI.';
+    }
+    if (msg.includes('Server selection timed out')) {
+      return 'Mongo connection timeout. Check Atlas network access and cluster status.';
+    }
+    if (msg.includes('bad auth')) {
+      return 'Mongo authentication failed. Reset DB user password and update MONGO_URI.';
+    }
+    if (msg.includes('MONGO_URI')) return msg;
+    if (msg.includes('Display name')) return msg;
+    if (msg.includes('Invalid JSON body')) return msg;
+    if (msg.includes('required')) return msg;
+    return `Server error: ${msg}`;
+  }
+
+  return 'Unexpected server error';
+}
+
 export default async function handler(req: ApiRequest, res: ApiResponse) {
   setCors(res);
+  res.setHeader('Content-Type', 'application/json; charset=utf-8');
 
   if (req.method === 'OPTIONS') {
     return res.status(200).json({ ok: true });
@@ -396,11 +441,17 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
 
     return res.status(405).json({ error: 'Method not allowed' });
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Unexpected error';
-    const statusCode =
-      message.includes('MONGO_URI') || message.includes('Invalid JSON body') || message.includes('required')
-        ? 400
-        : 500;
+    const message = toSafeErrorMessage(error);
+    let statusCode = 500;
+    if (message.includes('MONGO_URI') || message.includes('Invalid JSON body') || message.includes('required')) {
+      statusCode = 400;
+    }
+    if (message.includes('authentication failed') || message.includes('authorization failed')) {
+      statusCode = 401;
+    }
+    if (message.includes('connection timeout') || message.includes('DNS lookup failed')) {
+      statusCode = 503;
+    }
 
     return res.status(statusCode).json({ error: message });
   }
