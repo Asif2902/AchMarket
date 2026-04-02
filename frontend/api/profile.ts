@@ -88,29 +88,52 @@ interface ProfileDoc {
 async function getMongoClient(): Promise<MongoClient> {
   if (!MONGO_URI) throw new Error('MONGO_URI is not configured');
 
-  if (!cachedClient) {
-    cachedClient = new MongoClient(MONGO_URI, {
-      maxPoolSize: 4,
-      serverSelectionTimeoutMS: 10000,
-      connectTimeoutMS: 10000,
-    });
-    await cachedClient.connect();
+  // If we have a cached client, try to reuse it
+  if (cachedClient) {
+    try {
+      // Test if connection is still alive by pinging
+      await cachedClient.db(MONGO_DB_NAME).command({ ping: 1 });
+      if (!indexesReady) {
+        const col = cachedClient.db(MONGO_DB_NAME).collection<ProfileDoc>(PROFILES_COLLECTION);
+        await col.createIndex({ address: 1 }, { unique: true, name: 'uniq_address' });
+        await col.createIndex(
+          { profileSlug: 1 },
+          {
+            unique: true,
+            name: 'uniq_profile_slug',
+            partialFilterExpression: { profileSlug: { $exists: true, $type: 'string', $ne: '' } },
+          },
+        );
+        indexesReady = true;
+      }
+      return cachedClient;
+    } catch {
+      // Connection is dead, close and recreate
+      try { await cachedClient.close(); } catch {}
+      cachedClient = null;
+      indexesReady = false;
+    }
   }
 
-  if (!indexesReady) {
-    const db = cachedClient.db(MONGO_DB_NAME);
-    const col = db.collection<ProfileDoc>(PROFILES_COLLECTION);
-    await col.createIndex({ address: 1 }, { unique: true, name: 'uniq_address' });
-    await col.createIndex(
-      { profileSlug: 1 },
-      {
-        unique: true,
-        name: 'uniq_profile_slug',
-        partialFilterExpression: { profileSlug: { $exists: true, $type: 'string', $ne: '' } },
-      },
-    );
-    indexesReady = true;
-  }
+  // Create fresh connection
+  cachedClient = new MongoClient(MONGO_URI, {
+    maxPoolSize: 4,
+    serverSelectionTimeoutMS: 10000,
+    connectTimeoutMS: 10000,
+  });
+  await cachedClient.connect();
+
+  const col = cachedClient.db(MONGO_DB_NAME).collection<ProfileDoc>(PROFILES_COLLECTION);
+  await col.createIndex({ address: 1 }, { unique: true, name: 'uniq_address' });
+  await col.createIndex(
+    { profileSlug: 1 },
+    {
+      unique: true,
+      name: 'uniq_profile_slug',
+      partialFilterExpression: { profileSlug: { $exists: true, $type: 'string', $ne: '' } },
+    },
+  );
+  indexesReady = true;
 
   return cachedClient;
 }
