@@ -1,5 +1,7 @@
+import type { ReactNode } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { useEffect } from 'react';
+import { Analytics as VercelAnalytics } from '@vercel/analytics/react';
 import { WalletProvider, useWallet } from './context/WalletContext';
 import Header from './components/Header';
 import Footer from './components/Footer';
@@ -73,17 +75,17 @@ function AppRoutes() {
   );
 }
 
-export default function App() {
+export default function App({ children }: { children?: ReactNode }) {
   return (
     <BrowserRouter>
       <WalletProvider>
-        <AppShell />
+        <AppShell>{children}</AppShell>
       </WalletProvider>
     </BrowserRouter>
   );
 }
 
-function AppShell() {
+function AppShell({ children }: { children?: ReactNode }) {
   const location = useLocation();
 
   useEffect(() => {
@@ -95,12 +97,13 @@ function AppShell() {
       <Header />
       <main className="flex-1 pb-20 md:pb-0">
         <div key={`${location.pathname}${location.search}`} className="route-fade-in">
-          <AppRoutes />
+          {children ?? <AppRoutes />}
         </div>
       </main>
       <Footer />
       <MobileBottomNav />
       <ToastContainer />
+      <VercelAnalytics />
     </div>
   );
 }
