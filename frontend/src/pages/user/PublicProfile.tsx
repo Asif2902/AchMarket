@@ -120,7 +120,18 @@ export default function PublicProfile() {
 
       setData({
         profile: profileResponse.profile,
-        stats: profileResponse.stats,
+        stats: {
+          ...profileResponse.stats,
+          totalPositions: positions.length,
+          totalMarkets: new Set(positions.map((p) => p.market.toLowerCase())).size,
+          activePositions: positions.filter((p) => p.stage === STAGE.Active).length,
+          resolvedPositions: positions.filter((p) => p.stage === STAGE.Resolved).length,
+          totalDepositedWei: positions.reduce((acc, p) => acc + p.netDepositedWei, 0n).toString(),
+          activeDepositsWei: positions
+            .filter((p) => p.stage === STAGE.Active)
+            .reduce((acc, p) => acc + p.netDepositedWei, 0n)
+            .toString(),
+        },
         positions,
       });
       setResolvedAddress(resolvedAddress);

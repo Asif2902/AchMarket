@@ -1,7 +1,5 @@
-import { ethers, JsonRpcProvider, Contract } from 'ethers';
+import { ethers } from 'ethers';
 import { MongoClient, MongoServerError } from 'mongodb';
-import { FACTORY_ADDRESS, LENS_ADDRESS, STAGE } from '../src/config/network';
-import { FACTORY_ABI, LENS_ABI } from '../src/config/abis';
 import {
   buildProfileSigningMessage,
   EMPTY_PROFILE_PAYLOAD,
@@ -11,7 +9,6 @@ import {
   type ProfilePayload,
 } from '../src/utils/profileAuth';
 
-const RPC_URL = process.env.OG_RPC_URL ?? process.env.VITE_RPC_URL ?? 'https://arc-testnet.drpc.org/';
 const MONGO_URI = process.env.MONGO_URI;
 const MONGO_DB_NAME = process.env.MONGO_DB_NAME ?? 'achmarket';
 const PROFILES_COLLECTION = 'profiles';
@@ -28,12 +25,6 @@ type PortfolioStats = {
   resolvedPositions: number;
   totalDepositedWei: string;
   activeDepositsWei: string;
-};
-
-type PortfolioPosition = {
-  market?: string;
-  stage?: number | bigint;
-  netDepositedWei?: bigint | string | number;
 };
 
 type ProfileDocument = ProfilePayload & {
@@ -152,54 +143,6 @@ function emptyStats(): PortfolioStats {
   };
 }
 
-async function getPortfolioStats(address: string): Promise<PortfolioStats> {
-  try {
-    const provider = new JsonRpcProvider(RPC_URL);
-    const factory = new Contract(FACTORY_ADDRESS, FACTORY_ABI, provider);
-    const lens = new Contract(LENS_ADDRESS, LENS_ABI, provider);
-
-    const [portfolio] = await Promise.all([
-      lens.getUserPortfolio(address),
-      factory.totalMarkets(),
-    ]);
-
-    const positions = (Array.isArray(portfolio) ? portfolio : []) as PortfolioPosition[];
-
-    let totalDeposited = 0n;
-    let activeDeposits = 0n;
-    let activePositions = 0;
-    let resolvedPositions = 0;
-
-    for (const position of positions) {
-      const stage = Number(position.stage ?? 0);
-      const rawDeposited = position.netDepositedWei ?? 0;
-      const deposited = typeof rawDeposited === 'bigint' ? rawDeposited : BigInt(rawDeposited);
-      totalDeposited += deposited;
-
-      if (stage === STAGE.Active) {
-        activePositions += 1;
-        activeDeposits += deposited;
-      }
-      if (stage === STAGE.Resolved) {
-        resolvedPositions += 1;
-      }
-    }
-
-    const uniqueMarkets = new Set(positions.map((entry) => String(entry.market ?? '').toLowerCase()).filter(Boolean));
-
-    return {
-      totalPositions: positions.length,
-      totalMarkets: uniqueMarkets.size,
-      activePositions,
-      resolvedPositions,
-      totalDepositedWei: totalDeposited.toString(),
-      activeDepositsWei: activeDeposits.toString(),
-    };
-  } catch {
-    return emptyStats();
-  }
-}
-
 function serializeProfile(profile: ProfileDocument) {
   return {
     address: profile.address,
@@ -219,14 +162,11 @@ async function getProfileByAddress(address: string) {
   const collection = client.db(MONGO_DB_NAME).collection<ProfileDocument>(PROFILES_COLLECTION);
   const normalized = normalizeAddress(address);
 
-  const [profile, stats] = await Promise.all([
-    collection.findOne({ address: normalized }),
-    getPortfolioStats(normalized),
-  ]);
+  const profile = await collection.findOne({ address: normalized });
 
   return {
     profile: profile ? serializeProfile(profile) : null,
-    stats,
+    stats: emptyStats(),
   };
 }
 
