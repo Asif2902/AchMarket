@@ -177,6 +177,13 @@ async function upsertProfile(address: string, payload: Record<string, string>, t
 
   const existing = await col.findOne({ address: normalized });
   const merged = { ...EMPTY_PAYLOAD, ...(existing ?? {}), ...sanitized };
+  const {
+    address: _address,
+    profileSlug: _profileSlug,
+    createdAt: _createdAt,
+    updatedAt: _updatedAt,
+    ...mergedWithoutMeta
+  } = merged as ProfileDoc;
 
   const baseSlug = normalizeProfileSlug(merged.displayName || existing?.profileSlug || normalized.slice(2, 10));
   if (!baseSlug) throw new Error('Display name must include letters or numbers.');
@@ -187,7 +194,15 @@ async function upsertProfile(address: string, payload: Record<string, string>, t
 
   await col.updateOne(
     { address: normalized },
-    { $set: { address: normalized, profileSlug: baseSlug, ...merged, updatedAt: now }, $setOnInsert: { createdAt: now } },
+    {
+      $set: {
+        address: normalized,
+        profileSlug: baseSlug,
+        ...mergedWithoutMeta,
+        updatedAt: now,
+      },
+      $setOnInsert: { createdAt: now },
+    },
     { upsert: true },
   );
 
