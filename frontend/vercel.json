@@ -1,5 +1,21 @@
 {
   "rewrites": [
     { "source": "/((?!api/|assets/|.*\\..*).*)", "destination": "/index.html" }
+  ],
+  "functions": {
+    "api/*.ts": {
+      "maxDuration": 30
+    }
+  },
+  "headers": [
+    {
+      "source": "/api/(.*)",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "no-store"
+        }
+      ]
+    }
   ]
 }
