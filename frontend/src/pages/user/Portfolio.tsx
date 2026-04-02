@@ -8,8 +8,12 @@ import { FACTORY_ABI, LENS_ABI, MARKET_ABI } from '../../config/abis';
 import { PageLoader } from '../../components/LoadingSpinner';
 import EmptyState from '../../components/EmptyState';
 import UsdcIcon from '../../components/UsdcIcon';
+import ImageWithFallback from '../../components/ImageWithFallback';
 import { formatUSDC, formatCompactUSDC, formatWad, parseContractError, makeMarketSlug } from '../../utils/format';
 import { getOutcomeColor } from '../../components/ProbabilityBar';
+import { EMPTY_PROFILE_PAYLOAD, type ProfilePayload } from '../../utils/profileAuth';
+import { fetchProfileByAddress, saveProfileBySignature } from '../../services/profile';
+import type { PublicProfile as PublicProfileType } from '../../types/profile';
 
 interface Position {
   market: string;
@@ -29,6 +33,17 @@ interface Position {
 type TabType = 'all' | 'active' | 'winnings' | 'refunds' | 'claimed';
 type SortBy = 'highest_deposit' | 'lowest_deposit' | 'newest' | 'oldest' | 'title_az' | 'title_za' | 'claimable_first';
 
+function toProfilePayload(profile: PublicProfileType | null): ProfilePayload {
+  if (!profile) return { ...EMPTY_PROFILE_PAYLOAD };
+  return {
+    displayName: profile.displayName ?? '',
+    avatarUrl: profile.avatarUrl ?? '',
+    twitterUrl: profile.twitterUrl ?? '',
+    discordUrl: profile.discordUrl ?? '',
+    telegramUrl: profile.telegramUrl ?? '',
+  };
+}
+
 export default function Portfolio() {
   const { address, readProvider, signer, isConnected } = useWallet();
   const { clearClaim } = usePendingClaims();
@@ -39,6 +54,11 @@ export default function Portfolio() {
   const [activeTab, setActiveTab] = useState<TabType>('all');
   const [sortBy, setSortBy] = useState<SortBy>('claimable_first');
   const [categoryFilter, setCategoryFilter] = useState('All');
+  const [profileForm, setProfileForm] = useState<ProfilePayload>({ ...EMPTY_PROFILE_PAYLOAD });
+  const [profileLoading, setProfileLoading] = useState(false);
+  const [profileSaving, setProfileSaving] = useState(false);
+  const [profileMsg, setProfileMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [linkCopied, setLinkCopied] = useState(false);
   const txMsgTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
@@ -52,6 +72,40 @@ export default function Portfolio() {
       if (txMsgTimer.current) clearTimeout(txMsgTimer.current);
     };
   }, [txMsg]);
+
+  useEffect(() => {
+    if (!address) {
+      setProfileForm({ ...EMPTY_PROFILE_PAYLOAD });
+      return;
+    }
+
+    let cancelled = false;
+
+    const loadProfile = async () => {
+      try {
+        setProfileLoading(true);
+        const response = await fetchProfileByAddress(address);
+        if (!cancelled) {
+          setProfileForm(toProfilePayload(response.profile));
+        }
+      } catch (err) {
+        if (!cancelled) {
+          const message = err instanceof Error ? err.message : 'Unable to load profile';
+          setProfileMsg({ type: 'error', text: message });
+        }
+      } finally {
+        if (!cancelled) {
+          setProfileLoading(false);
+        }
+      }
+    };
+
+    loadProfile();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [address]);
 
   useEffect(() => {
     if (!address) return;
@@ -221,6 +275,45 @@ export default function Portfolio() {
   const cancelledCount = positions.filter((p) => p.stage === STAGE.Cancelled || p.stage === STAGE.Expired).length;
   const activeRatio = totalMarkets > 0 ? (activePositions / totalMarkets) * 100 : 0;
 
+  const publicProfileLink = useMemo(() => {
+    if (!address) return '';
+    const origin = typeof window !== 'undefined' ? window.location.origin : '';
+    if (!origin) return `/profile/${address}`;
+    return `${origin}/profile/${address}`;
+  }, [address]);
+
+  const updateProfileField = (field: keyof ProfilePayload, value: string) => {
+    setProfileForm((prev) => ({ ...prev, [field]: value }));
+  };
+
+  const handleSaveProfile = async () => {
+    if (!address || !signer) return;
+
+    try {
+      setProfileSaving(true);
+      setProfileMsg(null);
+      const response = await saveProfileBySignature(address, profileForm, signer);
+      setProfileForm(toProfilePayload(response.profile));
+      setProfileMsg({ type: 'success', text: 'Profile updated successfully.' });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to save profile';
+      setProfileMsg({ type: 'error', text: message });
+    } finally {
+      setProfileSaving(false);
+    }
+  };
+
+  const handleCopyPublicLink = async () => {
+    if (!publicProfileLink) return;
+    try {
+      await navigator.clipboard.writeText(publicProfileLink);
+      setLinkCopied(true);
+      setTimeout(() => setLinkCopied(false), 1600);
+    } catch {
+      setProfileMsg({ type: 'error', text: 'Unable to copy profile link' });
+    }
+  };
+
   if (!isConnected) {
     return (
       <div className="max-w-4xl mx-auto px-4 py-20">
@@ -239,8 +332,117 @@ export default function Portfolio() {
 
   if (loading) return <PageLoader />;
 
+  const profileAvatar = profileForm.avatarUrl.trim();
+  const profileDisplayName = profileForm.displayName.trim() || (address ? `${address.slice(0, 6)}...${address.slice(-4)}` : 'Trader');
+
   return (
     <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8 space-y-6 animate-fade-in">
+      <div className="card p-4 sm:p-5 bg-gradient-to-br from-cyan-500/[0.10] via-transparent to-primary-500/[0.08] border-cyan-400/20">
+        <div className="flex flex-col lg:flex-row gap-5">
+          <div className="lg:w-56">
+            <p className="text-2xs uppercase tracking-[0.14em] text-white/45 font-semibold mb-2">Public Profile</p>
+            <div className="w-24 h-24 rounded-2xl overflow-hidden border border-white/[0.12] bg-dark-900 mb-3">
+              {profileAvatar ? (
+                <ImageWithFallback src={profileAvatar} alt={profileDisplayName} className="w-full h-full" />
+              ) : (
+                <div className="w-full h-full flex items-center justify-center text-2xl font-semibold text-cyan-300">
+                  {profileDisplayName.charAt(0).toUpperCase()}
+                </div>
+              )}
+            </div>
+            <p className="text-sm font-semibold text-white truncate">{profileDisplayName}</p>
+            <p className="text-2xs text-dark-500 break-all mt-0.5">{address}</p>
+          </div>
+
+          <div className="flex-1 space-y-3">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div>
+                <label className="label">Display Name</label>
+                <input
+                  type="text"
+                  value={profileForm.displayName}
+                  onChange={(e) => updateProfileField('displayName', e.target.value)}
+                  placeholder="Your public name"
+                  maxLength={40}
+                  className="input-field text-sm"
+                />
+              </div>
+              <div>
+                <label className="label">Profile Image URL</label>
+                <input
+                  type="url"
+                  value={profileForm.avatarUrl}
+                  onChange={(e) => updateProfileField('avatarUrl', e.target.value)}
+                  placeholder="https://..."
+                  className="input-field text-sm"
+                />
+              </div>
+              <div>
+                <label className="label">Twitter Link</label>
+                <input
+                  type="url"
+                  value={profileForm.twitterUrl}
+                  onChange={(e) => updateProfileField('twitterUrl', e.target.value)}
+                  placeholder="https://x.com/yourhandle"
+                  className="input-field text-sm"
+                />
+              </div>
+              <div>
+                <label className="label">Discord Link</label>
+                <input
+                  type="url"
+                  value={profileForm.discordUrl}
+                  onChange={(e) => updateProfileField('discordUrl', e.target.value)}
+                  placeholder="https://discord.gg/..."
+                  className="input-field text-sm"
+                />
+              </div>
+              <div>
+                <label className="label">Telegram Link</label>
+                <input
+                  type="url"
+                  value={profileForm.telegramUrl}
+                  onChange={(e) => updateProfileField('telegramUrl', e.target.value)}
+                  placeholder="https://t.me/..."
+                  className="input-field text-sm"
+                />
+              </div>
+              <div>
+                <label className="label">Public URL</label>
+                <div className="input-field text-xs text-white/70 flex items-center truncate">{publicProfileLink}</div>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2 pt-1">
+              <Link to={`/profile/${address}`} className="btn-secondary text-xs px-3 py-2">
+                Open Public Profile
+              </Link>
+              <button onClick={handleCopyPublicLink} className="btn-secondary text-xs px-3 py-2">
+                {linkCopied ? 'Copied!' : 'Copy Profile Link'}
+              </button>
+              <button
+                onClick={handleSaveProfile}
+                disabled={profileSaving || profileLoading || !signer}
+                className="btn-primary text-xs px-3 py-2"
+              >
+                {profileSaving ? 'Saving...' : 'Save Profile'}
+              </button>
+              <span className="text-2xs text-dark-500">Save requires wallet signature (no gas).</span>
+            </div>
+
+            {profileMsg && (
+              <div className={`p-2.5 rounded-lg text-xs border ${
+                profileMsg.type === 'success'
+                  ? 'bg-emerald-500/10 text-emerald-300 border-emerald-500/25'
+                  : 'bg-red-500/10 text-red-300 border-red-500/25'
+              }`}>
+                {profileMsg.text}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
       {/* Header */}
       <div className="card p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 bg-gradient-to-br from-primary-500/[0.07] via-transparent to-emerald-500/[0.05]">
         <div>

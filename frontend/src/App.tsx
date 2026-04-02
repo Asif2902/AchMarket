@@ -9,6 +9,7 @@ import Home from './pages/user/Home';
 import MarketDetail from './pages/user/MarketDetail';
 import Portfolio from './pages/user/Portfolio';
 import Analytics from './pages/user/Analytics';
+import PublicProfile from './pages/user/PublicProfile';
 import OwnerLayout from './pages/owner/OwnerLayout';
 import CreateMarket from './pages/owner/CreateMarket';
 import ActiveMarkets from './pages/owner/ActiveMarkets';
@@ -23,6 +24,7 @@ const sharedRoutes = (
     <Route path="/analytics" element={<Analytics />} />
     <Route path="/market/:slug" element={<MarketDetail />} />
     <Route path="/portfolio" element={<Portfolio />} />
+    <Route path="/profile/:address" element={<PublicProfile />} />
   </>
 );
 
