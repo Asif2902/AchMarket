@@ -181,22 +181,17 @@ async function upsertProfile(address: string, payload: Record<string, string>, t
   const baseSlug = normalizeProfileSlug(merged.displayName || existing?.profileSlug || normalized.slice(2, 10));
   if (!baseSlug) throw new Error('Display name must include letters or numbers.');
 
-  for (let attempt = 0; attempt < 5; attempt++) {
-    const slug = attempt === 0 ? baseSlug : `${baseSlug.slice(0, 35)}-${attempt + 1}`;
-    try {
-      await col.updateOne(
-        { address: normalized },
-        { $set: { address: normalized, profileSlug: slug, ...merged, updatedAt: now }, $setOnInsert: { createdAt: now } },
-        { upsert: true },
-      );
-      return getProfile(normalized);
-    } catch (err) {
-      if (err instanceof MongoServerError && err.code === 11000) continue;
-      throw err;
-    }
-  }
+  // Check if another user already owns this slug
+  const conflict = await col.findOne({ profileSlug: baseSlug, address: { $ne: normalized } });
+  if (conflict) throw new Error(`"${baseSlug}" is already taken. Choose a different display name.`);
 
-  throw new Error('That display name is taken. Try a different one.');
+  await col.updateOne(
+    { address: normalized },
+    { $set: { address: normalized, profileSlug: baseSlug, ...merged, updatedAt: now }, $setOnInsert: { createdAt: now } },
+    { upsert: true },
+  );
+
+  return getProfile(normalized);
 }
 
 export default async function handler(req: any, res: any) {
