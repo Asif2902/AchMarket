@@ -1,17 +1,5 @@
 {
   "rewrites": [
-    {
-      "source": "/market/:slug",
-      "has": [
-        {
-          "type": "header",
-          "key": "user-agent",
-          "value": ".*([Bb]ot|[Cc]rawl|[Ss]pider|[Ff]acebookexternalhit|[Tt]witterbot|[Ss]lackbot|[Dd]iscordbot|[Ww]hats[Aa]pp|[Tt]elegram[Bb]ot|[Ll]inked[Ii]n[Bb]ot).*"
-        }
-      ],
-      "destination": "/market-meta/:slug.html"
-    },
-    { "source": "/market-meta/:slug", "destination": "/market-meta/:slug.html" },
-    { "source": "/((?!assets/|og/|market-meta/|.*\\..*).*)", "destination": "/index.html" }
+    { "source": "/((?!assets/|.*\\..*).*)", "destination": "/index.html" }
   ]
 }

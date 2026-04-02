@@ -5,8 +5,6 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "generate:market-meta": "node ./scripts/generate-market-meta.mjs",
-    "prebuild": "npm run generate:market-meta",
     "build": "tsc -b && vite build",
     "preview": "vite preview"
   },
