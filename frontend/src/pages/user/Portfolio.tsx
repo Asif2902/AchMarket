@@ -251,8 +251,8 @@ export default function Portfolio() {
   const cancelledCount = positions.filter((p) => p.stage === STAGE.Cancelled || p.stage === STAGE.Expired).length;
   const activeRatio = totalMarkets > 0 ? (activePositions / totalMarkets) * 100 : 0;
 
-  const publicProfilePath = address ? `/profile/${address}` : '/';
   const profileSlug = profileSummary?.profileSlug ?? '';
+  const publicProfilePath = profileSlug ? `/profile/${profileSlug}` : '/profile/settings';
   const publicProfileShareHref = profileSlug ? `/profile/${profileSlug}` : '';
   const showProfileCard = Boolean(profileSummary && ((profileSummary.displayName ?? '').trim() || (profileSummary.avatarUrl ?? '').trim()));
 
