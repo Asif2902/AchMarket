@@ -41,6 +41,7 @@ export default async function handler(
     <title>AchMarket</title>
     <meta name="description" content="Trade prediction markets on ARC Testnet with USDC." />
 
+    <meta property="og:site_name" content="AchMarket" />
     <meta property="og:title" content="AchMarket - Prediction Market" />
     <meta property="og:description" content="Trade prediction markets on ARC Testnet with USDC." />
     <meta property="og:type" content="website" />
@@ -49,11 +50,14 @@ export default async function handler(
     <meta property="og:image:secure_url" content="${escapeHtml(ogImageUrl)}" />
     <meta property="og:image:width" content="1200" />
     <meta property="og:image:height" content="630" />
+    <meta property="og:image:type" content="image/svg+xml" />
 
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:title" content="AchMarket - Prediction Market" />
     <meta name="twitter:description" content="Trade prediction markets on ARC Testnet with USDC." />
     <meta name="twitter:image" content="${escapeHtml(ogImageUrl)}" />
+
+    <link rel="canonical" href="${escapeHtml(marketUrl)}" />
 
     <meta http-equiv="refresh" content="0; url=${escapeHtml(marketUrl)}" />
     <script>

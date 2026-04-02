@@ -72,8 +72,13 @@ async function getMarketPayload(marketId: number): Promise<OgMarketPayload | nul
   }
 }
 
+function clipText(value: string, maxLength: number): string {
+  if (value.length <= maxLength) return value;
+  return `${value.slice(0, maxLength - 1)}...`;
+}
+
 function renderSvg(payload: OgMarketPayload | null): string {
-  const title = escapeHtml(payload?.title ?? OG_FALLBACK.title);
+  const title = escapeHtml(clipText(payload?.title ?? OG_FALLBACK.title, 115));
   const category = escapeHtml(payload?.category ?? 'Prediction Market');
   const endLabel = escapeHtml(payload?.endLabel ?? 'Live on ARC');
   const marketLabel = payload ? `Market #${payload.id}` : OG_FALLBACK.subtitle;
@@ -81,7 +86,7 @@ function renderSvg(payload: OgMarketPayload | null): string {
 
   const outcomeHtml = outcomes
     .map((label, idx) => {
-      const safe = escapeHtml(label);
+      const safe = escapeHtml(clipText(label, 20));
       const x = 88 + idx * 250;
       return `<g transform="translate(${x}, 430)">
         <rect width="220" height="64" rx="12" fill="rgba(13, 18, 27, 0.78)" stroke="rgba(148, 163, 184, 0.28)"/>
@@ -121,7 +126,7 @@ function renderSvg(payload: OgMarketPayload | null): string {
   <text x="88" y="124" fill="rgba(108, 225, 241, 0.92)" font-family="Inter, Arial, sans-serif" font-size="30" font-weight="700" letter-spacing="2">ACHMARKET</text>
   <text x="88" y="170" fill="rgba(227, 236, 250, 0.72)" font-family="Inter, Arial, sans-serif" font-size="30" font-weight="500">${escapeHtml(marketLabel)}</text>
 
-  <foreignObject x="88" y="198" width="1010" height="170">
+  <foreignObject x="88" y="198" width="1010" height="188">
     <div xmlns="http://www.w3.org/1999/xhtml" style="font-family: Inter, Arial, sans-serif; color: #F8FAFC; font-size: 58px; line-height: 1.08; font-weight: 760; letter-spacing: -0.02em; word-break: break-word;">
       ${title}
     </div>

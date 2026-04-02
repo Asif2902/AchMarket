@@ -456,6 +456,45 @@ export default function MarketDetail() {
     }
   }, [detail?.market, refreshTrigger]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  useEffect(() => {
+    if (!detail || !slug) return;
+
+    const baseUrl = window.location.origin;
+    const marketUrl = `${baseUrl}/market/${slug}`;
+    const imageUrl = `${baseUrl}/api/og-image?slug=${encodeURIComponent(slug)}`;
+    const title = `${detail.title} | AchMarket`;
+    const descriptionSource = parseDescription(detail.description).description;
+    const description = (descriptionSource || DEFAULT_META_DESCRIPTION).slice(0, 180);
+
+    document.title = title;
+    setMetaTag('name', 'description', description);
+    setMetaTag('property', 'og:title', title);
+    setMetaTag('property', 'og:description', description);
+    setMetaTag('property', 'og:type', 'website');
+    setMetaTag('property', 'og:url', marketUrl);
+    setMetaTag('property', 'og:image', imageUrl);
+    setMetaTag('name', 'twitter:card', 'summary_large_image');
+    setMetaTag('name', 'twitter:title', title);
+    setMetaTag('name', 'twitter:description', description);
+    setMetaTag('name', 'twitter:image', imageUrl);
+    setCanonicalUrl(marketUrl);
+
+    return () => {
+      const homeUrl = `${baseUrl}/`;
+      const defaultImage = `${baseUrl}/og.png`;
+      document.title = DEFAULT_META_TITLE;
+      setMetaTag('name', 'description', DEFAULT_META_DESCRIPTION);
+      setMetaTag('property', 'og:title', DEFAULT_META_TITLE);
+      setMetaTag('property', 'og:description', DEFAULT_META_DESCRIPTION);
+      setMetaTag('property', 'og:url', homeUrl);
+      setMetaTag('property', 'og:image', defaultImage);
+      setMetaTag('name', 'twitter:title', DEFAULT_META_TITLE);
+      setMetaTag('name', 'twitter:description', DEFAULT_META_DESCRIPTION);
+      setMetaTag('name', 'twitter:image', defaultImage);
+      setCanonicalUrl(homeUrl);
+    };
+  }, [detail, slug]);
+
   const currentInputKey = `${tradeTab}:${selectedOutcome}:${shareAmount}`;
 
   // Preview
@@ -676,45 +715,6 @@ export default function MarketDetail() {
   const selectedOutcomeLabel = detail.outcomeLabels[selectedOutcome] ?? `Outcome ${selectedOutcome + 1}`;
   const selectedOutcomePrice = probToPercent(detail.impliedProbabilitiesWad[selectedOutcome] ?? 0n) / 100;
   const selectedOwnedShares = userInfo?.shares[selectedOutcome] ?? 0n;
-
-  useEffect(() => {
-    if (!detail || !slug) return;
-
-    const baseUrl = window.location.origin;
-    const marketUrl = `${baseUrl}/market/${slug}`;
-    const imageUrl = `${baseUrl}/api/og-image?slug=${encodeURIComponent(slug)}`;
-    const title = `${detail.title} | AchMarket`;
-    const descriptionSource = parseDescription(detail.description).description;
-    const description = (descriptionSource || DEFAULT_META_DESCRIPTION).slice(0, 180);
-
-    document.title = title;
-    setMetaTag('name', 'description', description);
-    setMetaTag('property', 'og:title', title);
-    setMetaTag('property', 'og:description', description);
-    setMetaTag('property', 'og:type', 'website');
-    setMetaTag('property', 'og:url', marketUrl);
-    setMetaTag('property', 'og:image', imageUrl);
-    setMetaTag('name', 'twitter:card', 'summary_large_image');
-    setMetaTag('name', 'twitter:title', title);
-    setMetaTag('name', 'twitter:description', description);
-    setMetaTag('name', 'twitter:image', imageUrl);
-    setCanonicalUrl(marketUrl);
-
-    return () => {
-      const homeUrl = `${baseUrl}/`;
-      const defaultImage = `${baseUrl}/og.png`;
-      document.title = DEFAULT_META_TITLE;
-      setMetaTag('name', 'description', DEFAULT_META_DESCRIPTION);
-      setMetaTag('property', 'og:title', DEFAULT_META_TITLE);
-      setMetaTag('property', 'og:description', DEFAULT_META_DESCRIPTION);
-      setMetaTag('property', 'og:url', homeUrl);
-      setMetaTag('property', 'og:image', defaultImage);
-      setMetaTag('name', 'twitter:title', DEFAULT_META_TITLE);
-      setMetaTag('name', 'twitter:description', DEFAULT_META_DESCRIPTION);
-      setMetaTag('name', 'twitter:image', defaultImage);
-      setCanonicalUrl(homeUrl);
-    };
-  }, [detail, slug]);
 
   return (
     <div className="min-h-screen animate-fade-in">
