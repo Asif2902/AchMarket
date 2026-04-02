@@ -1,4 +1,5 @@
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
+import { useEffect } from 'react';
 import { WalletProvider, useWallet } from './context/WalletContext';
 import Header from './components/Header';
 import Footer from './components/Footer';
@@ -70,16 +71,30 @@ export default function App() {
   return (
     <BrowserRouter>
       <WalletProvider>
-        <div className="min-h-screen flex flex-col">
-          <Header />
-          <main className="flex-1 pb-20 md:pb-0">
-            <AppRoutes />
-          </main>
-          <Footer />
-          <MobileBottomNav />
-          <ToastContainer />
-        </div>
+        <AppShell />
       </WalletProvider>
     </BrowserRouter>
+  );
+}
+
+function AppShell() {
+  const location = useLocation();
+
+  useEffect(() => {
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }, [location.pathname, location.search]);
+
+  return (
+    <div className="min-h-screen flex flex-col">
+      <Header />
+      <main className="flex-1 pb-20 md:pb-0">
+        <div key={`${location.pathname}${location.search}`} className="route-fade-in">
+          <AppRoutes />
+        </div>
+      </main>
+      <Footer />
+      <MobileBottomNav />
+      <ToastContainer />
+    </div>
   );
 }
