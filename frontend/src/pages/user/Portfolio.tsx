@@ -253,7 +253,7 @@ export default function Portfolio() {
 
   const publicProfilePath = address ? `/profile/${address}` : '/';
   const profileSlug = profileSummary?.profileSlug ?? '';
-  const publicProfileShareHref = profileSlug ? `/profile?${profileSlug}` : '';
+  const publicProfileShareHref = profileSlug ? `/profile/${profileSlug}` : '';
   const showProfileCard = Boolean(profileSummary && ((profileSummary.displayName ?? '').trim() || (profileSummary.avatarUrl ?? '').trim()));
 
   if (!isConnected) {

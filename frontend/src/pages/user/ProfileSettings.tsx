@@ -70,8 +70,8 @@ export default function ProfileSettings() {
   const publicProfileLink = useMemo(() => {
     const slug = normalizeProfileSlug(form.displayName) || profileSlug;
     if (!slug) return '';
-    if (typeof window === 'undefined') return `/profile?${slug}`;
-    return `${window.location.origin}/profile?${slug}`;
+    if (typeof window === 'undefined') return `/profile/${slug}`;
+    return `${window.location.origin}/profile/${slug}`;
   }, [form.displayName, profileSlug]);
 
   const displayName = form.displayName.trim() || (address ? `${address.slice(0, 6)}...${address.slice(-4)}` : 'Trader');

@@ -26,7 +26,7 @@ const sharedRoutes = (
     <Route path="/market/:slug" element={<MarketDetail />} />
     <Route path="/portfolio" element={<Portfolio />} />
     <Route path="/profile/settings" element={<ProfileSettings />} />
-    <Route path="/profile/:address" element={<PublicProfile />} />
+    <Route path="/profile/:slug" element={<PublicProfile />} />
   </>
 );
 

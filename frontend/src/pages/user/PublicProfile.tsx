@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Link, useLocation, useParams } from 'react-router-dom';
+import { useCallback, useEffect, useState } from 'react';
+import { Link, useParams } from 'react-router-dom';
 import { ethers } from 'ethers';
 import { useWallet } from '../../context/WalletContext';
 import { FACTORY_ADDRESS, LENS_ADDRESS, STAGE, STAGE_LABELS, STAGE_COLORS } from '../../config/network';
@@ -9,7 +9,7 @@ import EmptyState from '../../components/EmptyState';
 import ImageWithFallback from '../../components/ImageWithFallback';
 import UsdcIcon from '../../components/UsdcIcon';
 import { formatCompactUSDC, makeMarketSlug } from '../../utils/format';
-import { fetchProfileByAddress, fetchProfileBySlug } from '../../services/profile';
+import { fetchProfileBySlug } from '../../services/profile';
 import type { PublicProfile as PublicProfileType, PortfolioStats } from '../../types/profile';
 
 interface PositionItem {
@@ -41,8 +41,7 @@ function isAddress(value: string | undefined): value is string {
 }
 
 export default function PublicProfile() {
-  const { address: routeAddress } = useParams<{ address: string }>();
-  const location = useLocation();
+  const { slug: routeSlug } = useParams<{ slug: string }>();
   const { readProvider } = useWallet();
 
   const [loading, setLoading] = useState(true);
@@ -50,45 +49,26 @@ export default function PublicProfile() {
   const [data, setData] = useState<PublicProfileData>({ profile: null, stats: EMPTY_STATS, positions: [] });
   const [resolvedAddress, setResolvedAddress] = useState<string | null>(null);
 
-  const targetAddress = useMemo(() => {
-    if (!isAddress(routeAddress)) return null;
-    try {
-      return ethers.getAddress(routeAddress);
-    } catch {
-      return null;
-    }
-  }, [routeAddress]);
-
-  const slugFromQuery = useMemo(() => {
-    const query = location.search.startsWith('?') ? location.search.slice(1) : '';
-    return decodeURIComponent(query || '').trim();
-  }, [location.search]);
-
   const fetchData = useCallback(async () => {
+    if (!routeSlug) {
+      setLoading(false);
+      setError('No profile specified');
+      return;
+    }
+
     try {
       setLoading(true);
       setError(null);
 
-      let profileResponse;
-      let resolvedAddress = targetAddress;
+      const profileResponse = await fetchProfileBySlug(routeSlug);
 
-      if (slugFromQuery) {
-        profileResponse = await fetchProfileBySlug(slugFromQuery);
-        resolvedAddress = profileResponse.profile?.address ?? null;
-      } else {
-        if (!targetAddress) {
-          setLoading(false);
-          setError('Invalid profile address');
-          return;
-        }
-        profileResponse = await fetchProfileByAddress(targetAddress);
-      }
-
-      if (!resolvedAddress) {
+      if (!profileResponse.profile) {
         setError('Profile not found');
         setLoading(false);
         return;
       }
+
+      const resolvedAddress = profileResponse.profile.address;
 
       const factory = new ethers.Contract(FACTORY_ADDRESS, FACTORY_ABI, readProvider);
       const lens = new ethers.Contract(LENS_ADDRESS, LENS_ABI, readProvider);
@@ -141,7 +121,7 @@ export default function PublicProfile() {
     } finally {
       setLoading(false);
     }
-  }, [readProvider, slugFromQuery, targetAddress]);
+  }, [readProvider, routeSlug]);
 
   useEffect(() => {
     fetchData();
@@ -149,19 +129,19 @@ export default function PublicProfile() {
 
   if (loading) return <PageLoader />;
 
-  if (error || (!targetAddress && !slugFromQuery)) {
+  if (error || !routeSlug) {
     return (
       <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
         <EmptyState
           title="Unable to load profile"
-          description={error ?? 'Invalid profile URL'}
+          description={error ?? 'No profile specified'}
           action={<Link to="/" className="btn-secondary text-sm">Back to Markets</Link>}
         />
       </div>
     );
   }
 
-  const safeAddress = resolvedAddress ?? targetAddress ?? '';
+  const safeAddress = resolvedAddress ?? '';
   const displayName = data.profile?.displayName?.trim() || `${safeAddress.slice(0, 6)}...${safeAddress.slice(-4)}`;
   const avatarUrl = data.profile?.avatarUrl?.trim() || '';
 
@@ -172,8 +152,8 @@ export default function PublicProfile() {
   ].filter((item) => item.value.trim().length > 0);
 
   const activeTrades = data.positions.filter((p) => p.stage === STAGE.Active).length;
-  const profileSlug = data.profile?.profileSlug ?? '';
-  const sharedPath = profileSlug ? `/profile?${profileSlug}` : '';
+  const profileSlug = data.profile?.profileSlug ?? routeSlug ?? '';
+  const sharedPath = profileSlug ? `/profile/${profileSlug}` : '';
 
   return (
     <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8 space-y-5 animate-fade-in">
