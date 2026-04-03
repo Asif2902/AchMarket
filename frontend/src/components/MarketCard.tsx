@@ -33,12 +33,13 @@ export default function MarketCard({ data }: Props) {
   const isTradingAllowed = isActive || isSuspended;
 
   const hasOutcomes = data.impliedProbabilitiesWad.length > 0;
-  const buyLabel = data.outcomeLabels[0] ?? 'Buy';
+  const rawLabel = hasOutcomes ? (data.outcomeLabels[0] ?? '') : '';
+  const displayLabel = rawLabel.trim() || 'Buy';
   const buyPct = hasOutcomes ? probToPercent(data.impliedProbabilitiesWad[0]) : 0;
-  const sparklinePoints = buildBuySparklinePoints(buyPct, data.marketId);
-  const sparklinePath = pointsToPath(sparklinePoints);
-  const sparklineAreaPath = `${sparklinePath} L 100 100 L 0 100 Z`;
-  const lastPoint = sparklinePoints[sparklinePoints.length - 1];
+  const sparklinePoints = hasOutcomes ? buildBuySparklinePoints(buyPct, data.marketId) : [];
+  const sparklinePath = sparklinePoints.length > 0 ? pointsToPath(sparklinePoints) : '';
+  const sparklineAreaPath = sparklinePath ? `${sparklinePath} L 100 100 L 0 100 Z` : '';
+  const lastPoint = sparklinePoints.length > 0 ? sparklinePoints[sparklinePoints.length - 1] : null;
   const stability = getStabilityLevel(data.bWad);
 
   return (
@@ -82,32 +83,34 @@ export default function MarketCard({ data }: Props) {
         <div className="p-3 flex flex-col gap-2.5 min-h-[96px]">
           <div className="rounded-lg border border-[var(--bg-border)] bg-dark-950/40 p-2">
             <div className="flex items-center justify-between mb-1.5">
-              <span className="text-[11px] text-white/65 font-medium truncate max-w-[70%]">{buyLabel} Buy</span>
+              <span className="text-[11px] text-white/65 font-medium truncate max-w-[70%]">{displayLabel}</span>
               <span className="text-[11px] font-semibold text-emerald-300 tabular-nums">{buyPct.toFixed(1)}%</span>
             </div>
             <div className="relative h-14 rounded-md bg-black/30 overflow-hidden border border-white/[0.04]" role="img" aria-label="Illustrative buy probability chart — not historical price data">
-              <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="absolute inset-0 w-full h-full">
-                <defs>
-                  <linearGradient id={`buy-fill-${data.marketId}`} x1="0" x2="0" y1="0" y2="1">
-                    <stop offset="0%" stopColor="rgba(52, 211, 153, 0.30)" />
-                    <stop offset="100%" stopColor="rgba(52, 211, 153, 0.02)" />
-                  </linearGradient>
-                  <linearGradient id={`buy-line-${data.marketId}`} x1="0" x2="1" y1="0" y2="0">
-                    <stop offset="0%" stopColor="rgba(52, 211, 153, 0.35)" />
-                    <stop offset="100%" stopColor="rgba(110, 231, 183, 0.95)" />
-                  </linearGradient>
-                </defs>
-                <path d={sparklineAreaPath} fill={`url(#buy-fill-${data.marketId})`} />
-                <path
-                  d={sparklinePath}
-                  fill="none"
-                  stroke={`url(#buy-line-${data.marketId})`}
-                  strokeWidth={2.4}
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
-                <circle cx={lastPoint.x} cy={lastPoint.y} r={2.4} fill="#6ee7b7" />
-              </svg>
+              {sparklinePath && lastPoint && (
+                <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="absolute inset-0 w-full h-full">
+                  <defs>
+                    <linearGradient id={`buy-fill-${data.marketId}`} x1="0" x2="0" y1="0" y2="1">
+                      <stop offset="0%" stopColor="rgba(52, 211, 153, 0.30)" />
+                      <stop offset="100%" stopColor="rgba(52, 211, 153, 0.02)" />
+                    </linearGradient>
+                    <linearGradient id={`buy-line-${data.marketId}`} x1="0" x2="1" y1="0" y2="0">
+                      <stop offset="0%" stopColor="rgba(52, 211, 153, 0.35)" />
+                      <stop offset="100%" stopColor="rgba(110, 231, 183, 0.95)" />
+                    </linearGradient>
+                  </defs>
+                  <path d={sparklineAreaPath} fill={`url(#buy-fill-${data.marketId})`} />
+                  <path
+                    d={sparklinePath}
+                    fill="none"
+                    stroke={`url(#buy-line-${data.marketId})`}
+                    strokeWidth={2.4}
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                  <circle cx={lastPoint.x} cy={lastPoint.y} r={2.4} fill="#6ee7b7" />
+                </svg>
+              )}
               <div className="absolute inset-0 opacity-15" style={{
                 backgroundImage: 'linear-gradient(to right, rgba(255,255,255,0.08) 1px, transparent 1px)',
                 backgroundSize: '16px 100%',
@@ -153,7 +156,7 @@ export default function MarketCard({ data }: Props) {
 
 function buildBuySparklinePoints(targetPct: number, seed: number): Array<{ x: number; y: number }> {
   const pointsCount = 16;
-  const clampedTarget = Math.max(2, Math.min(98, targetPct));
+  const clampedTarget = Math.max(0, Math.min(100, targetPct));
   const normalizedSeed = ((seed % 37) + 37) / 37;
 
   const points: Array<{ x: number; y: number }> = [];
@@ -169,7 +172,7 @@ function buildBuySparklinePoints(targetPct: number, seed: number): Array<{ x: nu
     if (i === 0) value = clampedTarget - (3 - normalizedSeed * 6);
     if (i === pointsCount - 1) value = clampedTarget;
 
-    const normalizedValue = Math.max(2, Math.min(98, value));
+    const normalizedValue = Math.max(0, Math.min(100, value));
     points.push({ x: t * 100, y: 100 - normalizedValue });
   }
 

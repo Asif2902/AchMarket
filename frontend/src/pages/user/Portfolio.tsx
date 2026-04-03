@@ -21,6 +21,7 @@ interface Position {
   outcomeLabels: string[];
   sharesPerOutcome: bigint[];
   netDepositedWei: bigint;
+  payoutWei?: bigint;
   canRedeem: boolean;
   canRefund: boolean;
   hasRedeemed: boolean;
@@ -61,6 +62,8 @@ export default function Portfolio() {
       setProfileSummary(null);
       return;
     }
+
+    setProfileSummary(null);
 
     let cancelled = false;
     const run = async () => {
@@ -142,11 +145,16 @@ export default function Portfolio() {
       await tx.wait();
       setTxMsg({ type: 'success', text: `${action === 'redeem' ? 'Winnings' : 'Refund'} claimed!` });
       clearClaim(marketAddr);
-      setPositions(await refreshPortfolio());
     } catch (err) {
       setTxMsg({ type: 'error', text: parseContractError(err) });
     } finally {
       setTxPending(null);
+    }
+
+    try {
+      setPositions(await refreshPortfolio());
+    } catch (err) {
+      console.error('Failed to refresh portfolio after claim:', err);
     }
   };
 
@@ -161,7 +169,7 @@ export default function Portfolio() {
   const categoryCounts = useMemo(() => {
     const map = new Map<string, number>();
     for (const pos of positions) {
-      const key = pos.category.trim() || 'Other';
+      const key = (pos.category || '').trim() || 'Other';
       map.set(key, (map.get(key) ?? 0) + 1);
     }
     return ['All', ...Array.from(map.keys()).sort((a, b) => a.localeCompare(b))];
@@ -184,7 +192,8 @@ export default function Portfolio() {
       })
       .filter((p) => {
         if (categoryFilter === 'All') return true;
-        return p.category.toLowerCase() === categoryFilter.toLowerCase();
+        const normalized = (p.category || '').trim() || 'Other';
+        return normalized.toLowerCase() === categoryFilter.toLowerCase();
       })
       .sort((a, b) => {
         if (sortBy === 'highest_deposit') {
@@ -220,7 +229,11 @@ export default function Portfolio() {
 
   const claimableValue = positions
     .filter((p) => (p.canRedeem && !p.hasRedeemed) || (p.canRefund && !p.hasRefunded && p.netDepositedWei > 0n))
-    .reduce((acc, p) => acc + p.netDepositedWei, 0n);
+    .reduce((acc, p) => {
+      if (p.canRedeem && !p.hasRedeemed) return acc + (p.payoutWei ?? p.netDepositedWei);
+      if (p.canRefund && !p.hasRefunded && p.netDepositedWei > 0n) return acc + p.netDepositedWei;
+      return acc;
+    }, 0n);
 
   const resolvedCount = positions.filter((p) => p.stage === STAGE.Resolved).length;
   const cancelledCount = positions.filter((p) => p.stage === STAGE.Cancelled || p.stage === STAGE.Expired).length;
@@ -297,10 +310,13 @@ export default function Portfolio() {
       {positions.length > 0 && (
         <div className="card p-3 sm:p-4">
           <div className="flex flex-col lg:flex-row gap-3 lg:items-center lg:justify-between">
-            <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-hide">
+            <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-hide" role="tablist" aria-label="Portfolio filter tabs">
               {(['all', 'active', 'winnings', 'refunds', 'claimed'] as TabType[]).map((tab) => (
                 <button
                   key={tab}
+                  role="tab"
+                  aria-selected={activeTab === tab}
+                  aria-pressed={activeTab === tab}
                   onClick={() => setActiveTab(tab)}
                   className={`chip shrink-0 ${activeTab === tab ? 'chip-active' : ''}`}
                 >
@@ -316,6 +332,7 @@ export default function Portfolio() {
               <select
                 value={categoryFilter}
                 onChange={(e) => setCategoryFilter(e.target.value)}
+                aria-label="Filter by category"
                 className="select-field text-xs sm:text-sm min-h-[40px] sm:min-h-[42px] sm:w-44"
               >
                 {categoryCounts.map((category) => (
@@ -325,6 +342,7 @@ export default function Portfolio() {
               <select
                 value={sortBy}
                 onChange={(e) => setSortBy(e.target.value as SortBy)}
+                aria-label="Sort positions"
                 className="select-field text-xs sm:text-sm min-h-[40px] sm:min-h-[42px] sm:w-56"
               >
                 <option value="claimable_first">Claimable First</option>

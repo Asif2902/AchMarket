@@ -51,7 +51,7 @@ export default function Analytics() {
       const date = new Date(now - (6 - i) * 24 * 60 * 60 * 1000);
       return {
         date: date.toISOString().split('T')[0],
-        dayLabel: date.toLocaleDateString('en-US', { weekday: 'short' }),
+        dayLabel: date.toLocaleDateString('en-US', { weekday: 'short', timeZone: 'UTC' }),
         volume: 0,
         trades: 0,
       };
@@ -115,7 +115,7 @@ export default function Analytics() {
       for (let i = 6; i >= 0; i -= 1) {
         const date = new Date(Date.now() - i * 24 * 60 * 60 * 1000);
         const dateStr = date.toISOString().split('T')[0];
-        const dayLabel = date.toLocaleDateString('en-US', { weekday: 'short' });
+        const dayLabel = date.toLocaleDateString('en-US', { weekday: 'short', timeZone: 'UTC' });
         dailyMap.set(dateStr, { volume: 0n, trades: 0, dayLabel });
       }
 
@@ -411,7 +411,7 @@ export default function Analytics() {
                       <div className="h-2 rounded-full bg-black/25 overflow-hidden">
                         <div
                           className="h-full rounded-full"
-                          style={{ width: `${Math.max(item.pct, 1)}%`, backgroundColor: item.color }}
+                          style={{ width: item.value > 0 ? `${Math.max(item.pct, 1)}%` : '0%', backgroundColor: item.color }}
                         />
                       </div>
                     </div>

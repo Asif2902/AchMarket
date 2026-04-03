@@ -68,11 +68,17 @@ export default function ProfileSettings() {
   }, [address]);
 
   const publicProfileLink = useMemo(() => {
-    const slug = normalizeProfileSlug(form.displayName) || profileSlug;
-    if (!slug) return '';
-    if (typeof window === 'undefined') return `/profile/${slug}`;
-    return `${window.location.origin}/profile/${slug}`;
-  }, [form.displayName, profileSlug]);
+    if (!profileSlug) return '';
+    if (typeof window === 'undefined') return `/profile/${profileSlug}`;
+    return `${window.location.origin}/profile/${profileSlug}`;
+  }, [profileSlug]);
+
+  const previewSlug = normalizeProfileSlug(form.displayName);
+  const previewProfileLink = useMemo(() => {
+    if (!previewSlug) return '';
+    if (typeof window === 'undefined') return `/profile/${previewSlug}`;
+    return `${window.location.origin}/profile/${previewSlug}`;
+  }, [previewSlug]);
 
   const displayName = form.displayName.trim() || (address ? `${address.slice(0, 6)}...${address.slice(-4)}` : 'Trader');
   const avatarUrl = form.avatarUrl.trim();
@@ -217,8 +223,14 @@ export default function ProfileSettings() {
               </div>
               <div>
                 <label className="label">Public Profile URL</label>
-                <div className="input-field text-xs text-white/70 flex items-center truncate">{publicProfileLink}</div>
+                <div className="input-field text-xs text-white/70 flex items-center truncate">{publicProfileLink || 'Save to generate'}</div>
               </div>
+              {previewProfileLink && previewProfileLink !== publicProfileLink && (
+                <div>
+                  <label className="label">Preview URL</label>
+                  <div className="input-field text-xs text-white/45 flex items-center truncate">{previewProfileLink}</div>
+                </div>
+              )}
             </div>
 
             <div className="flex flex-wrap items-center gap-2 pt-1">

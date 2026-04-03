@@ -18,7 +18,8 @@ function normalizeProfileSlug(value: string): string {
     .slice(0, 40);
 }
 
-function sanitizeUrl(value: string): string {
+function sanitizeUrl(value: unknown): string {
+  if (typeof value !== 'string') return '';
   if (!value) return '';
   const clipped = value.trim().slice(0, 300);
   if (clipped.startsWith('ipfs://')) return clipped;
@@ -30,17 +31,18 @@ function sanitizeUrl(value: string): string {
   }
 }
 
-function sanitizeProfilePayload(input: Record<string, string | undefined>) {
+function sanitizeProfilePayload(input: Record<string, unknown>) {
+  const displayName = typeof input.displayName === 'string' ? input.displayName.trim().slice(0, 40) : '';
   return {
-    displayName: (input.displayName ?? '').trim().slice(0, 40),
-    avatarUrl: sanitizeUrl(input.avatarUrl ?? ''),
-    twitterUrl: sanitizeUrl(input.twitterUrl ?? ''),
-    discordUrl: sanitizeUrl(input.discordUrl ?? ''),
-    telegramUrl: sanitizeUrl(input.telegramUrl ?? ''),
+    displayName,
+    avatarUrl: sanitizeUrl(input.avatarUrl),
+    twitterUrl: sanitizeUrl(input.twitterUrl),
+    discordUrl: sanitizeUrl(input.discordUrl),
+    telegramUrl: sanitizeUrl(input.telegramUrl),
   };
 }
 
-function buildProfileSigningMessage(address: string, payload: Record<string, string>, timestamp: number): string {
+function buildProfileSigningMessage(address: string, payload: Record<string, unknown>, timestamp: number): string {
   return [
     'AchMarket Profile Update',
     `Address: ${address}`,
@@ -152,8 +154,10 @@ async function getProfile(address: string) {
   };
 }
 
-async function upsertProfile(address: string, payload: Record<string, string>, timestamp: number, signature: string) {
-  const diff = Math.abs(Date.now() - timestamp);
+async function upsertProfile(address: string, payload: Record<string, unknown>, timestamp: number, signature: string) {
+  const ts = Number(timestamp);
+  if (!Number.isFinite(ts)) throw new Error('Invalid timestamp.');
+  const diff = Math.abs(Date.now() - ts);
   if (diff > SIG_VALIDITY_MS) throw new Error('Signature expired. Please try again.');
 
   const normalized = normalizeAddress(address);
@@ -259,9 +263,19 @@ export default async function handler(req: any, res: any) {
   } catch (err: any) {
     const msg = err?.message || 'Unexpected error';
     let code = 500;
-    if (msg.includes('MONGO_URI') || msg.includes('required') || msg.includes('Invalid')) code = 400;
-    if (msg.includes('auth')) code = 401;
-    if (msg.includes('timeout') || msg.includes('ENOTFOUND')) code = 503;
+    if (err instanceof MongoServerError && err.code === 11000) {
+      code = 409;
+    } else if (msg.includes('expired') || msg.includes('Invalid signature')) {
+      code = 401;
+    } else if (msg.includes('already taken') || msg.includes('taken')) {
+      code = 409;
+    } else if (msg.includes('MONGO_URI') || msg.includes('required') || msg.includes('Invalid') || msg.includes('Display name')) {
+      code = 400;
+    } else if (msg.includes('auth')) {
+      code = 401;
+    } else if (msg.includes('timeout') || msg.includes('ENOTFOUND')) {
+      code = 503;
+    }
     return res.status(code).json({ error: msg });
   }
 }

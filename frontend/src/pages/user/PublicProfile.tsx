@@ -44,7 +44,7 @@ export default function PublicProfile() {
   const [data, setData] = useState<PublicProfileData>({ profile: null, stats: EMPTY_STATS, positions: [] });
   const [resolvedAddress, setResolvedAddress] = useState<string | null>(null);
 
-  const fetchData = useCallback(async () => {
+  const fetchData = useCallback(async (signal: AbortSignal) => {
     if (!routeSlug) {
       setLoading(false);
       setError('No profile specified');
@@ -57,6 +57,8 @@ export default function PublicProfile() {
 
       const profileResponse = await fetchProfileBySlug(routeSlug);
 
+      if (signal.aborted) return;
+
       if (!profileResponse.profile) {
         setError('Profile not found');
         setLoading(false);
@@ -68,19 +70,45 @@ export default function PublicProfile() {
       const factory = new ethers.Contract(FACTORY_ADDRESS, FACTORY_ABI, readProvider);
       const lens = new ethers.Contract(LENS_ADDRESS, LENS_ABI, readProvider);
 
-      const [portfolio, totalMarkets] = await Promise.all([
-        lens.getUserPortfolio(resolvedAddress),
-        factory.totalMarkets(),
-      ]);
+      const portfolio = await lens.getUserPortfolio(resolvedAddress);
+      const portfolioArr = portfolio as Array<Record<string, unknown>>;
 
-      const totalMarketsNum = Number(totalMarkets);
-      const summaries = totalMarketsNum > 0 ? await lens.getMarketSummaries(0, totalMarketsNum) : [];
-      const addrToId = new Map<string, number>();
-      for (const summary of summaries as Array<Record<string, unknown>>) {
-        addrToId.set(String(summary.market).toLowerCase(), Number(summary.marketId));
+      if (signal.aborted) return;
+
+      if (portfolioArr.length === 0) {
+        setData({
+          profile: profileResponse.profile,
+          stats: {
+            ...profileResponse.stats,
+            totalPositions: 0,
+            totalMarkets: 0,
+            activePositions: 0,
+            resolvedPositions: 0,
+            totalDepositedWei: '0',
+            activeDepositsWei: '0',
+          },
+          positions: [],
+        });
+        setResolvedAddress(resolvedAddress);
+        setLoading(false);
+        return;
       }
 
-      const positions: PositionItem[] = (portfolio as Array<Record<string, unknown>>)
+      const marketAddrs = [...new Set(portfolioArr.map((entry) => String(entry.market).toLowerCase()))];
+      const addrToId = new Map<string, number>();
+
+      const totalMarkets = Number(await factory.totalMarkets());
+      if (totalMarkets > 0) {
+        const summaries = await lens.getMarketSummaries(0, totalMarkets);
+        for (const summary of summaries as Array<Record<string, unknown>>) {
+          const addr = String(summary.market).toLowerCase();
+          if (marketAddrs.includes(addr)) {
+            addrToId.set(addr, Number(summary.marketId));
+          }
+        }
+      }
+
+      const positions: PositionItem[] = portfolioArr
         .map((entry) => ({
           market: String(entry.market),
           title: String(entry.title),
@@ -111,15 +139,22 @@ export default function PublicProfile() {
       });
       setResolvedAddress(resolvedAddress);
     } catch (err) {
+      if (signal.aborted) return;
       const message = err instanceof Error ? err.message : 'Failed to load profile';
       setError(message);
     } finally {
-      setLoading(false);
+      if (!signal.aborted) {
+        setLoading(false);
+      }
     }
   }, [readProvider, routeSlug]);
 
   useEffect(() => {
-    fetchData();
+    const controller = new AbortController();
+    fetchData(controller.signal);
+    return () => {
+      controller.abort();
+    };
   }, [fetchData]);
 
   if (loading) return <PageLoader />;
