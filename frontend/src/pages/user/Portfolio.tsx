@@ -21,7 +21,6 @@ interface Position {
   outcomeLabels: string[];
   sharesPerOutcome: bigint[];
   netDepositedWei: bigint;
-  payoutWei?: bigint;
   canRedeem: boolean;
   canRefund: boolean;
   hasRedeemed: boolean;
@@ -112,7 +111,6 @@ export default function Portfolio() {
       outcomeLabels: [...(p.outcomeLabels as string[])],
       sharesPerOutcome: [...(p.sharesPerOutcome as bigint[])],
       netDepositedWei: p.netDepositedWei as bigint,
-      payoutWei: p.payoutWei as bigint | undefined,
       canRedeem: p.canRedeem as boolean,
       canRefund: p.canRefund as boolean,
       hasRedeemed: p.hasRedeemed as boolean,
@@ -143,6 +141,7 @@ export default function Portfolio() {
 
   const handleAction = async (marketAddr: string, action: 'redeem' | 'refund') => {
     if (!signer) return;
+    const submittingAddress = address;
     setTxPending(marketAddr);
     setTxMsg(null);
     try {
@@ -157,6 +156,7 @@ export default function Portfolio() {
       setTxPending(null);
     }
 
+    if (address !== submittingAddress) return;
     try {
       setPositions(await refreshPortfolio());
     } catch (err) {
@@ -235,11 +235,7 @@ export default function Portfolio() {
 
   const claimableValue = positions
     .filter((p) => (p.canRedeem && !p.hasRedeemed) || (p.canRefund && !p.hasRefunded && p.netDepositedWei > 0n))
-    .reduce((acc, p) => {
-      if (p.canRedeem && !p.hasRedeemed) return acc + (p.payoutWei ?? p.netDepositedWei);
-      if (p.canRefund && !p.hasRefunded && p.netDepositedWei > 0n) return acc + p.netDepositedWei;
-      return acc;
-    }, 0n);
+    .reduce((acc, p) => acc + p.netDepositedWei, 0n);
 
   const resolvedCount = positions.filter((p) => p.stage === STAGE.Resolved).length;
   const cancelledCount = positions.filter((p) => p.stage === STAGE.Cancelled || p.stage === STAGE.Expired).length;

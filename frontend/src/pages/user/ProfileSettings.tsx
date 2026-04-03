@@ -44,6 +44,8 @@ export default function ProfileSettings() {
       try {
         setLoading(true);
         setMsg(null);
+        setForm({ ...EMPTY_PROFILE_PAYLOAD });
+        setProfileSlug('');
         const response = await fetchProfileByAddress(address);
         if (!cancelled) {
           setForm(toProfilePayload(response.profile));

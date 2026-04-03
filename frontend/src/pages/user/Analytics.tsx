@@ -29,6 +29,7 @@ interface GlobalStats {
   resolvedMarkets: number;
   suspendedMarkets: number;
   cancelledOrExpiredMarkets: number;
+  unavailableMarkets: number;
 }
 
 interface DailyVolume {
@@ -75,6 +76,7 @@ export default function Analytics() {
           resolvedMarkets: 0,
           suspendedMarkets: 0,
           cancelledOrExpiredMarkets: 0,
+          unavailableMarkets: 0,
         });
         setDailyVolume(generateEmptyDailyVolumes());
         setLoading(false);
@@ -94,11 +96,16 @@ export default function Analytics() {
       const marketPromises = marketAddrs.map(async (addr) => {
         try {
           const market = new ethers.Contract(addr, marketAbi, readProvider);
-          const [volume, stage, participants] = await Promise.all([
+          const [volume, stage] = await Promise.all([
             market.totalVolumeWei(),
             market.stage(),
-            market.participantCount(),
           ]);
+          let participants: bigint | null = null;
+          try {
+            participants = await market.participantCount();
+          } catch {
+            participants = null;
+          }
           return { volume, stage, participants, addr };
         } catch {
           return null;
@@ -129,7 +136,7 @@ export default function Analytics() {
           continue;
         }
         totalVolume += r.volume;
-        totalParticipants += Number(r.participants);
+        if (r.participants !== null) totalParticipants += Number(r.participants);
 
         const stageNum = Number(r.stage);
         if (stageNum === STAGE.Active) activeMarkets += 1;
@@ -166,16 +173,15 @@ export default function Analytics() {
         }
       }
 
-      const effectiveTotalMarkets = totalMarkets - unavailableMarkets;
-
       setStats({
-        totalMarkets: effectiveTotalMarkets,
+        totalMarkets,
         totalVolumeWei: totalVolume,
         totalParticipants,
         activeMarkets,
         resolvedMarkets,
         suspendedMarkets,
         cancelledOrExpiredMarkets: cancelledOrExpired,
+        unavailableMarkets,
       });
 
       const dailyData: DailyVolume[] = Array.from(dailyMap.entries()).map(([date, data]) => ({
@@ -233,34 +239,42 @@ export default function Analytics() {
 
   const statusData = useMemo(() => {
     if (!stats || stats.totalMarkets === 0) return [];
+    const denominator = stats.totalMarkets;
     return [
       {
         label: 'Active',
         value: stats.activeMarkets,
-        pct: (stats.activeMarkets / stats.totalMarkets) * 100,
+        pct: (stats.activeMarkets / denominator) * 100,
         color: '#34d399',
         bg: 'bg-emerald-500/12 border-emerald-500/30 text-emerald-300',
       },
       {
         label: 'Resolved',
         value: stats.resolvedMarkets,
-        pct: (stats.resolvedMarkets / stats.totalMarkets) * 100,
+        pct: (stats.resolvedMarkets / denominator) * 100,
         color: '#60a5fa',
         bg: 'bg-blue-500/12 border-blue-500/30 text-blue-300',
       },
       {
         label: 'Suspended',
         value: stats.suspendedMarkets,
-        pct: (stats.suspendedMarkets / stats.totalMarkets) * 100,
+        pct: (stats.suspendedMarkets / denominator) * 100,
         color: '#fbbf24',
         bg: 'bg-amber-500/12 border-amber-500/30 text-amber-300',
       },
       {
         label: 'Cancelled/Expired',
         value: stats.cancelledOrExpiredMarkets,
-        pct: (stats.cancelledOrExpiredMarkets / stats.totalMarkets) * 100,
+        pct: (stats.cancelledOrExpiredMarkets / denominator) * 100,
         color: '#f87171',
         bg: 'bg-red-500/12 border-red-500/30 text-red-300',
+      },
+      {
+        label: 'Unavailable',
+        value: stats.unavailableMarkets,
+        pct: (stats.unavailableMarkets / denominator) * 100,
+        color: '#94a3b8',
+        bg: 'bg-slate-500/12 border-slate-500/30 text-slate-300',
       },
     ];
   }, [stats]);
