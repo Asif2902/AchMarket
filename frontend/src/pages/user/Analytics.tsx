@@ -100,28 +100,33 @@ export default function Analytics() {
         }
       }
 
-      const marketPromises = marketAddrs.map(async (addr) => {
-        try {
-          const market = new ethers.Contract(addr, MARKET_ABI, readProvider);
-          const [volume, stage] = await Promise.all([
-            market.totalVolumeWei(),
-            market.stage(),
-          ]);
-          let participants: bigint | null = null;
-          let participantsDropped = false;
-          try {
-            participants = await market.participantCount();
-          } catch {
-            participants = null;
-            participantsDropped = true;
-          }
-          return { volume, stage, participants, participantsDropped, addr };
-        } catch {
-          return null;
-        }
-      });
+      const CONCURRENCY = 10;
+      const results: Array<{ volume: bigint; stage: bigint; participants: bigint | null; participantsDropped: boolean; addr: string } | null> = [];
 
-      const results = await Promise.all(marketPromises);
+      for (let i = 0; i < marketAddrs.length; i += CONCURRENCY) {
+        const chunk = marketAddrs.slice(i, i + CONCURRENCY);
+        const chunkResults = await Promise.all(chunk.map(async (addr) => {
+          try {
+            const market = new ethers.Contract(addr, MARKET_ABI, readProvider);
+            const [volume, stage] = await Promise.all([
+              market.totalVolumeWei(),
+              market.stage(),
+            ]);
+            let participants: bigint | null = null;
+            let participantsDropped = false;
+            try {
+              participants = await market.participantCount();
+            } catch {
+              participants = null;
+              participantsDropped = true;
+            }
+            return { volume, stage, participants, participantsDropped, addr };
+          } catch {
+            return null;
+          }
+        }));
+        results.push(...chunkResults);
+      }
 
       let totalVolume = 0n;
       let totalParticipants = 0;
@@ -132,8 +137,9 @@ export default function Analytics() {
       let cancelledOrExpired = 0;
 
       const dailyMap = new Map<string, { volume: bigint; trades: number; dayLabel: string }>();
+      const now = Date.now();
       for (let i = 6; i >= 0; i -= 1) {
-        const date = new Date(Date.now() - i * 24 * 60 * 60 * 1000);
+        const date = new Date(now - i * 24 * 60 * 60 * 1000);
         const dateStr = date.toISOString().split('T')[0];
         const dayLabel = date.toLocaleDateString('en-US', { weekday: 'short', timeZone: 'UTC' });
         dailyMap.set(dateStr, { volume: 0n, trades: 0, dayLabel });

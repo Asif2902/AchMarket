@@ -42,6 +42,7 @@ export default function ProfileSettings() {
       setLoading(false);
       setForm({ ...EMPTY_PROFILE_PAYLOAD });
       setProfileSlug('');
+      setSaving(false);
       return;
     }
 
@@ -129,9 +130,7 @@ export default function ProfileSettings() {
         setMsg({ type: 'error', text: friendly });
       }
     } finally {
-      if (requestIdCaptured === currentRequestIdRef.current && addressRef.current === address && signerRef.current === signer) {
-        setSaving(false);
-      }
+      setSaving(false);
     }
   };
 

@@ -36,6 +36,7 @@ export default function Portfolio() {
   const { clearClaim } = usePendingClaims();
   const [positions, setPositions] = useState<Position[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
   const [txPending, setTxPending] = useState<string | null>(null);
   const [txMsg, setTxMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [activeTab, setActiveTab] = useState<TabType>('all');
@@ -136,20 +137,28 @@ export default function Portfolio() {
     if (!address) {
       setPositions([]);
       setTxPending(null);
+      setLoadError(false);
       return;
     }
 
     setPositions([]);
     setTxPending(null);
+    setLoadError(false);
     setLoading(true);
 
     let cancelled = false;
     const fetch = async () => {
       try {
         const positions = await refreshPortfolio(address);
-        if (!cancelled) setPositions(positions);
+        if (!cancelled) {
+          setPositions(positions);
+          setLoadError(false);
+        }
       } catch (err) {
-        if (!cancelled) console.error('Failed to fetch portfolio:', err);
+        if (!cancelled) {
+          console.error('Failed to fetch portfolio:', err);
+          setLoadError(true);
+        }
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -171,9 +180,12 @@ export default function Portfolio() {
       await tx.wait();
       if (latestAddressRef.current === submittingAddress) {
         setTxMsg({ type: 'success', text: `${action === 'redeem' ? 'Winnings' : 'Refund'} claimed!` });
-        clearClaim(marketAddr);
         try {
-          setPositions(await refreshPortfolio(submittingAddress));
+          const refreshed = await refreshPortfolio(submittingAddress);
+          if (latestAddressRef.current === submittingAddress) {
+            setPositions(refreshed);
+            clearClaim(marketAddr);
+          }
         } catch (err) {
           console.error('Failed to refresh portfolio after claim:', err);
         }
@@ -213,7 +225,8 @@ export default function Portfolio() {
   }, [categoryCounts, categoryFilter]);
 
   const filteredPositions = useMemo(() => {
-    return positions
+    const withIndex = positions.map((p, i) => ({ ...p, originalIndex: i }));
+    return withIndex
       .filter((p) => {
         if (activeTab === 'winnings') return p.canRedeem && !p.hasRedeemed;
         if (activeTab === 'refunds') return p.canRefund && !p.hasRefunded && p.netDepositedWei > 0n;
@@ -227,31 +240,32 @@ export default function Portfolio() {
         return normalized.toLowerCase() === categoryFilter.toLowerCase();
       })
       .sort((a, b) => {
+        const compareMarketId = (x: number | null, y: number | null): number => {
+          if (x !== null && y === null) return -1;
+          if (x === null && y !== null) return 1;
+          if (x !== null && y !== null) return y - x;
+          return a.originalIndex - b.originalIndex;
+        };
+
         if (sortBy === 'highest_deposit') {
-          const aId = a.marketId ?? -1;
-          const bId = b.marketId ?? -1;
-          if (a.netDepositedWei === b.netDepositedWei) return bId - aId;
+          if (a.netDepositedWei === b.netDepositedWei) return compareMarketId(b.marketId, a.marketId);
           return a.netDepositedWei > b.netDepositedWei ? -1 : 1;
         }
 
         if (sortBy === 'lowest_deposit') {
-          const aId = a.marketId ?? -1;
-          const bId = b.marketId ?? -1;
-          if (a.netDepositedWei === b.netDepositedWei) return bId - aId;
+          if (a.netDepositedWei === b.netDepositedWei) return compareMarketId(b.marketId, a.marketId);
           return a.netDepositedWei < b.netDepositedWei ? -1 : 1;
         }
 
-        if (sortBy === 'newest') return (b.marketId ?? -1) - (a.marketId ?? -1);
-        if (sortBy === 'oldest') return (a.marketId ?? -1) - (b.marketId ?? -1);
+        if (sortBy === 'newest') return compareMarketId(b.marketId, a.marketId);
+        if (sortBy === 'oldest') return compareMarketId(a.marketId, b.marketId);
         if (sortBy === 'title_az') return a.title.localeCompare(b.title);
         if (sortBy === 'title_za') return b.title.localeCompare(a.title);
 
         const aClaimable = (a.canRedeem && !a.hasRedeemed) || (a.canRefund && !a.hasRefunded && a.netDepositedWei > 0n);
         const bClaimable = (b.canRedeem && !b.hasRedeemed) || (b.canRefund && !b.hasRefunded && b.netDepositedWei > 0n);
         if (aClaimable !== bClaimable) return aClaimable ? -1 : 1;
-        const aId = a.marketId ?? -1;
-        const bId = b.marketId ?? -1;
-        if (a.netDepositedWei === b.netDepositedWei) return bId - aId;
+        if (a.netDepositedWei === b.netDepositedWei) return compareMarketId(b.marketId, a.marketId);
         return a.netDepositedWei > b.netDepositedWei ? -1 : 1;
       });
   }, [positions, activeTab, categoryFilter, sortBy]);
@@ -402,7 +416,13 @@ export default function Portfolio() {
       )}
 
       {/* Positions */}
-      {filteredPositions.length === 0 ? (
+      {loadError ? (
+        <EmptyState
+          title="Failed to load portfolio"
+          description="Could not fetch your portfolio data. Please try refreshing the page."
+          action={<button onClick={() => window.location.reload()} className="btn-secondary text-sm">Refresh</button>}
+        />
+      ) : filteredPositions.length === 0 ? (
         <EmptyState
           title={activeTab === 'all' ? "No positions yet" : `No ${activeTab} positions`}
           description={
