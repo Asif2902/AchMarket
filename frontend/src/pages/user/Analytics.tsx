@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { ethers } from 'ethers';
 import { useWallet } from '../../context/WalletContext';
-import { FACTORY_ADDRESS } from '../../config/network';
+import { FACTORY_ADDRESS, STAGE } from '../../config/network';
 import { FACTORY_ABI } from '../../config/abis';
 import EmptyState from '../../components/EmptyState';
 import UsdcIcon from '../../components/UsdcIcon';
@@ -88,16 +88,18 @@ export default function Analytics() {
       const marketAbi = [
         'function totalVolumeWei() view returns (uint256)',
         'function stage() view returns (uint8)',
+        'function participantCount() view returns (uint256)',
       ];
 
       const marketPromises = marketAddrs.map(async (addr) => {
         try {
           const market = new ethers.Contract(addr, marketAbi, readProvider);
-          const [volume, stage] = await Promise.all([
+          const [volume, stage, participants] = await Promise.all([
             market.totalVolumeWei(),
             market.stage(),
+            market.participantCount(),
           ]);
-          return { volume, stage, addr };
+          return { volume, stage, participants, addr };
         } catch {
           return null;
         }
@@ -106,10 +108,12 @@ export default function Analytics() {
       const results = await Promise.all(marketPromises);
 
       let totalVolume = 0n;
+      let totalParticipants = 0;
       let activeMarkets = 0;
       let resolvedMarkets = 0;
       let suspendedMarkets = 0;
       let cancelledOrExpired = 0;
+      let unavailableMarkets = 0;
 
       const dailyMap = new Map<string, { volume: bigint; trades: number; dayLabel: string }>();
       for (let i = 6; i >= 0; i -= 1) {
@@ -120,14 +124,19 @@ export default function Analytics() {
       }
 
       for (const r of results) {
-        if (!r) continue;
+        if (!r) {
+          unavailableMarkets += 1;
+          continue;
+        }
         totalVolume += r.volume;
+        totalParticipants += Number(r.participants);
 
         const stageNum = Number(r.stage);
-        if (stageNum === 0) activeMarkets += 1;
-        else if (stageNum === 1) suspendedMarkets += 1;
-        else if (stageNum === 2) resolvedMarkets += 1;
-        else if (stageNum === 3 || stageNum === 4) cancelledOrExpired += 1;
+        if (stageNum === STAGE.Active) activeMarkets += 1;
+        else if (stageNum === STAGE.Suspended) suspendedMarkets += 1;
+        else if (stageNum === STAGE.Resolved) resolvedMarkets += 1;
+        else if (stageNum === STAGE.Cancelled || stageNum === STAGE.Expired) cancelledOrExpired += 1;
+        else unavailableMarkets += 1;
       }
 
       const blockNumber = await readProvider.getBlockNumber();
@@ -157,23 +166,10 @@ export default function Analytics() {
         }
       }
 
-      const participantPromises = marketAddrs.map(async (addr) => {
-        try {
-          const market = new ethers.Contract(addr, ['function participantCount() view returns (uint256)'], readProvider);
-          return market.participantCount();
-        } catch {
-          return null;
-        }
-      });
-
-      const participantCounts = await Promise.all(participantPromises);
-      let totalParticipants = 0;
-      for (const count of participantCounts) {
-        if (count) totalParticipants += Number(count);
-      }
+      const effectiveTotalMarkets = totalMarkets - unavailableMarkets;
 
       setStats({
-        totalMarkets,
+        totalMarkets: effectiveTotalMarkets,
         totalVolumeWei: totalVolume,
         totalParticipants,
         activeMarkets,

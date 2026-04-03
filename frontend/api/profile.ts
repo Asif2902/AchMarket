@@ -32,14 +32,15 @@ function sanitizeUrl(value: unknown): string {
 }
 
 function sanitizeProfilePayload(input: Record<string, unknown>) {
-  const displayName = typeof input.displayName === 'string' ? input.displayName.trim().slice(0, 40) : '';
-  return {
-    displayName,
-    avatarUrl: sanitizeUrl(input.avatarUrl),
-    twitterUrl: sanitizeUrl(input.twitterUrl),
-    discordUrl: sanitizeUrl(input.discordUrl),
-    telegramUrl: sanitizeUrl(input.telegramUrl),
-  };
+  const result: Record<string, string> = {};
+  if ('displayName' in input && typeof input.displayName === 'string') {
+    result.displayName = input.displayName.trim().slice(0, 40);
+  }
+  if ('avatarUrl' in input) result.avatarUrl = sanitizeUrl(input.avatarUrl);
+  if ('twitterUrl' in input) result.twitterUrl = sanitizeUrl(input.twitterUrl);
+  if ('discordUrl' in input) result.discordUrl = sanitizeUrl(input.discordUrl);
+  if ('telegramUrl' in input) result.telegramUrl = sanitizeUrl(input.telegramUrl);
+  return result;
 }
 
 function buildProfileSigningMessage(address: string, payload: Record<string, unknown>, timestamp: number): string {
@@ -100,7 +101,7 @@ async function getMongoClient(): Promise<MongoClient> {
         await col.createIndex({ address: 1 }, { unique: true, name: 'uniq_address' });
         await col.createIndex(
           { profileSlug: 1 },
-          { unique: true, name: 'uniq_profile_slug', sparse: true },
+          { unique: true, name: 'uniq_profile_slug' },
         );
         indexesReady = true;
       }
@@ -125,7 +126,7 @@ async function getMongoClient(): Promise<MongoClient> {
   await col.createIndex({ address: 1 }, { unique: true, name: 'uniq_address' });
   await col.createIndex(
     { profileSlug: 1 },
-    { unique: true, name: 'uniq_profile_slug', sparse: true },
+    { unique: true, name: 'uniq_profile_slug' },
   );
   indexesReady = true;
 
@@ -233,6 +234,7 @@ export default async function handler(req: any, res: any) {
       const { address, slug } = req.query || {};
 
       if (slug) {
+        if (Array.isArray(slug) || typeof slug !== 'string') return res.status(400).json({ error: 'Invalid slug' });
         const norm = normalizeProfileSlug(slug);
         if (!norm) return res.status(400).json({ error: 'Invalid slug' });
         const client = await getMongoClient();
@@ -242,6 +244,7 @@ export default async function handler(req: any, res: any) {
         return res.status(200).json(await getProfile(doc.address));
       }
 
+      if (Array.isArray(address) || typeof address !== 'string') return res.status(400).json({ error: 'address or slug required' });
       if (!address) return res.status(400).json({ error: 'address or slug required' });
       return res.status(200).json(await getProfile(address));
     }
@@ -262,18 +265,19 @@ export default async function handler(req: any, res: any) {
     return res.status(405).json({ error: 'Method not allowed' });
   } catch (err: any) {
     const msg = err?.message || 'Unexpected error';
+    const msgLower = msg.toLowerCase();
     let code = 500;
     if (err instanceof MongoServerError && err.code === 11000) {
       code = 409;
-    } else if (msg.includes('expired') || msg.includes('Invalid signature')) {
+    } else if (msgLower.includes('expired') || msgLower.includes('invalid signature')) {
       code = 401;
-    } else if (msg.includes('already taken') || msg.includes('taken')) {
+    } else if (msgLower.includes('already taken') || msgLower.includes('taken')) {
       code = 409;
-    } else if (msg.includes('MONGO_URI') || msg.includes('required') || msg.includes('Invalid') || msg.includes('Display name')) {
+    } else if (msgLower.includes('mongo_uri') || msgLower.includes('required') || msgLower.includes('invalid') || msgLower.includes('display name')) {
       code = 400;
-    } else if (msg.includes('auth')) {
+    } else if (msgLower.includes('auth')) {
       code = 401;
-    } else if (msg.includes('timeout') || msg.includes('ENOTFOUND')) {
+    } else if (msgLower.includes('timeout') || msgLower.includes('enotfound')) {
       code = 503;
     }
     return res.status(code).json({ error: msg });

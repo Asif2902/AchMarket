@@ -98,8 +98,11 @@ export default function PublicProfile() {
       const addrToId = new Map<string, number>();
 
       const totalMarkets = Number(await factory.totalMarkets());
+      if (signal.aborted) return;
+
       if (totalMarkets > 0) {
         const summaries = await lens.getMarketSummaries(0, totalMarkets);
+        if (signal.aborted) return;
         for (const summary of summaries as Array<Record<string, unknown>>) {
           const addr = String(summary.market).toLowerCase();
           if (marketAddrs.includes(addr)) {
@@ -107,6 +110,8 @@ export default function PublicProfile() {
           }
         }
       }
+
+      if (signal.aborted) return;
 
       const positions: PositionItem[] = portfolioArr
         .map((entry) => ({

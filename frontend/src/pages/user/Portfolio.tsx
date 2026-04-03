@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
+import { useState, useEffect, useRef, useMemo, useCallback, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { ethers } from 'ethers';
 import { useWallet } from '../../context/WalletContext';
@@ -112,6 +112,7 @@ export default function Portfolio() {
       outcomeLabels: [...(p.outcomeLabels as string[])],
       sharesPerOutcome: [...(p.sharesPerOutcome as bigint[])],
       netDepositedWei: p.netDepositedWei as bigint,
+      payoutWei: p.payoutWei as bigint | undefined,
       canRedeem: p.canRedeem as boolean,
       canRefund: p.canRefund as boolean,
       hasRedeemed: p.hasRedeemed as boolean,
@@ -122,17 +123,22 @@ export default function Portfolio() {
 
   useEffect(() => {
     if (!address) return;
+    let cancelled = false;
     const fetch = async () => {
       try {
         setLoading(true);
-        setPositions(await refreshPortfolio());
+        const positions = await refreshPortfolio();
+        if (!cancelled) setPositions(positions);
       } catch (err) {
-        console.error('Failed to fetch portfolio:', err);
+        if (!cancelled) console.error('Failed to fetch portfolio:', err);
       } finally {
-        setLoading(false);
+        if (!cancelled) setLoading(false);
       }
     };
     fetch();
+    return () => {
+      cancelled = true;
+    };
   }, [address, refreshPortfolio]);
 
   const handleAction = async (marketAddr: string, action: 'redeem' | 'refund') => {
@@ -507,7 +513,7 @@ function SummaryCard({
   label: string;
   value: string;
   suffix?: string;
-  icon: React.ReactNode;
+  icon: ReactNode;
   accent: 'neutral' | 'primary' | 'success' | 'info' | 'danger';
 }) {
   const accentStyles = {
