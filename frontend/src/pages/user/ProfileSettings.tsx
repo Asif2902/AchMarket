@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useWallet } from '../../context/WalletContext';
 import ImageWithFallback from '../../components/ImageWithFallback';
@@ -31,6 +31,11 @@ export default function ProfileSettings() {
   const [profileSlug, setProfileSlug] = useState('');
   const [msg, setMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [linkCopied, setLinkCopied] = useState(false);
+  const currentRequestIdRef = useRef(0);
+  const addressRef = useRef(address);
+  const signerRef = useRef(signer);
+  addressRef.current = address;
+  signerRef.current = signer;
 
   useEffect(() => {
     if (!address) {
@@ -104,20 +109,19 @@ export default function ProfileSettings() {
 
   const handleSave = async () => {
     if (!address || !signer) return;
-    const savedAddress = address;
-    const savedSigner = signer;
+    const requestIdCaptured = ++currentRequestIdRef.current;
 
     try {
       setSaving(true);
       setMsg(null);
-      const response = await saveProfileBySignature(savedAddress, form, savedSigner);
-      if (address === savedAddress && signer === savedSigner) {
+      const response = await saveProfileBySignature(address, form, signer);
+      if (requestIdCaptured === currentRequestIdRef.current && addressRef.current === address && signerRef.current === signer) {
         setForm(toProfilePayload(response.profile));
         setProfileSlug(toProfileSlug(response.profile));
         setMsg({ type: 'success', text: 'Profile updated.' });
       }
     } catch (err) {
-      if (address === savedAddress && signer === savedSigner) {
+      if (requestIdCaptured === currentRequestIdRef.current && addressRef.current === address && signerRef.current === signer) {
         const message = err instanceof Error ? err.message : 'Failed to save profile';
         const friendly = message === 'Request failed'
           ? 'Profile API failed. Check Vercel env vars and function logs.'
@@ -125,7 +129,7 @@ export default function ProfileSettings() {
         setMsg({ type: 'error', text: friendly });
       }
     } finally {
-      if (address === savedAddress && signer === savedSigner) {
+      if (requestIdCaptured === currentRequestIdRef.current && addressRef.current === address && signerRef.current === signer) {
         setSaving(false);
       }
     }

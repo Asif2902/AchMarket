@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useMemo } from 'react';
 import { ethers } from 'ethers';
 import { useWallet } from '../../context/WalletContext';
 import { FACTORY_ADDRESS, NETWORK, STAGE } from '../../config/network';
-import { FACTORY_ABI } from '../../config/abis';
+import { FACTORY_ABI, MARKET_ABI } from '../../config/abis';
 import EmptyState from '../../components/EmptyState';
 import UsdcIcon from '../../components/UsdcIcon';
 import { formatCompact, formatCompactUSDC } from '../../utils/format';
@@ -35,6 +35,7 @@ interface DailyVolume {
   date: string;
   dayLabel: string;
   volume: number;
+  volumeWei: bigint;
   trades: number;
 }
 
@@ -53,6 +54,7 @@ export default function Analytics() {
         date: date.toISOString().split('T')[0],
         dayLabel: date.toLocaleDateString('en-US', { weekday: 'short', timeZone: 'UTC' }),
         volume: 0,
+        volumeWei: 0n,
         trades: 0,
       };
     });
@@ -86,15 +88,9 @@ export default function Analytics() {
         Array.from({ length: totalMarkets }, (_, i) => factory.markets(i)),
       );
 
-      const marketAbi = [
-        'function totalVolumeWei() view returns (uint256)',
-        'function stage() view returns (uint8)',
-        'function participantCount() view returns (uint256)',
-      ];
-
       const marketPromises = marketAddrs.map(async (addr) => {
         try {
-          const market = new ethers.Contract(addr, marketAbi, readProvider);
+          const market = new ethers.Contract(addr, MARKET_ABI, readProvider);
           const [volume, stage] = await Promise.all([
             market.totalVolumeWei(),
             market.stage(),
@@ -187,6 +183,7 @@ export default function Analytics() {
         date,
         dayLabel: data.dayLabel,
         volume: Number(data.volume) / 1e18,
+        volumeWei: data.volume,
         trades: data.trades,
       }));
       setDailyVolume(dailyData);
@@ -209,8 +206,14 @@ export default function Analytics() {
   const aggregate = useMemo(() => {
     const totalTrades = dailyVolume.reduce((acc, d) => acc + d.trades, 0);
     const weeklyVolume = dailyVolume.reduce((acc, d) => acc + d.volume, 0);
+    const weeklyVolumeWei = dailyVolume.reduce((acc, d) => acc + (d.volumeWei ?? 0n), 0n);
     const avgDailyVolume = dailyVolume.length > 0 ? weeklyVolume / dailyVolume.length : 0;
+    const avgDailyVolumeWei = dailyVolume.length > 0 ? weeklyVolumeWei / BigInt(dailyVolume.length) : 0n;
     const maxDailyVolume = dailyVolume.reduce((acc, d) => Math.max(acc, d.volume), 0);
+    const maxDailyVolumeWei = dailyVolume.reduce<bigint>((acc, d) => {
+      const v = d.volumeWei ?? 0n;
+      return v > acc ? v : acc;
+    }, 0n);
     const maxTrades = dailyVolume.reduce((acc, d) => Math.max(acc, d.trades), 0);
 
     const chartData = dailyVolume.map((d, index, arr) => {
@@ -229,8 +232,11 @@ export default function Analytics() {
     return {
       totalTrades,
       weeklyVolume,
+      weeklyVolumeWei,
       avgDailyVolume,
+      avgDailyVolumeWei,
       maxDailyVolume,
+      maxDailyVolumeWei,
       maxTrades,
       chartData,
     };
@@ -326,7 +332,7 @@ export default function Analytics() {
               <StatCard label="Total Markets" value={formatCompact(stats.totalMarkets)} icon={<MiniGridIcon />} accent="neutral" />
               <StatCard label="Total Volume" value={formatCompactUSDC(stats.totalVolumeWei)} suffix="USDC" icon={<UsdcIcon size={18} />} accent="accent" />
               <StatCard label="Weekly Trades" value={formatCompact(aggregate.totalTrades)} icon={<MiniTradeIcon />} accent="success" />
-              <StatCard label="Avg Daily Volume" value={formatCompact(aggregate.avgDailyVolume)} suffix="USDC" icon={<MiniTrendIcon />} accent="info" />
+              <StatCard label="Avg Daily Volume" value={formatCompactUSDC(aggregate.avgDailyVolumeWei)} suffix="USDC" icon={<MiniTrendIcon />} accent="info" />
             </div>
 
             <div className="card p-4 md:p-6">
@@ -431,8 +437,8 @@ export default function Analytics() {
               <div className="space-y-4">
                 <div className="card p-4 md:p-5">
                   <h2 className="section-header mb-3">Momentum</h2>
-                  <MetricRow label="7D Volume" value={formatCompact(aggregate.weeklyVolume)} suffix="USDC" />
-                  <MetricRow label="Peak Daily Volume" value={formatCompact(aggregate.maxDailyVolume)} suffix="USDC" />
+                  <MetricRow label="7D Volume" value={formatCompactUSDC(aggregate.weeklyVolumeWei)} suffix="USDC" />
+                  <MetricRow label="Peak Daily Volume" value={formatCompactUSDC(aggregate.maxDailyVolumeWei)} suffix="USDC" />
                   <MetricRow label="Peak Daily Trades" value={formatCompact(aggregate.maxTrades)} />
                 </div>
 

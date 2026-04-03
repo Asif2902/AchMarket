@@ -151,10 +151,9 @@ export default function Portfolio() {
       const market = new ethers.Contract(marketAddr, MARKET_ABI, signer);
       const tx = action === 'redeem' ? await market.redeem() : await market.refund();
       await tx.wait();
-      setTxMsg({ type: 'success', text: `${action === 'redeem' ? 'Winnings' : 'Refund'} claimed!` });
-      clearClaim(marketAddr);
-
       if (latestAddressRef.current === submittingAddress) {
+        setTxMsg({ type: 'success', text: `${action === 'redeem' ? 'Winnings' : 'Refund'} claimed!` });
+        clearClaim(marketAddr);
         try {
           setPositions(await refreshPortfolio(submittingAddress));
         } catch (err) {
@@ -162,9 +161,13 @@ export default function Portfolio() {
         }
       }
     } catch (err) {
-      setTxMsg({ type: 'error', text: parseContractError(err) });
+      if (latestAddressRef.current === submittingAddress) {
+        setTxMsg({ type: 'error', text: parseContractError(err) });
+      }
     } finally {
-      setTxPending(null);
+      if (latestAddressRef.current === submittingAddress) {
+        setTxPending(null);
+      }
     }
   };
 
@@ -406,12 +409,18 @@ export default function Portfolio() {
               {/* Title + Badge */}
               <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2 sm:gap-3 mb-3">
                 <div className="min-w-0 flex-1">
-                  <Link
-                    to={pos.marketId !== null ? `/market/${makeMarketSlug(pos.marketId, pos.title)}` : '#'}
-                    className="font-semibold text-sm text-white hover:text-primary-400 transition-colors line-clamp-2 sm:line-clamp-1"
-                  >
-                    {pos.title}
-                  </Link>
+                  {pos.marketId !== null ? (
+                    <Link
+                      to={`/market/${makeMarketSlug(pos.marketId, pos.title)}`}
+                      className="font-semibold text-sm text-white hover:text-primary-400 transition-colors line-clamp-2 sm:line-clamp-1"
+                    >
+                      {pos.title}
+                    </Link>
+                  ) : (
+                    <span className="font-semibold text-sm text-white line-clamp-2 sm:line-clamp-1" aria-disabled="true">
+                      {pos.title}
+                    </span>
+                  )}
                   <div className="flex items-center gap-2 mt-1.5 flex-wrap">
                     <span className={`badge text-2xs ${STAGE_COLORS[pos.stage]}`}>{STAGE_LABELS[pos.stage]}</span>
                     <span className="text-2xs text-dark-500">{pos.category}</span>
@@ -492,15 +501,24 @@ export default function Portfolio() {
                 )}
 
                 {/* View market link */}
-                <Link
-                  to={pos.marketId !== null ? `/market/${makeMarketSlug(pos.marketId, pos.title)}` : '#'}
-                  className="ml-auto text-2xs text-dark-500 hover:text-primary-400 font-medium transition-colors flex items-center gap-0.5"
-                >
-                  View
-                  <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-                  </svg>
-                </Link>
+                {pos.marketId !== null ? (
+                  <Link
+                    to={`/market/${makeMarketSlug(pos.marketId, pos.title)}`}
+                    className="ml-auto text-2xs text-dark-500 hover:text-primary-400 font-medium transition-colors flex items-center gap-0.5"
+                  >
+                    View
+                    <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                    </svg>
+                  </Link>
+                ) : (
+                  <span className="ml-auto text-2xs text-dark-500/40 flex items-center gap-0.5" aria-disabled="true" tabIndex={-1}>
+                    View
+                    <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                    </svg>
+                  </span>
+                )}
               </div>
             </div>
           ))}
