@@ -19,6 +19,9 @@ import {
 import { showToast } from '../../components/Toast';
 import { NETWORK } from '../../config/network';
 
+const DEFAULT_META_TITLE = 'AchMarket - Prediction Markets';
+const DEFAULT_META_DESCRIPTION = 'Trade prediction markets on ARC Testnet with USDC.';
+
 interface MarketDetailData {
   market: string;
   title: string;
@@ -54,6 +57,33 @@ interface UserInfo {
 interface ProbHistoryPoint {
   time: number;
   [key: string]: number;
+}
+
+function ensureMetaTag(kind: 'name' | 'property', key: string): HTMLMetaElement {
+  const selector = `meta[${kind}="${key}"]`;
+  const existing = document.head.querySelector(selector);
+  if (existing instanceof HTMLMetaElement) return existing;
+  const meta = document.createElement('meta');
+  meta.setAttribute(kind, key);
+  document.head.appendChild(meta);
+  return meta;
+}
+
+function setMetaTag(kind: 'name' | 'property', key: string, value: string): void {
+  const meta = ensureMetaTag(kind, key);
+  meta.setAttribute('content', value);
+}
+
+function setCanonicalUrl(url: string): void {
+  const existing = document.head.querySelector('link[rel="canonical"]');
+  if (existing instanceof HTMLLinkElement) {
+    existing.href = url;
+    return;
+  }
+  const link = document.createElement('link');
+  link.rel = 'canonical';
+  link.href = url;
+  document.head.appendChild(link);
 }
 
 export default function MarketDetail() {
@@ -426,6 +456,45 @@ export default function MarketDetail() {
     }
   }, [detail?.market, refreshTrigger]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  useEffect(() => {
+    if (!detail || !slug) return;
+
+    const baseUrl = window.location.origin;
+    const marketUrl = `${baseUrl}/market/${slug}`;
+    const defaultImage = `${baseUrl}/og.png`;
+    const title = `${detail.title} | AchMarket`;
+    const descriptionSource = parseDescription(detail.description).description;
+    const description = (descriptionSource || DEFAULT_META_DESCRIPTION).slice(0, 180);
+
+    document.title = title;
+    setMetaTag('name', 'description', description);
+    setMetaTag('property', 'og:title', title);
+    setMetaTag('property', 'og:description', description);
+    setMetaTag('property', 'og:type', 'website');
+    setMetaTag('property', 'og:url', marketUrl);
+    setMetaTag('property', 'og:image', defaultImage);
+    setMetaTag('name', 'twitter:card', 'summary_large_image');
+    setMetaTag('name', 'twitter:title', title);
+    setMetaTag('name', 'twitter:description', description);
+    setMetaTag('name', 'twitter:image', defaultImage);
+    setCanonicalUrl(marketUrl);
+
+    return () => {
+      const homeUrl = `${baseUrl}/`;
+      const defaultImage = `${baseUrl}/og.png`;
+      document.title = DEFAULT_META_TITLE;
+      setMetaTag('name', 'description', DEFAULT_META_DESCRIPTION);
+      setMetaTag('property', 'og:title', DEFAULT_META_TITLE);
+      setMetaTag('property', 'og:description', DEFAULT_META_DESCRIPTION);
+      setMetaTag('property', 'og:url', homeUrl);
+      setMetaTag('property', 'og:image', defaultImage);
+      setMetaTag('name', 'twitter:title', DEFAULT_META_TITLE);
+      setMetaTag('name', 'twitter:description', DEFAULT_META_DESCRIPTION);
+      setMetaTag('name', 'twitter:image', defaultImage);
+      setCanonicalUrl(homeUrl);
+    };
+  }, [detail, slug]);
+
   const currentInputKey = `${tradeTab}:${selectedOutcome}:${shareAmount}`;
 
   // Preview
@@ -643,6 +712,9 @@ export default function MarketDetail() {
   }
 
   const parsedAbout = parseDescription(detail?.description ?? '');
+  const selectedOutcomeLabel = detail.outcomeLabels[selectedOutcome] ?? `Outcome ${selectedOutcome + 1}`;
+  const selectedOutcomePrice = probToPercent(detail.impliedProbabilitiesWad[selectedOutcome] ?? 0n) / 100;
+  const selectedOwnedShares = userInfo?.shares[selectedOutcome] ?? 0n;
 
   return (
     <div className="min-h-screen animate-fade-in">
@@ -672,7 +744,30 @@ export default function MarketDetail() {
 
       {/* Two-column layout */}
       <div className="max-w-[1600px] mx-auto px-4 pt-5 md:pt-6 pb-8">
-        <div className="flex flex-col gap-5 md:grid md:grid-cols-[1fr_380px] md:gap-6">
+        <div className="mb-5 md:mb-6 card p-4 sm:p-5 bg-gradient-to-br from-primary-500/[0.08] via-transparent to-emerald-500/[0.06] border-primary-500/20">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+            <div>
+              <p className="text-2xs uppercase tracking-[0.14em] text-white/45 font-semibold mb-1">Trade Panel</p>
+              <h2 className="text-lg sm:text-xl font-semibold text-white">Make your position before market close</h2>
+              <p className="text-xs text-white/60 mt-1">
+                Pick an outcome, review estimated payout, and trade with slippage protection.
+              </p>
+            </div>
+            {isActive && !tradingEnded ? (
+              <div className="px-3.5 py-2 rounded-xl border border-emerald-500/30 bg-emerald-500/10 text-emerald-300 text-xs font-semibold inline-flex items-center gap-2">
+                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                Trading Open
+              </div>
+            ) : (
+              <div className="px-3.5 py-2 rounded-xl border border-white/[0.12] bg-white/[0.04] text-white/70 text-xs font-semibold inline-flex items-center gap-2">
+                <span className="w-2 h-2 rounded-full bg-white/50" />
+                Trading Closed
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div className="flex flex-col gap-5 lg:grid lg:grid-cols-[1fr_420px] lg:gap-6">
           {/* Left Column — Market Info (scrollable) */}
           <div className="space-y-4 md:space-y-5">
             {/* Quick stats */}
@@ -1054,10 +1149,18 @@ export default function MarketDetail() {
           </div>
 
           {/* Right Column — Trade Panel (sticky) */}
-          <div className="md:sticky md:top-4 md:self-start space-y-4 md:space-y-5">
+          <div className="lg:sticky lg:top-20 lg:self-start space-y-4 lg:space-y-5">
             {/* Outcome Probabilities Card */}
-            <div className="card p-5">
-              <h2 className="section-header mb-4">Outcome Probabilities</h2>
+            <div className="card p-5 border-primary-500/20 bg-gradient-to-br from-primary-500/[0.06] to-transparent">
+              <div className="flex items-end justify-between gap-3 mb-4">
+                <div>
+                  <h2 className="section-header mb-1">Live Odds</h2>
+                  <p className="text-2xs text-white/50">Current market pricing across all outcomes</p>
+                </div>
+                <span className="text-2xs px-2 py-1 rounded-md border border-white/[0.1] bg-white/[0.03] text-white/65">
+                  {detail.outcomeLabels.length} outcomes
+                </span>
+              </div>
               <ProbabilityBar
                 labels={detail.outcomeLabels}
                 probabilities={detail.impliedProbabilitiesWad}
@@ -1079,12 +1182,22 @@ export default function MarketDetail() {
                   );
                 })}
               </div>
+              <div className="mt-4 p-3 rounded-xl border border-white/[0.08] bg-dark-900/45">
+                <p className="text-2xs uppercase tracking-[0.12em] text-white/45 font-semibold mb-1">Selected Outcome</p>
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-sm font-semibold text-white truncate">{selectedOutcomeLabel}</p>
+                  <span className="text-sm font-bold text-emerald-300 tabular-nums">${selectedOutcomePrice.toFixed(2)}</span>
+                </div>
+              </div>
             </div>
 
             {/* Trade Panel */}
             {isActive && !tradingEnded && isConnected && isCorrectNetwork && (
-              <div className="card p-5">
-                <h3 className="section-header mb-4">Trade</h3>
+              <div className="card p-5 border-white/[0.12] bg-gradient-to-b from-white/[0.025] to-transparent shadow-[0_16px_46px_rgba(0,0,0,0.45)]">
+                <div className="mb-4">
+                  <h3 className="section-header mb-1">Trade</h3>
+                  <p className="text-2xs text-white/50">Enter amount, review preview, then confirm in wallet</p>
+                </div>
 
                 {/* Buy/Sell tabs */}
                 <div className="flex rounded-xl bg-dark-900/60 p-0.5 mb-5 border border-white/[0.06]">
@@ -1157,6 +1270,17 @@ export default function MarketDetail() {
                   })}
                 </div>
 
+                <div className="grid grid-cols-2 gap-2 mb-4">
+                  <div className="rounded-xl border border-white/[0.08] bg-dark-900/35 p-2.5">
+                    <p className="text-2xs text-white/45 uppercase tracking-[0.12em]">Outcome</p>
+                    <p className="text-xs font-semibold text-white mt-1 truncate">{selectedOutcomeLabel}</p>
+                  </div>
+                  <div className="rounded-xl border border-white/[0.08] bg-dark-900/35 p-2.5">
+                    <p className="text-2xs text-white/45 uppercase tracking-[0.12em]">You Hold</p>
+                    <p className="text-xs font-semibold text-white mt-1 tabular-nums">{formatWad(selectedOwnedShares)}</p>
+                  </div>
+                </div>
+
                 {/* Amount input */}
                 <div className="flex items-center justify-between mb-1.5">
                   <label className="text-2xs font-semibold text-dark-500 uppercase tracking-wider flex items-center gap-1.5">
@@ -1189,7 +1313,7 @@ export default function MarketDetail() {
                     placeholder={tradeTab === 'buy' ? '0.00' : '0'}
                     min="0"
                     step={tradeTab === 'buy' ? '0.01' : '0.1'}
-                    className="input-field text-sm pr-16"
+                    className="input-field text-sm pr-16 font-medium"
                   />
                   <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1.5">
                     {tradeTab === 'buy' && userBalance !== null && userBalance > 0n && (
@@ -1290,10 +1414,10 @@ export default function MarketDetail() {
                 <button
                   onClick={tradeTab === 'buy' ? handleBuy : handleSell}
                   disabled={txPending || !shareAmount || parseFloat(shareAmount) <= 0 || previewLoading || previewKey !== currentInputKey || (tradeTab === 'buy' ? estimatedShares === null : previewCost === null)}
-                  className={`w-full py-3 rounded-xl font-semibold text-sm transition-all active:scale-[0.97] ${
+                  className={`w-full py-3.5 rounded-xl font-semibold text-sm transition-all active:scale-[0.97] ${
                     tradeTab === 'buy'
-                      ? 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-glow-yes disabled:bg-emerald-600/20 disabled:text-emerald-400/40 disabled:shadow-none'
-                      : 'bg-red-600 hover:bg-red-500 text-white shadow-glow-no disabled:bg-red-600/20 disabled:text-red-400/40 disabled:shadow-none'
+                      ? 'bg-gradient-to-r from-emerald-600 to-emerald-500 hover:from-emerald-500 hover:to-emerald-400 text-white shadow-glow-yes disabled:from-emerald-600/20 disabled:to-emerald-500/20 disabled:text-emerald-400/40 disabled:shadow-none'
+                      : 'bg-gradient-to-r from-red-600 to-red-500 hover:from-red-500 hover:to-red-400 text-white shadow-glow-no disabled:from-red-600/20 disabled:to-red-500/20 disabled:text-red-400/40 disabled:shadow-none'
                   }`}
                 >
                   {txPending ? (
@@ -1322,20 +1446,22 @@ export default function MarketDetail() {
 
             {/* Connect wallet prompt */}
             {isActive && !tradingEnded && !isConnected && (
-              <div className="card p-6 text-center">
+              <div className="card p-6 text-center border-primary-500/20 bg-primary-500/[0.04]">
                 <div className="w-10 h-10 rounded-xl bg-primary-500/10 flex items-center justify-center mx-auto mb-3">
                   <svg className="w-5 h-5 text-primary-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
                   </svg>
                 </div>
-                <p className="text-sm text-dark-400 font-medium">Connect your wallet to trade</p>
+                <p className="text-sm text-dark-200 font-medium">Connect your wallet to trade</p>
+                <p className="text-2xs text-dark-500 mt-1">You can still review odds and history without connecting.</p>
               </div>
             )}
 
             {/* Wrong network prompt */}
             {isActive && isConnected && !isCorrectNetwork && (
-              <div className="card p-6 text-center">
+              <div className="card p-6 text-center border-amber-500/20 bg-amber-500/[0.04]">
                 <p className="text-sm text-amber-400 font-medium">Switch to ARC Testnet to trade</p>
+                <p className="text-2xs text-amber-300/70 mt-1">Current network does not support this market.</p>
               </div>
             )}
 
@@ -1460,7 +1586,7 @@ function ProbabilityChart({
         <div className="flex items-center justify-between mb-3">
           <h2 className="section-header">Price History</h2>
           {/* Time range selector */}
-          <div className="flex items-center rounded-lg bg-dark-900/60 p-0.5 border border-white/[0.06]">
+          <div className="flex items-center rounded-lg bg-dark-900/60 p-0.5 border border-white/[0.06] overflow-x-auto scrollbar-hide">
             {TIME_RANGES.map(range => (
               <button
                 key={range.key}
@@ -1531,7 +1657,7 @@ function ProbabilityChart({
       </div>
 
       {/* Chart */}
-      <div className="h-64 sm:h-72 px-2 pb-3">
+      <div className="h-56 sm:h-72 px-2 pb-3">
         <ResponsiveContainer width="100%" height="100%">
           <AreaChart
             data={filteredHistory}

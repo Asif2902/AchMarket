@@ -64,7 +64,7 @@ export default function OwnerLayout() {
       </aside>
 
       {/* Mobile bottom nav */}
-      <div className="lg:hidden fixed bottom-0 left-0 right-0 z-50 bg-dark-950/80 backdrop-blur-xl border-t border-white/[0.08] safe-area-bottom">
+      <div className="lg:hidden fixed bottom-0 left-0 right-0 z-50 bg-dark-950/95 backdrop-blur-xl border-t border-white/[0.08] safe-area-inset-bottom">
         <div className="flex overflow-x-auto scrollbar-hide px-1.5 py-1.5 gap-0.5">
           {NAV_ITEMS.map((item) => (
             <NavLink

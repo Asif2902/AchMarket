@@ -1,19 +1,21 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo, useCallback, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { ethers } from 'ethers';
 import { useWallet } from '../../context/WalletContext';
 import { usePendingClaims } from '../../hooks/usePendingClaims';
-import { FACTORY_ADDRESS, LENS_ADDRESS, STAGE_LABELS, STAGE_COLORS } from '../../config/network';
+import { FACTORY_ADDRESS, LENS_ADDRESS, STAGE, STAGE_LABELS, STAGE_COLORS } from '../../config/network';
 import { FACTORY_ABI, LENS_ABI, MARKET_ABI } from '../../config/abis';
 import { PageLoader } from '../../components/LoadingSpinner';
 import EmptyState from '../../components/EmptyState';
 import UsdcIcon from '../../components/UsdcIcon';
 import { formatUSDC, formatCompactUSDC, formatWad, parseContractError, makeMarketSlug } from '../../utils/format';
 import { getOutcomeColor } from '../../components/ProbabilityBar';
+import { fetchProfileByAddress } from '../../services/profile';
+import type { PublicProfile as PublicProfileType } from '../../types/profile';
 
 interface Position {
   market: string;
-  marketId: number;
+  marketId: number | null;
   title: string;
   category: string;
   outcomeLabels: string[];
@@ -27,15 +29,20 @@ interface Position {
 }
 
 type TabType = 'all' | 'active' | 'winnings' | 'refunds' | 'claimed';
+type SortBy = 'highest_deposit' | 'lowest_deposit' | 'newest' | 'oldest' | 'title_az' | 'title_za' | 'claimable_first';
 
 export default function Portfolio() {
   const { address, readProvider, signer, isConnected } = useWallet();
   const { clearClaim } = usePendingClaims();
   const [positions, setPositions] = useState<Position[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
   const [txPending, setTxPending] = useState<string | null>(null);
   const [txMsg, setTxMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [activeTab, setActiveTab] = useState<TabType>('all');
+  const [sortBy, setSortBy] = useState<SortBy>('claimable_first');
+  const [categoryFilter, setCategoryFilter] = useState('All');
+  const [profileSummary, setProfileSummary] = useState<PublicProfileType | null>(null);
   const txMsgTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
@@ -51,96 +58,237 @@ export default function Portfolio() {
   }, [txMsg]);
 
   useEffect(() => {
-    if (!address) return;
+    if (!address) {
+      setProfileSummary(null);
+      return;
+    }
+
+    setProfileSummary(null);
+
+    let cancelled = false;
+    const run = async () => {
+      try {
+        const response = await fetchProfileByAddress(address);
+        if (!cancelled) {
+          setProfileSummary(response.profile);
+        }
+      } catch {
+        if (!cancelled) {
+          setProfileSummary(null);
+        }
+      }
+    };
+
+    run();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [address]);
+
+  const latestAddressRef = useRef(address);
+  latestAddressRef.current = address;
+  const addrToIdCache = useRef<Map<string, number>>(new Map());
+
+  const refreshPortfolio = useCallback(async (expectedAddress: string): Promise<Position[]> => {
+    const lens = new ethers.Contract(LENS_ADDRESS, LENS_ABI, readProvider);
+    const portfolio = await lens.getUserPortfolio(expectedAddress);
+
+    const portfolioAddrs = (portfolio as Array<Record<string, unknown>>)
+      .map((p) => (p.market as string).toLowerCase());
+    const uniqueAddrs = [...new Set(portfolioAddrs)];
+
+    const cachedEntries = uniqueAddrs
+      .map((addr) => [addr, addrToIdCache.current.get(addr)] as [string, number | undefined])
+      .filter(([, id]) => id !== undefined) as Array<[string, number]>;
+
+    const missingAddrs = uniqueAddrs.filter((addr) => !addrToIdCache.current.has(addr));
+
+    if (missingAddrs.length > 0) {
+      const factory = new ethers.Contract(FACTORY_ADDRESS, FACTORY_ABI, readProvider);
+      const totalMarkets = Number(await factory.totalMarkets());
+      if (totalMarkets > 0) {
+        const summaries = await lens.getMarketSummaries(0, totalMarkets);
+        for (const s of summaries as Array<Record<string, unknown>>) {
+          const addr = (s.market as string).toLowerCase();
+          const id = Number(s.marketId);
+          addrToIdCache.current.set(addr, id);
+        }
+      }
+    }
+
+    return portfolio.map((p: Record<string, unknown>) => ({
+      market: p.market as string,
+      marketId: addrToIdCache.current.get((p.market as string).toLowerCase()) ?? null,
+      title: p.title as string,
+      category: p.category as string,
+      outcomeLabels: [...(p.outcomeLabels as string[])],
+      sharesPerOutcome: [...(p.sharesPerOutcome as bigint[])],
+      netDepositedWei: p.netDepositedWei as bigint,
+      canRedeem: p.canRedeem as boolean,
+      canRefund: p.canRefund as boolean,
+      hasRedeemed: p.hasRedeemed as boolean,
+      hasRefunded: p.hasRefunded as boolean,
+      stage: Number(p.stage),
+    }));
+  }, [readProvider]);
+
+  useEffect(() => {
+    if (!address) {
+      setPositions([]);
+      setTxPending(null);
+      setLoadError(false);
+      return;
+    }
+
+    setPositions([]);
+    setTxPending(null);
+    setLoadError(false);
+    setLoading(true);
+
+    let cancelled = false;
     const fetch = async () => {
       try {
-        setLoading(true);
-        const factory = new ethers.Contract(FACTORY_ADDRESS, FACTORY_ABI, readProvider);
-        const lens = new ethers.Contract(LENS_ADDRESS, LENS_ABI, readProvider);
-        const [portfolio, totalMarkets] = await Promise.all([
-          lens.getUserPortfolio(address),
-          factory.totalMarkets(),
-        ]);
-
-        const total = Number(totalMarkets);
-        let summaries: Record<string, unknown>[] = [];
-        if (total > 0) {
-          summaries = await lens.getMarketSummaries(0, total);
+        const positions = await refreshPortfolio(address);
+        if (!cancelled) {
+          setPositions(positions);
+          setLoadError(false);
         }
-        const addrToId = new Map<string, number>();
-        for (const s of summaries) {
-          addrToId.set((s.market as string).toLowerCase(), Number(s.marketId));
-        }
-
-        setPositions(portfolio.map((p: Record<string, unknown>) => ({
-          market: p.market as string,
-          marketId: addrToId.get((p.market as string).toLowerCase()) ?? 0,
-          title: p.title as string,
-          category: p.category as string,
-          outcomeLabels: [...(p.outcomeLabels as string[])],
-          sharesPerOutcome: [...(p.sharesPerOutcome as bigint[])],
-          netDepositedWei: p.netDepositedWei as bigint,
-          canRedeem: p.canRedeem as boolean,
-          canRefund: p.canRefund as boolean,
-          hasRedeemed: p.hasRedeemed as boolean,
-          hasRefunded: p.hasRefunded as boolean,
-          stage: Number(p.stage),
-        })));
       } catch (err) {
-        console.error('Failed to fetch portfolio:', err);
+        if (!cancelled) {
+          console.error('Failed to fetch portfolio:', err);
+          setLoadError(true);
+        }
       } finally {
-        setLoading(false);
+        if (!cancelled) setLoading(false);
       }
     };
     fetch();
-  }, [address, readProvider]);
+    return () => {
+      cancelled = true;
+    };
+  }, [address, refreshPortfolio]);
 
   const handleAction = async (marketAddr: string, action: 'redeem' | 'refund') => {
-    if (!signer) return;
+    if (!signer || !address) return;
+    const submittingAddress = address;
     setTxPending(marketAddr);
     setTxMsg(null);
     try {
       const market = new ethers.Contract(marketAddr, MARKET_ABI, signer);
       const tx = action === 'redeem' ? await market.redeem() : await market.refund();
       await tx.wait();
-      setTxMsg({ type: 'success', text: `${action === 'redeem' ? 'Winnings' : 'Refund'} claimed!` });
-      clearClaim(marketAddr);
-      // Refresh
-      const factory = new ethers.Contract(FACTORY_ADDRESS, FACTORY_ABI, readProvider);
-      const lens = new ethers.Contract(LENS_ADDRESS, LENS_ABI, readProvider);
-      const [portfolio, totalMarkets2] = await Promise.all([
-        lens.getUserPortfolio(address!),
-        factory.totalMarkets(),
-      ]);
-      const total2 = Number(totalMarkets2);
-      let sums2: Record<string, unknown>[] = [];
-      if (total2 > 0) {
-        sums2 = await lens.getMarketSummaries(0, total2);
+      if (latestAddressRef.current === submittingAddress) {
+        setTxMsg({ type: 'success', text: `${action === 'redeem' ? 'Winnings' : 'Refund'} claimed!` });
+        try {
+          const refreshed = await refreshPortfolio(submittingAddress);
+          if (latestAddressRef.current === submittingAddress) {
+            setPositions(refreshed);
+            clearClaim(marketAddr);
+          }
+        } catch (err) {
+          console.error('Failed to refresh portfolio after claim:', err);
+        }
       }
-      const addrToId2 = new Map<string, number>();
-      for (const s of sums2) {
-        addrToId2.set((s.market as string).toLowerCase(), Number(s.marketId));
-      }
-      setPositions(portfolio.map((p: Record<string, unknown>) => ({
-        market: p.market as string,
-        marketId: addrToId2.get((p.market as string).toLowerCase()) ?? 0,
-        title: p.title as string,
-        category: p.category as string,
-        outcomeLabels: [...(p.outcomeLabels as string[])],
-        sharesPerOutcome: [...(p.sharesPerOutcome as bigint[])],
-        netDepositedWei: p.netDepositedWei as bigint,
-        canRedeem: p.canRedeem as boolean,
-        canRefund: p.canRefund as boolean,
-        hasRedeemed: p.hasRedeemed as boolean,
-        hasRefunded: p.hasRefunded as boolean,
-        stage: Number(p.stage),
-      })));
     } catch (err) {
-      setTxMsg({ type: 'error', text: parseContractError(err) });
+      if (latestAddressRef.current === submittingAddress) {
+        setTxMsg({ type: 'error', text: parseContractError(err) });
+      }
     } finally {
-      setTxPending(null);
+      if (latestAddressRef.current === submittingAddress) {
+        setTxPending(null);
+      }
     }
   };
+
+  const totalDeposited = positions.reduce((acc, p) => acc + p.netDepositedWei, 0n);
+  const activeDeposits = positions.filter((p) => p.stage === STAGE.Active).reduce((acc, p) => acc + p.netDepositedWei, 0n);
+
+  const totalMarkets = new Set(positions.map((p) => p.market)).size;
+  const activePositions = positions.filter((p) => p.stage === STAGE.Active).length;
+  const claimableWinnings = positions.filter((p) => p.canRedeem && !p.hasRedeemed).length;
+  const claimableRefunds = positions.filter((p) => p.canRefund && !p.hasRefunded && p.netDepositedWei > 0n).length;
+
+  const categoryCounts = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const pos of positions) {
+      const key = (pos.category || '').trim() || 'Other';
+      map.set(key, (map.get(key) ?? 0) + 1);
+    }
+    return ['All', ...Array.from(map.keys()).sort((a, b) => a.localeCompare(b))];
+  }, [positions]);
+
+  useEffect(() => {
+    if (!categoryCounts.includes(categoryFilter)) {
+      setCategoryFilter('All');
+    }
+  }, [categoryCounts, categoryFilter]);
+
+  const filteredPositions = useMemo(() => {
+    const withIndex = positions.map((p, i) => ({ ...p, originalIndex: i }));
+    return withIndex
+      .filter((p) => {
+        if (activeTab === 'winnings') return p.canRedeem && !p.hasRedeemed;
+        if (activeTab === 'refunds') return p.canRefund && !p.hasRefunded && p.netDepositedWei > 0n;
+        if (activeTab === 'active') return p.stage === STAGE.Active;
+        if (activeTab === 'claimed') return p.hasRedeemed || p.hasRefunded;
+        return true;
+      })
+      .filter((p) => {
+        if (categoryFilter === 'All') return true;
+        const normalized = (p.category || '').trim() || 'Other';
+        return normalized.toLowerCase() === categoryFilter.toLowerCase();
+      })
+      .sort((a, b) => {
+        const compareMarketId = (x: number | null, y: number | null): number => {
+          if (x !== null && y === null) return -1;
+          if (x === null && y !== null) return 1;
+          if (x !== null && y !== null) return y - x;
+          return a.originalIndex - b.originalIndex;
+        };
+
+        if (sortBy === 'highest_deposit') {
+          if (a.netDepositedWei === b.netDepositedWei) return compareMarketId(b.marketId, a.marketId);
+          return a.netDepositedWei > b.netDepositedWei ? -1 : 1;
+        }
+
+        if (sortBy === 'lowest_deposit') {
+          if (a.netDepositedWei === b.netDepositedWei) return compareMarketId(b.marketId, a.marketId);
+          return a.netDepositedWei < b.netDepositedWei ? -1 : 1;
+        }
+
+        if (sortBy === 'newest') return compareMarketId(b.marketId, a.marketId);
+        if (sortBy === 'oldest') return compareMarketId(a.marketId, b.marketId);
+        if (sortBy === 'title_az') return a.title.localeCompare(b.title);
+        if (sortBy === 'title_za') return b.title.localeCompare(a.title);
+
+        const aClaimable = (a.canRedeem && !a.hasRedeemed) || (a.canRefund && !a.hasRefunded && a.netDepositedWei > 0n);
+        const bClaimable = (b.canRedeem && !b.hasRedeemed) || (b.canRefund && !b.hasRefunded && b.netDepositedWei > 0n);
+        if (aClaimable !== bClaimable) return aClaimable ? -1 : 1;
+        if (a.netDepositedWei === b.netDepositedWei) return compareMarketId(b.marketId, a.marketId);
+        return a.netDepositedWei > b.netDepositedWei ? -1 : 1;
+      });
+  }, [positions, activeTab, categoryFilter, sortBy]);
+
+  const tabCounts = {
+    all: positions.length,
+    active: positions.filter(p => p.stage === STAGE.Active).length,
+    winnings: positions.filter(p => p.canRedeem && !p.hasRedeemed).length,
+    refunds: positions.filter(p => p.canRefund && !p.hasRefunded && p.netDepositedWei > 0n).length,
+    claimed: positions.filter(p => p.hasRedeemed || p.hasRefunded).length,
+  };
+
+  const claimablePrincipal = positions
+    .filter((p) => (p.canRedeem && !p.hasRedeemed) || (p.canRefund && !p.hasRefunded && p.netDepositedWei > 0n))
+    .reduce((acc, p) => acc + p.netDepositedWei, 0n);
+
+  const resolvedCount = positions.filter((p) => p.stage === STAGE.Resolved).length;
+  const cancelledCount = positions.filter((p) => p.stage === STAGE.Cancelled).length;
+  const expiredCount = positions.filter((p) => p.stage === STAGE.Expired).length;
+  const activeRatio = totalMarkets > 0 ? (activePositions / totalMarkets) * 100 : 0;
+
+  const profileName = (profileSummary?.displayName ?? '').trim();
+  const greetingName = profileName || (address ? `${address.slice(0, 6)}...${address.slice(-4)}` : 'Trader');
 
   if (!isConnected) {
     return (
@@ -160,92 +308,101 @@ export default function Portfolio() {
 
   if (loading) return <PageLoader />;
 
-    // Compute summary stats
-    const totalDeposited = positions.reduce((acc, p) => acc + p.netDepositedWei, 0n);
-    const activeDeposits = positions.filter(p => p.stage === 0).reduce((acc, p) => acc + p.netDepositedWei, 0n);
-    
-    const totalMarkets = new Set(positions.map(p => p.market)).size;
-    const activePositions = positions.filter(p => p.stage === 0).length;
-    // Use same filtering logic as usePendingClaims to be consistent:
-    // - Exclude already-claimed positions
-    // - Exclude zero-deposit refunds
-    const claimableWinnings = positions.filter(p => p.canRedeem && !p.hasRedeemed).length;
-    const claimableRefunds = positions.filter(p => p.canRefund && !p.hasRefunded && p.netDepositedWei > 0n).length;
-    
-  
-  // Filter positions based on tab - use same logic as usePendingClaims
-  const filteredPositions = positions.filter(p => {
-    if (activeTab === 'winnings') return p.canRedeem && !p.hasRedeemed;
-    if (activeTab === 'refunds') return p.canRefund && !p.hasRefunded && p.netDepositedWei > 0n;
-    if (activeTab === 'active') return p.stage === 0;
-    if (activeTab === 'claimed') return p.hasRedeemed || p.hasRefunded;
-    return true;
-  });
-
-  const tabCounts = {
-    all: positions.length,
-    active: positions.filter(p => p.stage === 0).length,
-    winnings: positions.filter(p => p.canRedeem && !p.hasRedeemed).length,
-    refunds: positions.filter(p => p.canRefund && !p.hasRefunded && p.netDepositedWei > 0n).length,
-    claimed: positions.filter(p => p.hasRedeemed || p.hasRefunded).length,
-  };
-
   return (
-    <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8 space-y-6 animate-fade-in">
+    <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8 space-y-6 animate-fade-in">
+      <div className="card p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 bg-gradient-to-r from-cyan-500/[0.10] via-transparent to-primary-500/[0.08] border-cyan-400/20">
+        <div>
+          <p className="text-lg sm:text-xl font-semibold text-white">Hi {greetingName}, here is your portfolio.</p>
+          <p className="text-xs text-dark-400 mt-1">Track positions, claim outcomes, and keep your momentum rolling.</p>
+          <div className="mt-2 flex items-center gap-2 text-2xs">
+            <span className="px-2 py-1 rounded-md border border-cyan-400/25 bg-cyan-400/10 text-cyan-200">{positions.length} positions</span>
+            <span className="px-2 py-1 rounded-md border border-emerald-500/25 bg-emerald-500/10 text-emerald-200">{claimableWinnings + claimableRefunds} claimable</span>
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          <Link to="/profile" className="btn-secondary text-xs px-3 py-2">
+            Profile Hub
+          </Link>
+        </div>
+      </div>
+
       {/* Header */}
-      <div className="flex items-start sm:items-center justify-between gap-3">
+      <div className="card p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 bg-gradient-to-br from-primary-500/[0.07] via-transparent to-emerald-500/[0.05] border-primary-500/15">
         <div>
           <h1 className="text-xl sm:text-2xl font-bold text-white">Portfolio</h1>
           <p className="text-xs text-dark-400 mt-0.5">{positions.length} position{positions.length !== 1 ? 's' : ''} across {totalMarkets} market{totalMarkets !== 1 ? 's' : ''}</p>
+          <div className="mt-2 flex flex-wrap items-center gap-2 text-2xs">
+            <span className="px-2 py-1 rounded-md bg-emerald-500/15 text-emerald-300 border border-emerald-500/25">{claimableWinnings + claimableRefunds} claimable</span>
+            <span className="px-2 py-1 rounded-md bg-blue-500/12 text-blue-300 border border-blue-500/25">{resolvedCount} resolved</span>
+            <span className="px-2 py-1 rounded-md bg-amber-500/12 text-amber-300 border border-amber-500/25">{activeRatio.toFixed(0)}% active</span>
+          </div>
         </div>
-        <Link to="/" className="btn-secondary text-xs px-3 py-1.5 shrink-0 !min-h-0">
+        <Link to="/" className="btn-secondary text-xs px-3 py-2 shrink-0 !min-h-0">
           Browse Markets
         </Link>
       </div>
 
       {/* Summary stats */}
       {positions.length > 0 && (
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3 max-w-5xl mx-auto">
-          <div className="card p-3.5">
-            <span className="text-2xs text-dark-500 font-medium uppercase tracking-wider">Total Volume</span>
-            <p className="text-base sm:text-lg font-bold text-white mt-0.5 tabular-nums flex items-center gap-1.5 truncate"><UsdcIcon size={16} />{formatCompactUSDC(totalDeposited)} <span className="text-2xs text-dark-500">USDC</span></p>
-          </div>
-          <div className="card p-3.5">
-            <span className="text-2xs text-dark-500 font-medium uppercase tracking-wider">Total Markets</span>
-            <p className="text-base sm:text-lg font-bold text-white mt-0.5">{totalMarkets}</p>
-          </div>
-          <div className="card p-3.5">
-            <span className="text-2xs text-dark-500 font-medium uppercase tracking-wider">Active Deposits</span>
-            <p className="text-base sm:text-lg font-bold text-primary-400 mt-0.5 tabular-nums flex items-center gap-1.5 truncate"><UsdcIcon size={16} />{formatCompactUSDC(activeDeposits)} <span className="text-2xs text-dark-500">USDC</span></p>
-          </div>
-          <div className="card p-3.5">
-            <span className="text-2xs text-dark-500 font-medium uppercase tracking-wider">Active</span>
-            <p className="text-base sm:text-lg font-bold text-white mt-0.5">{activePositions}</p>
-          </div>
-          <div className="card p-3.5">
-            <span className="text-2xs text-dark-500 font-medium uppercase tracking-wider">Estimated Claimable</span>
-            <p className={`text-base sm:text-lg font-bold mt-0.5 ${claimableWinnings + claimableRefunds > 0 ? 'text-emerald-400' : 'text-white'}`}>
-              {claimableWinnings + claimableRefunds > 0 ? claimableWinnings + claimableRefunds : <span className="text-dark-500">—</span>}
-            </p>
-          </div>
+        <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-3">
+          <SummaryCard label="Total Deposited" value={formatCompactUSDC(totalDeposited)} suffix="USDC" icon={<UsdcIcon size={16} />} accent="neutral" />
+          <SummaryCard label="Active Deposits" value={formatCompactUSDC(activeDeposits)} suffix="USDC" icon={<UsdcIcon size={16} />} accent="primary" />
+          <SummaryCard label="Claimable Principal" value={formatCompactUSDC(claimablePrincipal)} suffix="USDC" icon={<UsdcIcon size={16} />} accent="success" />
+          <SummaryCard label="Markets" value={`${totalMarkets}`} icon={<MiniMarketIcon />} accent="neutral" />
+          <SummaryCard label="Active" value={`${activePositions}`} icon={<MiniBoltIcon />} accent="info" />
+          <SummaryCard label="Cancelled / Expired" value={`${cancelledCount + expiredCount}`} icon={<MiniCloseIcon />} accent="danger" />
         </div>
       )}
 
       {/* Tab Chips */}
       {positions.length > 0 && (
-        <div className="flex items-center gap-2 overflow-x-auto pb-2 -mx-4 px-4 sm:mx-0 sm:px-0 scrollbar-hide">
-          {(['all', 'active', 'winnings', 'refunds', 'claimed'] as TabType[]).map((tab) => (
-            <button
-              key={tab}
-              onClick={() => setActiveTab(tab)}
-              className={`chip shrink-0 ${activeTab === tab ? 'chip-active' : ''}`}
-            >
-              {tab === 'winnings' ? 'Est. Winnings' : tab === 'refunds' ? 'Est. Refunds' : tab.charAt(0).toUpperCase() + tab.slice(1)}
-              <span className="ml-1.5 px-1.5 py-0.5 rounded bg-white/20 text-2xs">
-                {tabCounts[tab]}
-              </span>
-            </button>
-          ))}
+        <div className="card p-3 sm:p-4">
+          <div className="flex flex-col lg:flex-row gap-3 lg:items-center lg:justify-between">
+            <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-hide" role="tablist" aria-label="Portfolio filter tabs">
+              {(['all', 'active', 'winnings', 'refunds', 'claimed'] as TabType[]).map((tab) => (
+                <button
+                  key={tab}
+                  role="tab"
+                  aria-selected={activeTab === tab}
+                  aria-pressed={activeTab === tab}
+                  onClick={() => setActiveTab(tab)}
+                  className={`chip shrink-0 ${activeTab === tab ? 'chip-active' : ''}`}
+                >
+                  {tab === 'winnings' ? 'Est. Winnings' : tab === 'refunds' ? 'Est. Refunds' : tab.charAt(0).toUpperCase() + tab.slice(1)}
+                  <span className="ml-1.5 px-1.5 py-0.5 rounded bg-white/20 text-2xs">
+                    {tabCounts[tab]}
+                  </span>
+                </button>
+              ))}
+            </div>
+
+            <div className="flex flex-col sm:flex-row gap-2 sm:items-center sm:justify-end">
+              <select
+                value={categoryFilter}
+                onChange={(e) => setCategoryFilter(e.target.value)}
+                aria-label="Filter by category"
+                className="select-field text-xs sm:text-sm min-h-[40px] sm:min-h-[42px] sm:w-44"
+              >
+                {categoryCounts.map((category) => (
+                  <option key={category} value={category}>{category}</option>
+                ))}
+              </select>
+              <select
+                value={sortBy}
+                onChange={(e) => setSortBy(e.target.value as SortBy)}
+                aria-label="Sort positions"
+                className="select-field text-xs sm:text-sm min-h-[40px] sm:min-h-[42px] sm:w-56"
+              >
+                <option value="claimable_first">Claimable First</option>
+                <option value="highest_deposit">Highest Deposit</option>
+                <option value="lowest_deposit">Lowest Deposit</option>
+                <option value="newest">Newest Markets</option>
+                <option value="oldest">Oldest Markets</option>
+                <option value="title_az">Title A-Z</option>
+                <option value="title_za">Title Z-A</option>
+              </select>
+            </div>
+          </div>
         </div>
       )}
 
@@ -259,7 +416,13 @@ export default function Portfolio() {
       )}
 
       {/* Positions */}
-      {filteredPositions.length === 0 ? (
+      {loadError ? (
+        <EmptyState
+          title="Failed to load portfolio"
+          description="Could not fetch your portfolio data. Please try refreshing the page."
+          action={<button onClick={() => window.location.reload()} className="btn-secondary text-sm">Refresh</button>}
+        />
+      ) : filteredPositions.length === 0 ? (
         <EmptyState
           title={activeTab === 'all' ? "No positions yet" : `No ${activeTab} positions`}
           description={
@@ -278,21 +441,33 @@ export default function Portfolio() {
           action={activeTab === 'all' ? <Link to="/" className="btn-primary text-sm">Browse Markets</Link> : undefined}
         />
       ) : (
-        <div className="space-y-3">
+         <div className="space-y-3">
           {filteredPositions.map((pos, idx) => (
-            <div key={pos.market} className="card p-4 sm:p-5 animate-fade-in-up" style={{ animationDelay: `${idx * 50}ms`, animationFillMode: 'both' }}>
+            <div key={pos.market} className="card p-4 sm:p-5 animate-fade-in-up bg-gradient-to-br from-white/[0.015] to-transparent" style={{ animationDelay: `${idx * 50}ms`, animationFillMode: 'both' }}>
               {/* Title + Badge */}
               <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2 sm:gap-3 mb-3">
                 <div className="min-w-0 flex-1">
-                  <Link
-                    to={`/market/${makeMarketSlug(pos.marketId, pos.title)}`}
-                    className="font-semibold text-sm text-white hover:text-primary-400 transition-colors line-clamp-2 sm:line-clamp-1"
-                  >
-                    {pos.title}
-                  </Link>
-                  <div className="flex items-center gap-2 mt-1.5">
+                  {pos.marketId !== null ? (
+                    <Link
+                      to={`/market/${makeMarketSlug(pos.marketId, pos.title)}`}
+                      className="font-semibold text-sm text-white hover:text-primary-400 transition-colors line-clamp-2 sm:line-clamp-1"
+                    >
+                      {pos.title}
+                    </Link>
+                  ) : (
+                    <span className="font-semibold text-sm text-white line-clamp-2 sm:line-clamp-1" aria-disabled="true">
+                      {pos.title}
+                    </span>
+                  )}
+                  <div className="flex items-center gap-2 mt-1.5 flex-wrap">
                     <span className={`badge text-2xs ${STAGE_COLORS[pos.stage]}`}>{STAGE_LABELS[pos.stage]}</span>
                     <span className="text-2xs text-dark-500">{pos.category}</span>
+                    {(pos.canRedeem && !pos.hasRedeemed) && (
+                      <span className="badge text-2xs bg-emerald-500/15 text-emerald-300 border-emerald-500/25">Claim Winnings</span>
+                    )}
+                    {(pos.canRefund && !pos.hasRefunded && pos.netDepositedWei > 0n) && (
+                      <span className="badge text-2xs bg-cyan-500/15 text-cyan-300 border-cyan-500/25">Claim Refund</span>
+                    )}
                   </div>
                 </div>
                 <div className="flex items-center sm:items-end gap-1.5 sm:flex-col sm:text-right shrink-0">
@@ -364,20 +539,90 @@ export default function Portfolio() {
                 )}
 
                 {/* View market link */}
-                <Link
-                  to={`/market/${makeMarketSlug(pos.marketId, pos.title)}`}
-                  className="ml-auto text-2xs text-dark-500 hover:text-primary-400 font-medium transition-colors flex items-center gap-0.5"
-                >
-                  View
-                  <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-                  </svg>
-                </Link>
+                {pos.marketId !== null ? (
+                  <Link
+                    to={`/market/${makeMarketSlug(pos.marketId, pos.title)}`}
+                    className="ml-auto text-2xs text-dark-500 hover:text-primary-400 font-medium transition-colors flex items-center gap-0.5"
+                  >
+                    View
+                    <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                    </svg>
+                  </Link>
+                ) : (
+                  <span className="ml-auto text-2xs text-dark-500/40 flex items-center gap-0.5" aria-disabled="true" tabIndex={-1}>
+                    View
+                    <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                    </svg>
+                  </span>
+                )}
               </div>
             </div>
           ))}
         </div>
       )}
     </div>
+  );
+}
+
+function SummaryCard({
+  label,
+  value,
+  suffix,
+  icon,
+  accent,
+}: {
+  label: string;
+  value: string;
+  suffix?: string;
+  icon: ReactNode;
+  accent: 'neutral' | 'primary' | 'success' | 'info' | 'danger';
+}) {
+  const accentStyles = {
+    neutral: 'bg-white/[0.02] border-white/[0.08] text-white',
+    primary: 'bg-primary-500/[0.08] border-primary-500/25 text-primary-200',
+    success: 'bg-emerald-500/[0.08] border-emerald-500/25 text-emerald-200',
+    info: 'bg-blue-500/[0.08] border-blue-500/25 text-blue-200',
+    danger: 'bg-red-500/[0.08] border-red-500/25 text-red-200',
+  };
+
+  return (
+    <div className={`card p-3.5 border ${accentStyles[accent]}`}>
+      <div className="flex items-center gap-2 text-2xs uppercase tracking-wider text-white/55 mb-1.5">
+        <span className="w-5 h-5 rounded-md bg-black/25 border border-white/[0.08] flex items-center justify-center">
+          {icon}
+        </span>
+        {label}
+      </div>
+      <p className="text-lg font-bold tabular-nums text-white leading-none">
+        {value}
+        {suffix ? <span className="text-2xs font-medium text-white/45 ml-1.5">{suffix}</span> : null}
+      </p>
+    </div>
+  );
+}
+
+function MiniMarketIcon() {
+  return (
+    <svg className="w-3.5 h-3.5 text-white/75" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6A2.25 2.25 0 016 3.75h2.25A2.25 2.25 0 0110.5 6v2.25a2.25 2.25 0 01-2.25 2.25H6a2.25 2.25 0 01-2.25-2.25V6zM13.5 6a2.25 2.25 0 012.25-2.25H18A2.25 2.25 0 0120.25 6v2.25A2.25 2.25 0 0118 10.5h-2.25a2.25 2.25 0 01-2.25-2.25V6zM3.75 15.75A2.25 2.25 0 016 13.5h12A2.25 2.25 0 0120.25 15.75V18A2.25 2.25 0 0118 20.25H6A2.25 2.25 0 013.75 18v-2.25z" />
+    </svg>
+  );
+}
+
+function MiniBoltIcon() {
+  return (
+    <svg className="w-3.5 h-3.5 text-blue-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M13 3L4 14h6l-1 7 9-11h-6l1-7z" />
+    </svg>
+  );
+}
+
+function MiniCloseIcon() {
+  return (
+    <svg className="w-3.5 h-3.5 text-red-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M6 6l12 12M6 18L18 6" />
+    </svg>
   );
 }

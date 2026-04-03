@@ -4,40 +4,40 @@
 
 @layer base {
   :root {
-    --color-primary: 217 91% 60%;
+    --color-primary: 194 92% 58%;
     --color-yes: 142 76% 36%;
     --color-no: 0 84% 60%;
     
-    --background: 222 28% 7%;
+    --background: 220 30% 5%;
     --foreground: 210 40% 98%;
-    --border: 217 33% 18%;
-    --card: 222 25% 10%;
+    --border: 215 28% 14%;
+    --card: 220 24% 8%;
     --card-foreground: 210 40% 98%;
-    --card-border: 217 25% 16%;
-    --popover: 222 25% 12%;
+    --card-border: 215 24% 12%;
+    --popover: 220 24% 9%;
     --popover-foreground: 210 40% 98%;
-    --popover-border: 217 33% 18%;
-    --primary: 217 91% 60%;
+    --popover-border: 215 28% 14%;
+    --primary: 194 92% 58%;
     --primary-foreground: 220 25% 8%;
-    --secondary: 217 33% 16%;
+    --secondary: 216 27% 12%;
     --secondary-foreground: 210 40% 98%;
-    --muted: 217 33% 15%;
+    --muted: 216 24% 11%;
     --muted-foreground: 215 20% 65%;
-    --accent: 217 33% 18%;
+    --accent: 216 24% 14%;
     --accent-foreground: 210 40% 98%;
     --destructive: 0 84% 60%;
     --destructive-foreground: 210 40% 98%;
-    --input: 217 33% 20%;
-    --ring: 217 91% 60%;
+    --input: 216 24% 16%;
+    --ring: 194 92% 58%;
     
-    --elevate-1: rgba(59, 130, 246, 0.08);
-    --elevate-2: rgba(59, 130, 246, 0.15);
+    --elevate-1: rgba(34, 211, 238, 0.08);
+    --elevate-2: rgba(34, 211, 238, 0.15);
 
     --accent-green: #00d46a;
     --accent-red: #ef4444;
-    --bg-base: #0a0a0f;
-    --bg-card: #111118;
-    --bg-border: #1a1a24;
+    --bg-base: #070a11;
+    --bg-card: #0d121b;
+    --bg-border: #161f2c;
   }
 
   * {
@@ -68,7 +68,9 @@
     @apply bg-dark-950 text-white antialiased;
     min-height: 100vh;
     background-image:
-      linear-gradient(to bottom right, hsl(var(--background)), hsl(var(--background)), rgba(59, 130, 246, 0.05));
+      radial-gradient(1200px 620px at 12% -20%, rgba(34, 211, 238, 0.12), transparent 60%),
+      radial-gradient(1000px 680px at 90% 120%, rgba(16, 185, 129, 0.08), transparent 62%),
+      linear-gradient(165deg, #05070d 0%, #070b12 40%, #0a1018 100%);
   }
 
   body::before {
@@ -79,13 +81,13 @@
     width: 200%;
     height: 200%;
     background: radial-gradient(
-      circle at 30% 20%,
-      hsl(var(--primary) / 0.06) 0%,
+      circle at 28% 18%,
+      hsl(var(--primary) / 0.08) 0%,
       transparent 50%
     ),
     radial-gradient(
-      circle at 70% 80%,
-      hsl(217 91% 60% / 0.04) 0%,
+      circle at 72% 82%,
+      hsl(160 84% 42% / 0.05) 0%,
       transparent 40%
     );
     animation: rotate-bg 30s linear infinite;
@@ -94,8 +96,8 @@
   }
 
   @keyframes rotate-bg {
-    from { transform: rotate(0deg); }
-    to { transform: rotate(360deg); }
+    from { transform: rotate(0deg) scale(1); }
+    to { transform: rotate(360deg) scale(1.04); }
   }
 
   input[type="number"]::-webkit-outer-spin-button,
@@ -329,7 +331,7 @@
   }
 
   .text-gradient {
-    background: linear-gradient(135deg, hsl(217 91% 70%) 0%, hsl(var(--primary)) 50%, hsl(217 91% 55%) 100%);
+    background: linear-gradient(135deg, #67e8f9 0%, hsl(var(--primary)) 45%, #2dd4bf 100%);
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
     background-clip: text;
@@ -425,6 +427,99 @@
     }
     .chip {
       @apply min-h-[36px] px-3.5;
+    }
+  }
+
+  /* Safe area for notch devices */
+  .safe-area-inset-bottom {
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+
+  /* Focus visible styles for accessibility */
+  *:focus-visible {
+    outline: 2px solid hsl(var(--primary) / 0.6);
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+
+  /* Smooth page transitions */
+  .page-enter {
+    animation: fadeIn 0.2s ease-out;
+  }
+
+  .route-fade-in {
+    animation: route-fade-in 0.35s ease-out;
+    will-change: opacity, transform;
+  }
+
+  @keyframes route-fade-in {
+    0% {
+      opacity: 0;
+      transform: translateY(8px);
+      filter: blur(2px);
+    }
+    100% {
+      opacity: 1;
+      transform: translateY(0);
+      filter: blur(0);
+    }
+  }
+
+  /* Responsive grid improvements */
+  .market-grid {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 1rem;
+  }
+  @media (min-width: 640px) {
+    .market-grid {
+      grid-template-columns: repeat(2, 1fr);
+    }
+  }
+  @media (min-width: 1024px) {
+    .market-grid {
+      grid-template-columns: repeat(3, 1fr);
+    }
+  }
+  @media (min-width: 1280px) {
+    .market-grid {
+      grid-template-columns: repeat(4, 1fr);
+    }
+  }
+
+  /* Touch device optimizations */
+  @media (hover: none) and (pointer: coarse) {
+    .card-hover:hover {
+      border-color: var(--bg-border);
+      box-shadow: 0 2px 12px -2px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(255, 255, 255, 0.03);
+    }
+    .card-hover:active {
+      border-color: rgba(255, 255, 255, 0.12);
+      transform: scale(0.98);
+    }
+  }
+
+  /* Improved modal backdrop for mobile */
+  @media (max-width: 640px) {
+    .mobile-drawer {
+      width: 100%;
+      max-width: 100%;
+      border-left: none;
+      border-radius: 1rem 1rem 0 0;
+      bottom: 0;
+      top: auto;
+      max-height: 85vh;
+      animation: slideUp 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+  }
+
+  /* Toast responsive positioning */
+  @media (max-width: 640px) {
+    .toast-container {
+      top: auto !important;
+      bottom: 4.5rem !important;
+      left: 1rem !important;
+      right: 1rem !important;
     }
   }
 

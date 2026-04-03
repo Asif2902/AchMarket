@@ -9,6 +9,7 @@ A decentralized prediction market platform built on ARC Testnet. Users can creat
 - **Liquidity Provision**: Automatic market making via LMSR
 - **Settlement**: Automatic resolution and payouts when markets resolve
 - **Decentralized**: Fully on-chain, no centralized intermediaries
+
 ## Architecture
 
 ```

@@ -10,6 +10,7 @@ export const NETWORK = {
   },
   blockExplorer: 'https://testnet.arcscan.app',
   blockscoutApi: 'https://testnet.arcscan.app/api',
+  blockTime: 0.5,
 } as const;
 
 export const FACTORY_ADDRESS = '0xd7b122B12caCB299249f89be7F241a47f762f283';

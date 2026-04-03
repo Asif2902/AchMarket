@@ -1,13 +1,19 @@
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import type { ReactNode } from 'react';
+import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
+import { useEffect } from 'react';
 import { Analytics as VercelAnalytics } from '@vercel/analytics/react';
 import { WalletProvider, useWallet } from './context/WalletContext';
 import Header from './components/Header';
 import Footer from './components/Footer';
+import MobileBottomNav from './components/MobileBottomNav';
 import ToastContainer from './components/Toast';
 import Home from './pages/user/Home';
 import MarketDetail from './pages/user/MarketDetail';
 import Portfolio from './pages/user/Portfolio';
+import ProfileHome from './pages/user/ProfileHome';
+import ProfileSettings from './pages/user/ProfileSettings';
 import Analytics from './pages/user/Analytics';
+import PublicProfile from './pages/user/PublicProfile';
 import OwnerLayout from './pages/owner/OwnerLayout';
 import CreateMarket from './pages/owner/CreateMarket';
 import ActiveMarkets from './pages/owner/ActiveMarkets';
@@ -22,6 +28,9 @@ const sharedRoutes = (
     <Route path="/analytics" element={<Analytics />} />
     <Route path="/market/:slug" element={<MarketDetail />} />
     <Route path="/portfolio" element={<Portfolio />} />
+    <Route path="/profile" element={<ProfileHome />} />
+    <Route path="/profile/settings" element={<ProfileSettings />} />
+    <Route path="/profile/:slug" element={<PublicProfile />} />
   </>
 );
 
@@ -66,20 +75,35 @@ function AppRoutes() {
   );
 }
 
-export default function App() {
+export default function App({ children }: { children?: ReactNode }) {
   return (
     <BrowserRouter>
       <WalletProvider>
-        <div className="min-h-screen flex flex-col">
-          <Header />
-          <main className="flex-1">
-            <AppRoutes />
-          </main>
-          <Footer />
-          <ToastContainer />
-          <VercelAnalytics />
-        </div>
+        <AppShell>{children}</AppShell>
       </WalletProvider>
     </BrowserRouter>
+  );
+}
+
+function AppShell({ children }: { children?: ReactNode }) {
+  const location = useLocation();
+
+  useEffect(() => {
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }, [location.pathname, location.search]);
+
+  return (
+    <div className="min-h-screen flex flex-col">
+      <Header />
+      <main className="flex-1 pb-20 md:pb-0">
+        <div key={`${location.pathname}${location.search}`} className="route-fade-in">
+          {children ?? <AppRoutes />}
+        </div>
+      </main>
+      <Footer />
+      <MobileBottomNav />
+      <ToastContainer />
+      <VercelAnalytics />
+    </div>
   );
 }
