@@ -262,9 +262,9 @@ export default function ProfileSettings() {
                   View Public Profile
                 </a>
               ) : (
-                <a href="#" aria-disabled="true" tabIndex={-1} className="btn-secondary text-xs px-3 py-2 opacity-40 cursor-not-allowed" onClick={(e) => e.preventDefault()}>
+                <button disabled className="btn-secondary text-xs px-3 py-2 opacity-40 cursor-not-allowed">
                   View Public Profile
-                </a>
+                </button>
               )}
               <button onClick={handleSave} disabled={saving || !signer} className="btn-primary text-xs px-3 py-2">
                 {saving ? 'Saving...' : 'Save Changes'}

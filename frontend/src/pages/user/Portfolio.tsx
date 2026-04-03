@@ -87,28 +87,38 @@ export default function Portfolio() {
 
   const latestAddressRef = useRef(address);
   latestAddressRef.current = address;
+  const addrToIdCache = useRef<Map<string, number>>(new Map());
 
   const refreshPortfolio = useCallback(async (expectedAddress: string): Promise<Position[]> => {
-    const factory = new ethers.Contract(FACTORY_ADDRESS, FACTORY_ABI, readProvider);
     const lens = new ethers.Contract(LENS_ADDRESS, LENS_ABI, readProvider);
-    const [portfolio, totalMarkets] = await Promise.all([
-      lens.getUserPortfolio(expectedAddress),
-      factory.totalMarkets(),
-    ]);
+    const portfolio = await lens.getUserPortfolio(expectedAddress);
 
-    const total = Number(totalMarkets);
-    let summaries: Record<string, unknown>[] = [];
-    if (total > 0) {
-      summaries = await lens.getMarketSummaries(0, total);
-    }
-    const addrToId = new Map<string, number>();
-    for (const s of summaries) {
-      addrToId.set((s.market as string).toLowerCase(), Number(s.marketId));
+    const portfolioAddrs = (portfolio as Array<Record<string, unknown>>)
+      .map((p) => (p.market as string).toLowerCase());
+    const uniqueAddrs = [...new Set(portfolioAddrs)];
+
+    const cachedEntries = uniqueAddrs
+      .map((addr) => [addr, addrToIdCache.current.get(addr)] as [string, number | undefined])
+      .filter(([, id]) => id !== undefined) as Array<[string, number]>;
+
+    const missingAddrs = uniqueAddrs.filter((addr) => !addrToIdCache.current.has(addr));
+
+    if (missingAddrs.length > 0) {
+      const factory = new ethers.Contract(FACTORY_ADDRESS, FACTORY_ABI, readProvider);
+      const totalMarkets = Number(await factory.totalMarkets());
+      if (totalMarkets > 0) {
+        const summaries = await lens.getMarketSummaries(0, totalMarkets);
+        for (const s of summaries as Array<Record<string, unknown>>) {
+          const addr = (s.market as string).toLowerCase();
+          const id = Number(s.marketId);
+          addrToIdCache.current.set(addr, id);
+        }
+      }
     }
 
     return portfolio.map((p: Record<string, unknown>) => ({
       market: p.market as string,
-      marketId: addrToId.get((p.market as string).toLowerCase()) ?? null,
+      marketId: addrToIdCache.current.get((p.market as string).toLowerCase()) ?? null,
       title: p.title as string,
       category: p.category as string,
       outcomeLabels: [...(p.outcomeLabels as string[])],
@@ -123,11 +133,19 @@ export default function Portfolio() {
   }, [readProvider]);
 
   useEffect(() => {
-    if (!address) return;
+    if (!address) {
+      setPositions([]);
+      setTxPending(null);
+      return;
+    }
+
+    setPositions([]);
+    setTxPending(null);
+    setLoading(true);
+
     let cancelled = false;
     const fetch = async () => {
       try {
-        setLoading(true);
         const positions = await refreshPortfolio(address);
         if (!cancelled) setPositions(positions);
       } catch (err) {

@@ -24,6 +24,7 @@ interface GlobalStats {
   totalMarkets: number;
   totalVolumeWei: bigint;
   totalParticipants: number;
+  participantsPartial: boolean;
   activeMarkets: number;
   resolvedMarkets: number;
   suspendedMarkets: number;
@@ -73,6 +74,7 @@ export default function Analytics() {
           totalMarkets: 0,
           totalVolumeWei: 0n,
           totalParticipants: 0,
+          participantsPartial: false,
           activeMarkets: 0,
           resolvedMarkets: 0,
           suspendedMarkets: 0,
@@ -84,9 +86,19 @@ export default function Analytics() {
         return;
       }
 
-      const marketAddrs = await Promise.all(
+      const marketSettled = await Promise.allSettled(
         Array.from({ length: totalMarkets }, (_, i) => factory.markets(i)),
       );
+
+      const marketAddrs: string[] = [];
+      let unavailableMarkets = 0;
+      for (const result of marketSettled) {
+        if (result.status === 'fulfilled') {
+          marketAddrs.push(result.value);
+        } else {
+          unavailableMarkets += 1;
+        }
+      }
 
       const marketPromises = marketAddrs.map(async (addr) => {
         try {
@@ -96,12 +108,14 @@ export default function Analytics() {
             market.stage(),
           ]);
           let participants: bigint | null = null;
+          let participantsDropped = false;
           try {
             participants = await market.participantCount();
           } catch {
             participants = null;
+            participantsDropped = true;
           }
-          return { volume, stage, participants, addr };
+          return { volume, stage, participants, participantsDropped, addr };
         } catch {
           return null;
         }
@@ -111,11 +125,11 @@ export default function Analytics() {
 
       let totalVolume = 0n;
       let totalParticipants = 0;
+      let participantsPartial = false;
       let activeMarkets = 0;
       let resolvedMarkets = 0;
       let suspendedMarkets = 0;
       let cancelledOrExpired = 0;
-      let unavailableMarkets = 0;
 
       const dailyMap = new Map<string, { volume: bigint; trades: number; dayLabel: string }>();
       for (let i = 6; i >= 0; i -= 1) {
@@ -132,6 +146,7 @@ export default function Analytics() {
         }
         totalVolume += r.volume;
         if (r.participants !== null) totalParticipants += Number(r.participants);
+        if (r.participantsDropped) participantsPartial = true;
 
         const stageNum = Number(r.stage);
         if (stageNum === STAGE.Active) activeMarkets += 1;
@@ -144,7 +159,7 @@ export default function Analytics() {
       const blockNumber = await readProvider.getBlockNumber();
       const avgBlockTime = NETWORK.blockTime;
       const blocksPerDay = Math.floor(86400 / avgBlockTime);
-      const startBlock = blockNumber - (blocksPerDay * 7);
+      const startBlock = Math.max(0, blockNumber - (blocksPerDay * 7));
 
       const eventPromises = marketAddrs.map(async (addr) => {
         try {
@@ -172,6 +187,7 @@ export default function Analytics() {
         totalMarkets,
         totalVolumeWei: totalVolume,
         totalParticipants,
+        participantsPartial,
         activeMarkets,
         resolvedMarkets,
         suspendedMarkets,
@@ -454,7 +470,7 @@ export default function Analytics() {
                     value={stats.totalMarkets > 0 ? ((stats.activeMarkets / stats.totalMarkets) * 100).toFixed(1) : '0'}
                     suffix="%"
                   />
-                  <MetricRow label="Trader-Market Participations" value={formatCompact(stats.totalParticipants)} />
+                  <MetricRow label="Trader-Market Participations" value={stats.participantsPartial ? `~${formatCompact(stats.totalParticipants)}` : formatCompact(stats.totalParticipants)} />
                 </div>
               </div>
             </div>
