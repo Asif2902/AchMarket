@@ -85,7 +85,7 @@ export default function MarketCard({ data }: Props) {
               <span className="text-[11px] text-white/65 font-medium truncate max-w-[70%]">{buyLabel} Buy</span>
               <span className="text-[11px] font-semibold text-emerald-300 tabular-nums">{buyPct.toFixed(1)}%</span>
             </div>
-            <div className="relative h-14 rounded-md bg-black/30 overflow-hidden border border-white/[0.04]">
+            <div className="relative h-14 rounded-md bg-black/30 overflow-hidden border border-white/[0.04]" role="img" aria-label="Illustrative buy probability chart — not historical price data">
               <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="absolute inset-0 w-full h-full">
                 <defs>
                   <linearGradient id={`buy-fill-${data.marketId}`} x1="0" x2="0" y1="0" y2="1">

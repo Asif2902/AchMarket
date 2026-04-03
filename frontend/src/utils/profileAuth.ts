@@ -23,6 +23,7 @@ export function normalizeProfileSlug(value: string): string {
     .replace(/[^a-z0-9_-]/g, '')
     .replace(/_{2,}/g, '_')
     .replace(/-{2,}/g, '-')
+    .replace(/^-+|-+$/g, '')
     .slice(0, 40);
 }
 

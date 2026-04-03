@@ -1,6 +1,3 @@
-<<<<<<< HEAD
-it works 😁 but data base doesn't 
-=======
 # AchMarket
 
 A decentralized prediction market platform built on ARC Testnet. Users can create and trade on outcome-based prediction markets using the LMSR (Logarithmic Market Scoring Rule) mechanism.
@@ -12,6 +9,7 @@ A decentralized prediction market platform built on ARC Testnet. Users can creat
 - **Liquidity Provision**: Automatic market making via LMSR
 - **Settlement**: Automatic resolution and payouts when markets resolve
 - **Decentralized**: Fully on-chain, no centralized intermediaries
+
 ## Architecture
 
 ```
@@ -105,4 +103,3 @@ npm run dev
 ## License
 
 GNU General Public License v3.0 - see LICENSE file for detail
->>>>>>> origin/main

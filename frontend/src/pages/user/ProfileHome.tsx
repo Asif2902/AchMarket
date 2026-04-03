@@ -9,6 +9,7 @@ export default function ProfileHome() {
   const { isConnected, address } = useWallet();
   const [loading, setLoading] = useState(true);
   const [profileSlug, setProfileSlug] = useState<string | null>(null);
+  const [profileNotFound, setProfileNotFound] = useState(false);
 
   useEffect(() => {
     if (!isConnected || !address) {
@@ -26,8 +27,12 @@ export default function ProfileHome() {
         if (!cancelled) {
           setProfileSlug(response.profile?.profileSlug || null);
         }
-      } catch {
+      } catch (err) {
         if (!cancelled) {
+          const message = err instanceof Error ? err.message : '';
+          if (message.includes('404') || message.includes('not found') || message.includes('Profile not found')) {
+            setProfileNotFound(true);
+          }
           setProfileSlug(null);
         }
       } finally {
@@ -57,6 +62,10 @@ export default function ProfileHome() {
   }
 
   if (loading) return <PageLoader />;
+
+  if (profileNotFound) {
+    return <Navigate to="/profile/settings" replace />;
+  }
 
   if (profileSlug) {
     return <Navigate to={`/profile/${profileSlug}`} replace />;

@@ -204,7 +204,9 @@ export default function PublicProfile() {
                 </svg>
               </Link>
             )}
-            <Link to="/portfolio" className="btn-secondary text-xs px-3 py-2">My Portfolio</Link>
+            {canEdit && (
+              <Link to="/portfolio" className="btn-secondary text-xs px-3 py-2">My Portfolio</Link>
+            )}
           </div>
         </div>
       </div>

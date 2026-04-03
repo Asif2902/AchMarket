@@ -1,3 +1,4 @@
+import { Link } from 'react-router-dom';
 import { NETWORK } from '../config/network';
 
 const ACH_SWAP_URL = 'https://achswap.app';
@@ -32,9 +33,9 @@ export default function Footer() {
           </div>
 
           <div className="flex items-center gap-6 text-xs text-dark-400">
-            <a href="/" className="hover:text-white transition-colors">Markets</a>
-            <a href="/analytics" className="hover:text-white transition-colors">Analytics</a>
-            <a href="/portfolio" className="hover:text-white transition-colors">Portfolio</a>
+            <Link to="/" className="hover:text-white transition-colors">Markets</Link>
+            <Link to="/analytics" className="hover:text-white transition-colors">Analytics</Link>
+            <Link to="/portfolio" className="hover:text-white transition-colors">Portfolio</Link>
           </div>
 
           <div className="flex items-center gap-6 text-xs text-dark-400">

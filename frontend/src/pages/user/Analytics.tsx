@@ -27,6 +27,7 @@ interface GlobalStats {
   totalParticipants: number;
   activeMarkets: number;
   resolvedMarkets: number;
+  suspendedMarkets: number;
   cancelledOrExpiredMarkets: number;
 }
 
@@ -72,6 +73,7 @@ export default function Analytics() {
           totalParticipants: 0,
           activeMarkets: 0,
           resolvedMarkets: 0,
+          suspendedMarkets: 0,
           cancelledOrExpiredMarkets: 0,
         });
         setDailyVolume(generateEmptyDailyVolumes());
@@ -106,6 +108,7 @@ export default function Analytics() {
       let totalVolume = 0n;
       let activeMarkets = 0;
       let resolvedMarkets = 0;
+      let suspendedMarkets = 0;
       let cancelledOrExpired = 0;
 
       const dailyMap = new Map<string, { volume: bigint; trades: number; dayLabel: string }>();
@@ -122,6 +125,7 @@ export default function Analytics() {
 
         const stageNum = Number(r.stage);
         if (stageNum === 0) activeMarkets += 1;
+        else if (stageNum === 1) suspendedMarkets += 1;
         else if (stageNum === 2) resolvedMarkets += 1;
         else if (stageNum === 3 || stageNum === 4) cancelledOrExpired += 1;
       }
@@ -174,6 +178,7 @@ export default function Analytics() {
         totalParticipants,
         activeMarkets,
         resolvedMarkets,
+        suspendedMarkets,
         cancelledOrExpiredMarkets: cancelledOrExpired,
       });
 
@@ -246,6 +251,13 @@ export default function Analytics() {
         pct: (stats.resolvedMarkets / stats.totalMarkets) * 100,
         color: '#60a5fa',
         bg: 'bg-blue-500/12 border-blue-500/30 text-blue-300',
+      },
+      {
+        label: 'Suspended',
+        value: stats.suspendedMarkets,
+        pct: (stats.suspendedMarkets / stats.totalMarkets) * 100,
+        color: '#fbbf24',
+        bg: 'bg-amber-500/12 border-amber-500/30 text-amber-300',
       },
       {
         label: 'Cancelled/Expired',

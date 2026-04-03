@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { ethers } from 'ethers';
 import { useWallet } from '../../context/WalletContext';
@@ -215,12 +215,12 @@ export default function Home() {
   }, [categoryFilter, markets, readProvider]);
 
   const categories = getCategories(markets);
-  const categoryCounts = categories.map((cat) => ({
+  const categoryCounts = useMemo(() => categories.map((cat) => ({
     category: cat,
     count: cat === 'All'
       ? markets.length
       : markets.filter((m) => m.category.toLowerCase() === cat.toLowerCase()).length,
-  }));
+  })), [categories, markets]);
 
   return (
     <div className="min-h-screen">

@@ -1,10 +1,10 @@
-import { recoverAddress, hashMessage } from 'ethers';
+import { recoverAddress, hashMessage, getAddress } from 'ethers';
 import { MongoClient, MongoServerError } from 'mongodb';
 
 // ====== Inline utilities (no cross-directory imports) ======
 
 function normalizeAddress(address: string): string {
-  return address.toLowerCase();
+  return getAddress(address).toLowerCase();
 }
 
 function normalizeProfileSlug(value: string): string {
@@ -98,7 +98,7 @@ async function getMongoClient(): Promise<MongoClient> {
         await col.createIndex({ address: 1 }, { unique: true, name: 'uniq_address' });
         await col.createIndex(
           { profileSlug: 1 },
-          { unique: true, name: 'uniq_profile_slug' },
+          { unique: true, name: 'uniq_profile_slug', sparse: true },
         );
         indexesReady = true;
       }
@@ -123,7 +123,7 @@ async function getMongoClient(): Promise<MongoClient> {
   await col.createIndex({ address: 1 }, { unique: true, name: 'uniq_address' });
   await col.createIndex(
     { profileSlug: 1 },
-    { unique: true, name: 'uniq_profile_slug' },
+    { unique: true, name: 'uniq_profile_slug', sparse: true },
   );
   indexesReady = true;
 
@@ -192,19 +192,26 @@ async function upsertProfile(address: string, payload: Record<string, string>, t
   const conflict = await col.findOne({ profileSlug: baseSlug, address: { $ne: normalized } });
   if (conflict) throw new Error(`"${baseSlug}" is already taken. Choose a different display name.`);
 
-  await col.updateOne(
-    { address: normalized },
-    {
-      $set: {
-        address: normalized,
-        profileSlug: baseSlug,
-        ...mergedWithoutMeta,
-        updatedAt: now,
+  try {
+    await col.updateOne(
+      { address: normalized },
+      {
+        $set: {
+          address: normalized,
+          profileSlug: baseSlug,
+          ...mergedWithoutMeta,
+          updatedAt: now,
+        },
+        $setOnInsert: { createdAt: now },
       },
-      $setOnInsert: { createdAt: now },
-    },
-    { upsert: true },
-  );
+      { upsert: true },
+    );
+  } catch (err) {
+    if (err instanceof MongoServerError && err.code === 11000) {
+      throw new Error(`"${baseSlug}" is already taken. Choose a different display name.`);
+    }
+    throw err;
+  }
 
   return getProfile(normalized);
 }

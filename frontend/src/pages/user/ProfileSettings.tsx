@@ -19,10 +19,8 @@ function toProfilePayload(profile: PublicProfileType | null): ProfilePayload {
   };
 }
 
-function toProfileSlug(profile: PublicProfileType | null, address: string | null): string {
-  if (profile?.profileSlug) return profile.profileSlug;
-  if (!address) return '';
-  return normalizeProfileSlug(address.slice(2, 10));
+function toProfileSlug(profile: PublicProfileType | null): string {
+  return profile?.profileSlug ?? '';
 }
 
 export default function ProfileSettings() {
@@ -49,10 +47,12 @@ export default function ProfileSettings() {
         const response = await fetchProfileByAddress(address);
         if (!cancelled) {
           setForm(toProfilePayload(response.profile));
-          setProfileSlug(toProfileSlug(response.profile, address));
+          setProfileSlug(toProfileSlug(response.profile));
         }
       } catch (err) {
         if (!cancelled) {
+          setForm({ ...EMPTY_PROFILE_PAYLOAD });
+          setProfileSlug('');
           const message = err instanceof Error ? err.message : 'Failed to load profile';
           setMsg({ type: 'error', text: message });
         }
@@ -101,7 +101,7 @@ export default function ProfileSettings() {
       setMsg(null);
       const response = await saveProfileBySignature(address, form, signer);
       setForm(toProfilePayload(response.profile));
-      setProfileSlug(toProfileSlug(response.profile, address));
+      setProfileSlug(toProfileSlug(response.profile));
       setMsg({ type: 'success', text: 'Profile updated.' });
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to save profile';

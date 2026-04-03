@@ -143,7 +143,7 @@ export default function ToastContainer() {
   if (toasts.length === 0) return null;
 
   return (
-    <div className="fixed top-4 right-4 z-[9999] flex flex-col gap-3 pointer-events-none toast-container sm:top-4 sm:right-4 sm:left-auto sm:bottom-auto max-sm:top-auto max-sm:bottom-[4.5rem] max-sm:left-3 max-sm:right-3" aria-live="polite" aria-atomic="true">
+    <div className="fixed z-[9999] flex flex-col gap-3 pointer-events-none toast-container" aria-live="polite" aria-atomic="true">
       {toasts.map(toast => (
         <div key={toast.id} className="pointer-events-auto animate-slide-in-right">
           <ToastItem toast={toast} onRemove={removeToast} />
