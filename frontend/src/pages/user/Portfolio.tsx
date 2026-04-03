@@ -15,7 +15,7 @@ import type { PublicProfile as PublicProfileType } from '../../types/profile';
 
 interface Position {
   market: string;
-  marketId: number;
+  marketId: number | null;
   title: string;
   category: string;
   outcomeLabels: string[];
@@ -85,11 +85,14 @@ export default function Portfolio() {
     };
   }, [address]);
 
-  const refreshPortfolio = useCallback(async (): Promise<Position[]> => {
+  const latestAddressRef = useRef(address);
+  latestAddressRef.current = address;
+
+  const refreshPortfolio = useCallback(async (expectedAddress: string): Promise<Position[]> => {
     const factory = new ethers.Contract(FACTORY_ADDRESS, FACTORY_ABI, readProvider);
     const lens = new ethers.Contract(LENS_ADDRESS, LENS_ABI, readProvider);
     const [portfolio, totalMarkets] = await Promise.all([
-      lens.getUserPortfolio(address!),
+      lens.getUserPortfolio(expectedAddress),
       factory.totalMarkets(),
     ]);
 
@@ -105,7 +108,7 @@ export default function Portfolio() {
 
     return portfolio.map((p: Record<string, unknown>) => ({
       market: p.market as string,
-      marketId: addrToId.get((p.market as string).toLowerCase()) ?? 0,
+      marketId: addrToId.get((p.market as string).toLowerCase()) ?? null,
       title: p.title as string,
       category: p.category as string,
       outcomeLabels: [...(p.outcomeLabels as string[])],
@@ -117,7 +120,7 @@ export default function Portfolio() {
       hasRefunded: p.hasRefunded as boolean,
       stage: Number(p.stage),
     }));
-  }, [address, readProvider]);
+  }, [readProvider]);
 
   useEffect(() => {
     if (!address) return;
@@ -125,7 +128,7 @@ export default function Portfolio() {
     const fetch = async () => {
       try {
         setLoading(true);
-        const positions = await refreshPortfolio();
+        const positions = await refreshPortfolio(address);
         if (!cancelled) setPositions(positions);
       } catch (err) {
         if (!cancelled) console.error('Failed to fetch portfolio:', err);
@@ -140,7 +143,7 @@ export default function Portfolio() {
   }, [address, refreshPortfolio]);
 
   const handleAction = async (marketAddr: string, action: 'redeem' | 'refund') => {
-    if (!signer) return;
+    if (!signer || !address) return;
     const submittingAddress = address;
     setTxPending(marketAddr);
     setTxMsg(null);
@@ -150,17 +153,18 @@ export default function Portfolio() {
       await tx.wait();
       setTxMsg({ type: 'success', text: `${action === 'redeem' ? 'Winnings' : 'Refund'} claimed!` });
       clearClaim(marketAddr);
+
+      if (latestAddressRef.current === submittingAddress) {
+        try {
+          setPositions(await refreshPortfolio(submittingAddress));
+        } catch (err) {
+          console.error('Failed to refresh portfolio after claim:', err);
+        }
+      }
     } catch (err) {
       setTxMsg({ type: 'error', text: parseContractError(err) });
     } finally {
       setTxPending(null);
-    }
-
-    if (address !== submittingAddress) return;
-    try {
-      setPositions(await refreshPortfolio());
-    } catch (err) {
-      console.error('Failed to refresh portfolio after claim:', err);
     }
   };
 
@@ -203,24 +207,30 @@ export default function Portfolio() {
       })
       .sort((a, b) => {
         if (sortBy === 'highest_deposit') {
-          if (a.netDepositedWei === b.netDepositedWei) return b.marketId - a.marketId;
+          const aId = a.marketId ?? -1;
+          const bId = b.marketId ?? -1;
+          if (a.netDepositedWei === b.netDepositedWei) return bId - aId;
           return a.netDepositedWei > b.netDepositedWei ? -1 : 1;
         }
 
         if (sortBy === 'lowest_deposit') {
-          if (a.netDepositedWei === b.netDepositedWei) return b.marketId - a.marketId;
+          const aId = a.marketId ?? -1;
+          const bId = b.marketId ?? -1;
+          if (a.netDepositedWei === b.netDepositedWei) return bId - aId;
           return a.netDepositedWei < b.netDepositedWei ? -1 : 1;
         }
 
-        if (sortBy === 'newest') return b.marketId - a.marketId;
-        if (sortBy === 'oldest') return a.marketId - b.marketId;
+        if (sortBy === 'newest') return (b.marketId ?? -1) - (a.marketId ?? -1);
+        if (sortBy === 'oldest') return (a.marketId ?? -1) - (b.marketId ?? -1);
         if (sortBy === 'title_az') return a.title.localeCompare(b.title);
         if (sortBy === 'title_za') return b.title.localeCompare(a.title);
 
         const aClaimable = (a.canRedeem && !a.hasRedeemed) || (a.canRefund && !a.hasRefunded && a.netDepositedWei > 0n);
         const bClaimable = (b.canRedeem && !b.hasRedeemed) || (b.canRefund && !b.hasRefunded && b.netDepositedWei > 0n);
         if (aClaimable !== bClaimable) return aClaimable ? -1 : 1;
-        if (a.netDepositedWei === b.netDepositedWei) return b.marketId - a.marketId;
+        const aId = a.marketId ?? -1;
+        const bId = b.marketId ?? -1;
+        if (a.netDepositedWei === b.netDepositedWei) return bId - aId;
         return a.netDepositedWei > b.netDepositedWei ? -1 : 1;
       });
   }, [positions, activeTab, categoryFilter, sortBy]);
@@ -233,12 +243,13 @@ export default function Portfolio() {
     claimed: positions.filter(p => p.hasRedeemed || p.hasRefunded).length,
   };
 
-  const claimableValue = positions
+  const claimablePrincipal = positions
     .filter((p) => (p.canRedeem && !p.hasRedeemed) || (p.canRefund && !p.hasRefunded && p.netDepositedWei > 0n))
     .reduce((acc, p) => acc + p.netDepositedWei, 0n);
 
   const resolvedCount = positions.filter((p) => p.stage === STAGE.Resolved).length;
-  const cancelledCount = positions.filter((p) => p.stage === STAGE.Cancelled || p.stage === STAGE.Expired).length;
+  const cancelledCount = positions.filter((p) => p.stage === STAGE.Cancelled).length;
+  const expiredCount = positions.filter((p) => p.stage === STAGE.Expired).length;
   const activeRatio = totalMarkets > 0 ? (activePositions / totalMarkets) * 100 : 0;
 
   const profileName = (profileSummary?.displayName ?? '').trim();
@@ -301,10 +312,10 @@ export default function Portfolio() {
         <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-3">
           <SummaryCard label="Total Deposited" value={formatCompactUSDC(totalDeposited)} suffix="USDC" icon={<UsdcIcon size={16} />} accent="neutral" />
           <SummaryCard label="Active Deposits" value={formatCompactUSDC(activeDeposits)} suffix="USDC" icon={<UsdcIcon size={16} />} accent="primary" />
-          <SummaryCard label="Claimable Value" value={formatCompactUSDC(claimableValue)} suffix="USDC" icon={<UsdcIcon size={16} />} accent="success" />
+          <SummaryCard label="Claimable Principal" value={formatCompactUSDC(claimablePrincipal)} suffix="USDC" icon={<UsdcIcon size={16} />} accent="success" />
           <SummaryCard label="Markets" value={`${totalMarkets}`} icon={<MiniMarketIcon />} accent="neutral" />
           <SummaryCard label="Active" value={`${activePositions}`} icon={<MiniBoltIcon />} accent="info" />
-          <SummaryCard label="Cancelled" value={`${cancelledCount}`} icon={<MiniCloseIcon />} accent="danger" />
+          <SummaryCard label="Cancelled / Expired" value={`${cancelledCount + expiredCount}`} icon={<MiniCloseIcon />} accent="danger" />
         </div>
       )}
 
@@ -396,7 +407,7 @@ export default function Portfolio() {
               <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2 sm:gap-3 mb-3">
                 <div className="min-w-0 flex-1">
                   <Link
-                    to={`/market/${makeMarketSlug(pos.marketId, pos.title)}`}
+                    to={pos.marketId !== null ? `/market/${makeMarketSlug(pos.marketId, pos.title)}` : '#'}
                     className="font-semibold text-sm text-white hover:text-primary-400 transition-colors line-clamp-2 sm:line-clamp-1"
                   >
                     {pos.title}
@@ -482,7 +493,7 @@ export default function Portfolio() {
 
                 {/* View market link */}
                 <Link
-                  to={`/market/${makeMarketSlug(pos.marketId, pos.title)}`}
+                  to={pos.marketId !== null ? `/market/${makeMarketSlug(pos.marketId, pos.title)}` : '#'}
                   className="ml-auto text-2xs text-dark-500 hover:text-primary-400 font-medium transition-colors flex items-center gap-0.5"
                 >
                   View

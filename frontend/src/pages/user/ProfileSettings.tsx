@@ -36,6 +36,7 @@ export default function ProfileSettings() {
     if (!address) {
       setLoading(false);
       setForm({ ...EMPTY_PROFILE_PAYLOAD });
+      setProfileSlug('');
       return;
     }
 
@@ -103,22 +104,30 @@ export default function ProfileSettings() {
 
   const handleSave = async () => {
     if (!address || !signer) return;
+    const savedAddress = address;
+    const savedSigner = signer;
 
     try {
       setSaving(true);
       setMsg(null);
-      const response = await saveProfileBySignature(address, form, signer);
-      setForm(toProfilePayload(response.profile));
-      setProfileSlug(toProfileSlug(response.profile));
-      setMsg({ type: 'success', text: 'Profile updated.' });
+      const response = await saveProfileBySignature(savedAddress, form, savedSigner);
+      if (address === savedAddress && signer === savedSigner) {
+        setForm(toProfilePayload(response.profile));
+        setProfileSlug(toProfileSlug(response.profile));
+        setMsg({ type: 'success', text: 'Profile updated.' });
+      }
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Failed to save profile';
-      const friendly = message === 'Request failed'
-        ? 'Profile API failed. Check Vercel env vars and function logs.'
-        : message;
-      setMsg({ type: 'error', text: friendly });
+      if (address === savedAddress && signer === savedSigner) {
+        const message = err instanceof Error ? err.message : 'Failed to save profile';
+        const friendly = message === 'Request failed'
+          ? 'Profile API failed. Check Vercel env vars and function logs.'
+          : message;
+        setMsg({ type: 'error', text: friendly });
+      }
     } finally {
-      setSaving(false);
+      if (address === savedAddress && signer === savedSigner) {
+        setSaving(false);
+      }
     }
   };
 
@@ -173,8 +182,9 @@ export default function ProfileSettings() {
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               <div>
-                <label className="label">Display Name</label>
+                <label htmlFor="profile-displayName" className="label">Display Name</label>
                 <input
+                  id="profile-displayName"
                   type="text"
                   value={form.displayName}
                   onChange={(e) => updateField('displayName', e.target.value)}
@@ -184,8 +194,9 @@ export default function ProfileSettings() {
                 />
               </div>
               <div>
-                <label className="label">Avatar URL</label>
+                <label htmlFor="profile-avatarUrl" className="label">Avatar URL</label>
                 <input
+                  id="profile-avatarUrl"
                   type="url"
                   value={form.avatarUrl}
                   onChange={(e) => updateField('avatarUrl', e.target.value)}
@@ -194,8 +205,9 @@ export default function ProfileSettings() {
                 />
               </div>
               <div>
-                <label className="label">Twitter URL</label>
+                <label htmlFor="profile-twitterUrl" className="label">Twitter URL</label>
                 <input
+                  id="profile-twitterUrl"
                   type="url"
                   value={form.twitterUrl}
                   onChange={(e) => updateField('twitterUrl', e.target.value)}
@@ -204,8 +216,9 @@ export default function ProfileSettings() {
                 />
               </div>
               <div>
-                <label className="label">Discord URL</label>
+                <label htmlFor="profile-discordUrl" className="label">Discord URL</label>
                 <input
+                  id="profile-discordUrl"
                   type="url"
                   value={form.discordUrl}
                   onChange={(e) => updateField('discordUrl', e.target.value)}
@@ -214,8 +227,9 @@ export default function ProfileSettings() {
                 />
               </div>
               <div>
-                <label className="label">Telegram URL</label>
+                <label htmlFor="profile-telegramUrl" className="label">Telegram URL</label>
                 <input
+                  id="profile-telegramUrl"
                   type="url"
                   value={form.telegramUrl}
                   onChange={(e) => updateField('telegramUrl', e.target.value)}
@@ -224,24 +238,30 @@ export default function ProfileSettings() {
                 />
               </div>
               <div>
-                <label className="label">Public Profile URL</label>
-                <div className="input-field text-xs text-white/70 flex items-center truncate">{publicProfileLink || 'Save to generate'}</div>
+                <span className="label">Public Profile URL</span>
+                <div className="input-field text-xs text-white/70 flex items-center truncate" role="textbox" aria-readonly="true" aria-label="Public profile URL">{publicProfileLink || 'Save to generate'}</div>
               </div>
               {previewProfileLink && previewProfileLink !== publicProfileLink && (
                 <div>
-                  <label className="label">Preview URL</label>
-                  <div className="input-field text-xs text-white/45 flex items-center truncate">{previewProfileLink}</div>
+                  <span className="label">Preview URL</span>
+                  <div className="input-field text-xs text-white/45 flex items-center truncate" role="textbox" aria-readonly="true" aria-label="Preview profile URL">{previewProfileLink}</div>
                 </div>
               )}
             </div>
 
             <div className="flex flex-wrap items-center gap-2 pt-1">
-              <button onClick={handleCopyLink} className="btn-secondary text-xs px-3 py-2">
+              <button onClick={handleCopyLink} disabled={!publicProfileLink} className={`btn-secondary text-xs px-3 py-2 ${!publicProfileLink ? 'opacity-40 cursor-not-allowed' : ''}`}>
                 {linkCopied ? 'Copied!' : 'Copy Link'}
               </button>
-              <a href={shareLinkHref} className="btn-secondary text-xs px-3 py-2">
-                View Public Profile
-              </a>
+              {publicProfileLink ? (
+                <a href={publicProfileLink} className="btn-secondary text-xs px-3 py-2">
+                  View Public Profile
+                </a>
+              ) : (
+                <a href="#" aria-disabled="true" tabIndex={-1} className="btn-secondary text-xs px-3 py-2 opacity-40 cursor-not-allowed" onClick={(e) => e.preventDefault()}>
+                  View Public Profile
+                </a>
+              )}
               <button onClick={handleSave} disabled={saving || !signer} className="btn-primary text-xs px-3 py-2">
                 {saving ? 'Saving...' : 'Save Changes'}
               </button>

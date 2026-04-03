@@ -1,14 +1,13 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { ethers } from 'ethers';
 import { useWallet } from '../../context/WalletContext';
-import { FACTORY_ADDRESS, STAGE } from '../../config/network';
+import { FACTORY_ADDRESS, NETWORK, STAGE } from '../../config/network';
 import { FACTORY_ABI } from '../../config/abis';
 import EmptyState from '../../components/EmptyState';
 import UsdcIcon from '../../components/UsdcIcon';
 import { formatCompact, formatCompactUSDC } from '../../utils/format';
 import {
   Area,
-  AreaChart,
   CartesianGrid,
   Cell,
   ComposedChart,
@@ -147,7 +146,7 @@ export default function Analytics() {
       }
 
       const blockNumber = await readProvider.getBlockNumber();
-      const avgBlockTime = 0.5;
+      const avgBlockTime = NETWORK.blockTime;
       const blocksPerDay = Math.floor(86400 / avgBlockTime);
       const startBlock = blockNumber - (blocksPerDay * 7);
 
@@ -449,7 +448,7 @@ export default function Analytics() {
                     value={stats.totalMarkets > 0 ? ((stats.activeMarkets / stats.totalMarkets) * 100).toFixed(1) : '0'}
                     suffix="%"
                   />
-                  <MetricRow label="Total Traders" value={formatCompact(stats.totalParticipants)} />
+                  <MetricRow label="Trader-Market Participations" value={formatCompact(stats.totalParticipants)} />
                 </div>
               </div>
             </div>
