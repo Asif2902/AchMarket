@@ -18,6 +18,8 @@ import {
 } from '../../utils/format';
 import { showToast } from '../../components/Toast';
 import { NETWORK } from '../../config/network';
+import ChatThread from '../../components/chat/ChatThread';
+import { fetchProfileByAddress } from '../../services/profile';
 
 const DEFAULT_META_TITLE = 'AchMarket - Prediction Markets';
 const DEFAULT_META_DESCRIPTION = 'Trade prediction markets on ARC Testnet with USDC.';
@@ -117,6 +119,7 @@ export default function MarketDetail() {
   const [aboutExpanded, setAboutExpanded] = useState(false);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
   const [userBalance, setUserBalance] = useState<bigint | null>(null);
+  const [hasProfile, setHasProfile] = useState(false);
   const hasLoadedOnce = useRef(false);
   const requestSeqRef = useRef(0);
   const prevMarketIdRef = useRef<number | null>(null);
@@ -437,7 +440,7 @@ export default function MarketDetail() {
   useEffect(() => { fetchAll(); }, [fetchAll]);
 
   useEffect(() => {
-    if (!userAddress || !isConnected) { setUserBalance(null); return; }
+    if (!userAddress || !isConnected) { setUserBalance(null); setHasProfile(false); return; }
     let cancelled = false;
     const fetchBalance = async () => {
       try {
@@ -445,7 +448,16 @@ export default function MarketDetail() {
         if (!cancelled) setUserBalance(bal);
       } catch { /* ignore */ }
     };
+    const checkProfile = async () => {
+      try {
+        const resp = await fetchProfileByAddress(userAddress);
+        if (!cancelled) setHasProfile(!!resp.profile);
+      } catch {
+        if (!cancelled) setHasProfile(false);
+      }
+    };
     fetchBalance();
+    checkProfile();
     const interval = setInterval(fetchBalance, 30000);
     return () => { cancelled = true; clearInterval(interval); };
   }, [userAddress, isConnected, readProvider, refreshTrigger]);
@@ -1145,6 +1157,17 @@ export default function MarketDetail() {
                   </div>
                 )}
               </div>
+            )}
+
+            {/* Market Chat */}
+            {marketAddress && (
+              <ChatThread
+                marketAddress={marketAddress}
+                userAddress={userAddress}
+                signer={signer}
+                isConnected={isConnected}
+                hasProfile={hasProfile}
+              />
             )}
           </div>
 
