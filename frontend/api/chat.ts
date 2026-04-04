@@ -238,8 +238,7 @@ async function sendChatMessage(
   }
 
   const content = typeof payload.content === 'string' ? payload.content : '';
-  const sanitized = sanitizeChatContent(content);
-  if (!sanitized) throw new Error('Message cannot be empty.');
+  if (!content.trim()) throw new Error('Message cannot be empty.');
 
   const marketAddress = typeof payload.marketAddress === 'string' ? payload.marketAddress : '';
   if (!marketAddress) throw new Error('Market address is required.');
@@ -251,9 +250,8 @@ async function sendChatMessage(
   }
 
   const replyTo = payload.replyTo ? String(payload.replyTo) : null;
-  const mentions = extractMentions(sanitized);
 
-  const message = buildChatSigningMessage(normalized, { content: sanitized, marketAddress, replyTo }, timestamp);
+  const message = buildChatSigningMessage(normalized, { content, marketAddress, replyTo }, timestamp);
   let recovered: string;
   try {
     recovered = verifyMessage(message, signature);
@@ -264,6 +262,10 @@ async function sendChatMessage(
   if (normalizeAddress(recovered) !== normalized) {
     throw new Error('Invalid signature for wallet address.');
   }
+
+  const sanitized = sanitizeChatContent(content);
+  if (!sanitized) throw new Error('Message cannot contain links.');
+  const mentions = extractMentions(sanitized);
 
   const client = await getMongoClient();
   const col = client.db(MONGO_DB_NAME).collection<ChatDoc>(CHATS_COLLECTION);
