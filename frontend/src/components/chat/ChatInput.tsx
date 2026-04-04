@@ -1,8 +1,8 @@
 import { useState, useRef, useEffect } from 'react';
 import type { ChatMessage } from '../../types/chat';
+import { showToast } from '../Toast';
 
 interface ChatInputProps {
-  marketAddress: string;
   isConnected: boolean;
   hasProfile: boolean;
   onSend: (content: string, replyTo: string | null) => Promise<void>;
@@ -12,7 +12,6 @@ interface ChatInputProps {
 }
 
 export default function ChatInput({
-  marketAddress,
   isConnected,
   hasProfile,
   onSend,
@@ -85,6 +84,13 @@ export default function ChatInput({
       setContent('');
       setShowMentions(false);
       setMentionQuery('');
+    } catch (err: any) {
+      const msg = err?.message || 'Failed to send message';
+      showToast({
+        type: 'error',
+        title: 'Message not sent',
+        message: msg,
+      });
     } finally {
       setSending(false);
     }

@@ -5,6 +5,7 @@ import type { Signer } from 'ethers';
 import ChatMessageItem from './ChatMessage';
 import ChatInput from './ChatInput';
 import { fetchProfileBySlug } from '../../services/profile';
+import { showToast } from '../Toast';
 
 interface ChatThreadProps {
   marketAddress: string;
@@ -112,31 +113,33 @@ export default function ChatThread({
   };
 
   const handleSend = async (content: string, replyToId: string | null) => {
-    if (!signer || !userAddress) return;
-    try {
-      const result = await sendChatMessage(userAddress, {
-        marketAddress,
-        content,
-        replyTo: replyToId,
-      }, signer);
-
-      setMessages(prev => [result.message, ...prev]);
-
-      if (result.message.authorProfile?.profileSlug) {
-        setAllProfiles(prev => {
-          const next = new Map(prev);
-          next.set(result.message.authorProfile!.profileSlug, {
-            displayName: result.message.authorProfile!.displayName,
-            profileSlug: result.message.authorProfile!.profileSlug,
-          });
-          return next;
-        });
-      }
-
-      setReplyTo(null);
-    } catch (err: any) {
-      throw err;
+    if (!signer || !userAddress) {
+      throw new Error('Connect wallet to send messages.');
     }
+    const result = await sendChatMessage(userAddress, {
+      marketAddress,
+      content,
+      replyTo: replyToId,
+    }, signer);
+
+    setMessages(prev => [result.message, ...prev]);
+
+    if (result.message.authorProfile?.profileSlug) {
+      setAllProfiles(prev => {
+        const next = new Map(prev);
+        next.set(result.message.authorProfile!.profileSlug, {
+          displayName: result.message.authorProfile!.displayName,
+          profileSlug: result.message.authorProfile!.profileSlug,
+        });
+        return next;
+      });
+    }
+
+    setReplyTo(null);
+    showToast({
+      type: 'success',
+      title: 'Message sent',
+    });
   };
 
   const handleMentionClick = (slug: string) => {
@@ -214,7 +217,6 @@ export default function ChatThread({
       </div>
 
       <ChatInput
-        marketAddress={marketAddress}
         isConnected={isConnected}
         hasProfile={hasProfile}
         onSend={handleSend}

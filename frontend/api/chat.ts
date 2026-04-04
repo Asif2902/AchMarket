@@ -32,12 +32,20 @@ function extractMentions(text: string): string[] {
   return [...new Set(mentions)];
 }
 
+function serializeChatSigningPayload(payload: Record<string, unknown>): string {
+  return JSON.stringify({
+    marketAddress: typeof payload.marketAddress === 'string' ? payload.marketAddress : '',
+    content: typeof payload.content === 'string' ? payload.content : '',
+    replyTo: payload.replyTo ? String(payload.replyTo) : null,
+  });
+}
+
 function buildChatSigningMessage(address: string, payload: Record<string, unknown>, timestamp: number): string {
   return [
     'AchMarket Chat Message',
     `Address: ${address}`,
     `Timestamp: ${timestamp}`,
-    `Payload: ${JSON.stringify(payload)}`,
+    `Payload: ${serializeChatSigningPayload(payload)}`,
     'No gas fee. Sign only if you trust this request.',
   ].join('\n');
 }

@@ -1,8 +1,48 @@
 import { ethers } from 'ethers';
 import type { Signer } from 'ethers';
-import type { ChatMessage, ChatApiResponse, ChatSendResponse, ChatMessageInput } from '../types/chat';
+import type { ChatApiResponse, ChatSendResponse, ChatMessageInput } from '../types/chat';
 
 const CHAT_API_PATH = '/api/chat';
+const REQUEST_TIMEOUT_MS = 20000;
+
+interface ChatSigningPayload {
+  marketAddress: string;
+  content: string;
+  replyTo: string | null;
+}
+
+function serializeChatSigningPayload(payload: ChatSigningPayload): string {
+  return JSON.stringify({
+    marketAddress: payload.marketAddress,
+    content: payload.content,
+    replyTo: payload.replyTo,
+  });
+}
+
+function buildChatSigningMessage(address: string, payload: ChatSigningPayload, timestamp: number): string {
+  return [
+    'AchMarket Chat Message',
+    `Address: ${address}`,
+    `Timestamp: ${timestamp}`,
+    `Payload: ${serializeChatSigningPayload(payload)}`,
+    'No gas fee. Sign only if you trust this request.',
+  ].join('\n');
+}
+
+async function fetchWithTimeout(input: RequestInfo | URL, init: RequestInit, timeoutMs = REQUEST_TIMEOUT_MS): Promise<Response> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(input, { ...init, signal: controller.signal });
+  } catch (err: any) {
+    if (err?.name === 'AbortError') {
+      throw new Error('Request timed out. Please try again.');
+    }
+    throw err;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
 
 async function parseApiResponse<T>(response: Response): Promise<T> {
   const body = await response.json().catch(() => ({}));
@@ -21,7 +61,7 @@ function withCacheBust(url: string): string {
 export async function fetchChatMessages(marketAddress: string, cursor?: string): Promise<ChatApiResponse> {
   const params = new URLSearchParams({ marketAddress });
   if (cursor) params.set('cursor', cursor);
-  const response = await fetch(withCacheBust(`${CHAT_API_PATH}?${params.toString()}`));
+  const response = await fetchWithTimeout(withCacheBust(`${CHAT_API_PATH}?${params.toString()}`), {}, 15000);
   return parseApiResponse<ChatApiResponse>(response);
 }
 
@@ -30,25 +70,19 @@ export async function sendChatMessage(
   input: ChatMessageInput,
   signer: Signer,
 ): Promise<ChatSendResponse> {
-  const normalized = ethers.getAddress(address);
-  const payload = {
+  const normalized = ethers.getAddress(address).toLowerCase();
+  const payload: ChatSigningPayload = {
     marketAddress: input.marketAddress,
     content: input.content,
     replyTo: input.replyTo,
   };
   const timestamp = Date.now();
 
-  const message = [
-    'AchMarket Chat Message',
-    `Address: ${normalized}`,
-    `Timestamp: ${timestamp}`,
-    `Payload: ${JSON.stringify(payload)}`,
-    'No gas fee. Sign only if you trust this request.',
-  ].join('\n');
+  const message = buildChatSigningMessage(normalized, payload, timestamp);
 
   const signature = await signer.signMessage(message);
 
-  const response = await fetch(CHAT_API_PATH, {
+  const response = await fetchWithTimeout(CHAT_API_PATH, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -57,7 +91,7 @@ export async function sendChatMessage(
       timestamp,
       signature,
     }),
-  });
+  }, REQUEST_TIMEOUT_MS);
 
   return parseApiResponse<ChatSendResponse>(response);
 }
