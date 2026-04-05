@@ -36,3 +36,15 @@ export interface ChatApiResponse {
 export interface ChatSendResponse {
   message: ChatMessage;
 }
+
+export type ChatSendErrorCode =
+  | 'chat_closed'
+  | 'rate_limited'
+  | 'validation'
+  | 'auth'
+  | 'unknown';
+
+export interface ChatServiceError extends Error {
+  status?: number;
+  code?: ChatSendErrorCode;
+}

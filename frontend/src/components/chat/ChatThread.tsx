@@ -2,10 +2,14 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { fetchChatMessages, sendChatMessage } from '../../services/chat';
 import type { ChatMessage } from '../../types/chat';
 import type { Signer } from 'ethers';
+import { ethers } from 'ethers';
 import ChatMessageItem from './ChatMessage';
 import ChatInput from './ChatInput';
 import { fetchProfileBySlug } from '../../services/profile';
 import { showToast } from '../Toast';
+import { STAGE } from '../../config/network';
+import { MARKET_ABI } from '../../config/abis';
+import { useWallet } from '../../context/WalletContext';
 
 interface ChatThreadProps {
   marketAddress: string;
@@ -17,6 +21,18 @@ interface ChatThreadProps {
 
 const POLL_INTERVAL = 8000;
 
+function mergeUniqueById(list: ChatMessage[]): ChatMessage[] {
+  const map = new Map<string, ChatMessage>();
+  for (const item of list) {
+    map.set(item._id, item);
+  }
+  return [...map.values()];
+}
+
+function sortByCreatedAsc(list: ChatMessage[]): ChatMessage[] {
+  return [...list].sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+}
+
 export default function ChatThread({
   marketAddress,
   userAddress,
@@ -24,6 +40,7 @@ export default function ChatThread({
   isConnected,
   hasProfile,
 }: ChatThreadProps) {
+  const { readProvider } = useWallet();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -31,19 +48,54 @@ export default function ChatThread({
   const [allProfiles, setAllProfiles] = useState<Map<string, { displayName: string; profileSlug: string }>>(new Map());
   const [hasMore, setHasMore] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
+  const [isChatOpen, setIsChatOpen] = useState(true);
   const scrollRef = useRef<HTMLDivElement>(null);
-  const shouldAutoScroll = useRef(true);
+  const shouldStickToBottom = useRef(true);
+  const messagesRef = useRef<ChatMessage[]>([]);
+  const profilesRef = useRef<Map<string, { displayName: string; profileSlug: string }>>(new Map());
+
+  useEffect(() => {
+    messagesRef.current = messages;
+  }, [messages]);
+
+  useEffect(() => {
+    profilesRef.current = allProfiles;
+  }, [allProfiles]);
+
+  const canSend = isConnected && hasProfile && isChatOpen;
+  const disabledReason = !isConnected
+    ? 'Connect your wallet to join the conversation'
+    : !hasProfile
+      ? 'You need a profile to chat'
+      : 'Chat is closed for resolved or cancelled markets';
+
+  useEffect(() => {
+    setMessages([]);
+    setError(null);
+    setHasMore(false);
+    setReplyTo(null);
+    setAllProfiles(new Map());
+    setLoading(true);
+    shouldStickToBottom.current = true;
+    messagesRef.current = [];
+    profilesRef.current = new Map();
+  }, [marketAddress]);
 
   const loadMessages = useCallback(async (append = false) => {
     try {
-      const cursor = append && messages.length > 0
-        ? messages[messages.length - 1].createdAt
+      const currentMessages = messagesRef.current;
+      const cursor = append && currentMessages.length > 0
+        ? currentMessages[0].createdAt
         : undefined;
       const data = await fetchChatMessages(marketAddress, cursor);
 
-      const newMessages = append ? [...messages, ...data.messages] : data.messages;
+      const newMessages = append
+        ? sortByCreatedAsc(mergeUniqueById([...data.messages, ...currentMessages]))
+        : sortByCreatedAsc(mergeUniqueById([...currentMessages, ...data.messages]));
+
       setMessages(newMessages);
       setHasMore(data.hasMore);
+      setError(null);
 
       const slugsToFetch = new Set<string>();
       for (const msg of newMessages) {
@@ -58,10 +110,10 @@ export default function ChatThread({
         }
       }
 
-      const existingSlugs = new Set(allProfiles.keys());
-      const missing = [...slugsToFetch].filter(s => !existingSlugs.has(s));
+      const existingSlugs = new Set(profilesRef.current.keys());
+      const missing = [...slugsToFetch].filter((s) => !existingSlugs.has(s));
       if (missing.length > 0) {
-        const newProfileMap = new Map(allProfiles);
+        const newProfileMap = new Map(profilesRef.current);
         await Promise.all(
           missing.map(async (slug) => {
             try {
@@ -80,12 +132,34 @@ export default function ChatThread({
         setAllProfiles(newProfileMap);
       }
     } catch (err: any) {
-      setError(err.message || 'Failed to load messages');
+      setError(err?.message || 'Failed to load messages');
     } finally {
       setLoading(false);
       setLoadingMore(false);
     }
-  }, [marketAddress, messages, allProfiles]);
+  }, [marketAddress]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const checkStage = async () => {
+      try {
+        const market = new ethers.Contract(marketAddress, MARKET_ABI, readProvider);
+        const stageRaw: bigint = await market.stage();
+        if (cancelled) return;
+        const stage = Number(stageRaw);
+        setIsChatOpen(stage !== STAGE.Resolved && stage !== STAGE.Cancelled);
+      } catch {
+        if (!cancelled) setIsChatOpen(false);
+      }
+    };
+
+    checkStage();
+    const interval = setInterval(checkStage, POLL_INTERVAL);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [marketAddress, readProvider]);
 
   useEffect(() => {
     loadMessages();
@@ -94,52 +168,74 @@ export default function ChatThread({
   }, [loadMessages]);
 
   useEffect(() => {
-    if (shouldAutoScroll.current && scrollRef.current) {
-      scrollRef.current.scrollTop = 0;
+    if (!scrollRef.current) return;
+    if (shouldStickToBottom.current) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
   }, [messages]);
 
   const handleScroll = () => {
     const el = scrollRef.current;
     if (!el) return;
-    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 200;
-    shouldAutoScroll.current = nearBottom;
+    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+    shouldStickToBottom.current = nearBottom;
+    const nearTop = el.scrollTop < 40;
+    if (nearTop && hasMore && !loadingMore) {
+      void loadMore();
+    }
   };
 
   const loadMore = async () => {
     if (!hasMore || loadingMore) return;
+    const el = scrollRef.current;
+    const prevHeight = el?.scrollHeight ?? 0;
+    const prevTop = el?.scrollTop ?? 0;
+
     setLoadingMore(true);
     await loadMessages(true);
+
+    requestAnimationFrame(() => {
+      const node = scrollRef.current;
+      if (!node) return;
+      const delta = node.scrollHeight - prevHeight;
+      node.scrollTop = prevTop + delta;
+    });
   };
 
   const handleSend = async (content: string, replyToId: string | null) => {
+    if (!isChatOpen) {
+      throw new Error('Chat is closed for resolved or cancelled markets.');
+    }
     if (!signer || !userAddress) {
       throw new Error('Connect wallet to send messages.');
     }
-    const result = await sendChatMessage(userAddress, {
-      marketAddress,
-      content,
-      replyTo: replyToId,
-    }, signer);
 
-    setMessages(prev => [result.message, ...prev]);
+    const result = await sendChatMessage(
+      userAddress,
+      {
+        marketAddress,
+        content,
+        replyTo: replyToId,
+      },
+      signer,
+    );
+
+    setMessages((prev) => sortByCreatedAsc(mergeUniqueById([...prev, result.message])));
 
     if (result.message.authorProfile?.profileSlug) {
-      setAllProfiles(prev => {
+      const authorProfile = result.message.authorProfile;
+      setAllProfiles((prev) => {
         const next = new Map(prev);
-        next.set(result.message.authorProfile!.profileSlug, {
-          displayName: result.message.authorProfile!.displayName,
-          profileSlug: result.message.authorProfile!.profileSlug,
+        next.set(authorProfile.profileSlug, {
+          displayName: authorProfile.displayName,
+          profileSlug: authorProfile.profileSlug,
         });
         return next;
       });
     }
 
     setReplyTo(null);
-    showToast({
-      type: 'success',
-      title: 'Message sent',
-    });
+    showToast({ type: 'success', title: 'Message sent' });
   };
 
   const handleMentionClick = (slug: string) => {
@@ -172,26 +268,16 @@ export default function ChatThread({
         <span className="text-2xs text-dark-500">{messages.length} messages</span>
       </div>
 
-      <div
-        ref={scrollRef}
-        onScroll={handleScroll}
-        className="max-h-96 overflow-y-auto space-y-0"
-      >
+      <div ref={scrollRef} onScroll={handleScroll} className="h-[24rem] max-h-[24rem] overflow-y-auto space-y-0">
         {error && messages.length === 0 && (
           <div className="p-6 text-center">
             <p className="text-sm text-red-400">{error}</p>
           </div>
         )}
 
-        {hasMore && (
-          <div className="py-2 text-center">
-            <button
-              onClick={loadMore}
-              disabled={loadingMore}
-              className="text-xs text-primary-400 hover:text-primary-300 disabled:text-dark-600 transition-colors"
-            >
-              {loadingMore ? 'Loading...' : 'Load older messages'}
-            </button>
+        {(hasMore || loadingMore) && (
+          <div className="py-2 text-center text-xs text-dark-500">
+            {loadingMore ? 'Loading older messages...' : 'Scroll up for older messages'}
           </div>
         )}
 
@@ -205,13 +291,13 @@ export default function ChatThread({
           </div>
         )}
 
-        {messages.map(msg => (
+        {messages.map((msg) => (
           <ChatMessageItem
             key={msg._id}
             message={msg}
             onReply={setReplyTo}
-            allProfiles={allProfiles}
             onMentionClick={handleMentionClick}
+            canReply={canSend}
           />
         ))}
       </div>
@@ -219,6 +305,8 @@ export default function ChatThread({
       <ChatInput
         isConnected={isConnected}
         hasProfile={hasProfile}
+        canSend={canSend}
+        disabledReason={disabledReason}
         onSend={handleSend}
         replyTo={replyTo}
         onCancelReply={() => setReplyTo(null)}

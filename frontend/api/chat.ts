@@ -1,5 +1,6 @@
-import { recoverAddress, hashMessage, getAddress } from 'ethers';
+import { recoverAddress, hashMessage, getAddress, JsonRpcProvider, Contract } from 'ethers';
 import { MongoClient, ObjectId } from 'mongodb';
+import type { Collection } from 'mongodb';
 
 function normalizeAddress(address: string): string {
   return getAddress(address).toLowerCase();
@@ -8,8 +9,8 @@ function normalizeAddress(address: string): string {
 function sanitizeChatContent(value: string): string {
   const trimmed = value.trim();
   if (!trimmed) return '';
-  const clipped = trimmed.slice(0, 500);
-  return stripLinks(clipped);
+  const withoutControlChars = trimmed.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, '');
+  return stripLinks(withoutControlChars).trim();
 }
 
 function stripLinks(text: string): string {
@@ -25,11 +26,18 @@ function stripLinks(text: string): string {
 function extractMentions(text: string): string[] {
   const mentionPattern = /@([a-zA-Z0-9_-]{2,40})/g;
   const mentions: string[] = [];
-  let match;
+  let match: RegExpExecArray | null;
   while ((match = mentionPattern.exec(text)) !== null) {
     mentions.push(match[1].toLowerCase());
   }
   return [...new Set(mentions)];
+}
+
+function containsLink(text: string): boolean {
+  const urlPattern = /https?:\/\/[\S]+/i;
+  const wwwPattern = /\bwww\.[\S]+/i;
+  const domainPattern = /\b[a-zA-Z0-9-]+\.(com|net|org|io|co|xyz|app|dev|ai|gg|me|info|biz|cc|tv|ru|de|fr|jp|cn|in|br|uk|us|ca|au|it|nl|es|se|no|fi|dk|pl|cz|at|ch|be|pt|ie|nz|za|kr|tw|hk|sg|my|th|vn|ph|id|mx|ar|cl|co\.uk|co\.jp|co\.in|com\.au|com\.br|com\.mx|com\.ar|com\.za|com\.sg|com\.my|com\.th|com\.vn|com\.ph|com\.id|com\.tw|com\.hk)\b/i;
+  return urlPattern.test(text) || wwwPattern.test(text) || domainPattern.test(text);
 }
 
 function serializeChatSigningPayload(payload: Record<string, unknown>): string {
@@ -61,9 +69,38 @@ const CHATS_COLLECTION = 'chats';
 const PROFILES_COLLECTION = 'profiles';
 const SIG_VALIDITY_MS = 10 * 60 * 1000;
 const PAGE_SIZE = 30;
+const MAX_MESSAGE_LENGTH = 500;
+const MAX_MENTIONS = 12;
+const MIN_MESSAGE_INTERVAL_MS = 2500;
+const MAX_MESSAGES_PER_MINUTE = 8;
+const DUPLICATE_WINDOW_MS = 2 * 60 * 1000;
+const MAX_IP_POSTS_PER_MINUTE = 40;
+const IP_WINDOW_MS = 60 * 1000;
+const RPC_URL = process.env.RPC_URL ?? 'https://arc-testnet.drpc.org/';
+const MARKET_STAGE_ABI = ['function stage() view returns (uint8)'];
+const STAGE_RESOLVED = 2;
+const STAGE_CANCELLED = 3;
+const STAGE_CACHE_MS = 15_000;
 
 let cachedClient: MongoClient | null = null;
 let indexesReady = false;
+let cachedReadProvider: JsonRpcProvider | null = null;
+const marketStageCache = new Map<string, { stage: number; expiresAt: number }>();
+const ipRateLimitMap = new Map<string, { count: number; resetAt: number }>();
+
+function cleanupInMemoryCaches(): void {
+  const now = Date.now();
+  if (marketStageCache.size > 200) {
+    for (const [key, value] of marketStageCache.entries()) {
+      if (value.expiresAt <= now) marketStageCache.delete(key);
+    }
+  }
+  if (ipRateLimitMap.size > 1000) {
+    for (const [key, value] of ipRateLimitMap.entries()) {
+      if (value.resetAt <= now) ipRateLimitMap.delete(key);
+    }
+  }
+}
 
 interface ChatDoc {
   _id?: ObjectId;
@@ -92,6 +129,7 @@ async function getMongoClient(): Promise<MongoClient> {
       if (!indexesReady) {
         const col = cachedClient.db(MONGO_DB_NAME).collection<ChatDoc>(CHATS_COLLECTION);
         await col.createIndex({ marketAddress: 1, createdAt: -1 }, { name: 'idx_market_created' });
+        await col.createIndex({ marketAddress: 1, authorAddress: 1, createdAt: -1 }, { name: 'idx_market_author_created' });
         await col.createIndex({ authorAddress: 1 }, { name: 'idx_author' });
         await col.createIndex({ replyTo: 1 }, { name: 'idx_reply_to' });
         indexesReady = true;
@@ -113,6 +151,7 @@ async function getMongoClient(): Promise<MongoClient> {
 
   const col = cachedClient.db(MONGO_DB_NAME).collection<ChatDoc>(CHATS_COLLECTION);
   await col.createIndex({ marketAddress: 1, createdAt: -1 }, { name: 'idx_market_created' });
+  await col.createIndex({ marketAddress: 1, authorAddress: 1, createdAt: -1 }, { name: 'idx_market_author_created' });
   await col.createIndex({ authorAddress: 1 }, { name: 'idx_author' });
   await col.createIndex({ replyTo: 1 }, { name: 'idx_reply_to' });
   indexesReady = true;
@@ -124,18 +163,6 @@ async function getProfileByAddress(address: string): Promise<ProfileDoc | null> 
   const client = await getMongoClient();
   const col = client.db(MONGO_DB_NAME).collection<ProfileDoc>(PROFILES_COLLECTION);
   return col.findOne({ address: address.toLowerCase() });
-}
-
-async function getProfilesBySlugs(slugs: string[]): Promise<Map<string, ProfileDoc>> {
-  if (slugs.length === 0) return new Map();
-  const client = await getMongoClient();
-  const col = client.db(MONGO_DB_NAME).collection<ProfileDoc>(PROFILES_COLLECTION);
-  const docs = await col.find({ profileSlug: { $in: slugs } }).toArray();
-  const map = new Map<string, ProfileDoc>();
-  for (const doc of docs) {
-    map.set(doc.profileSlug, doc);
-  }
-  return map;
 }
 
 function formatChatMessage(doc: ChatDoc, authorProfile: ProfileDoc | null, replyToDoc: ChatDoc | null, replyToProfile: ProfileDoc | null) {
@@ -167,11 +194,73 @@ function formatChatMessage(doc: ChatDoc, authorProfile: ProfileDoc | null, reply
   };
 }
 
+function getReadProvider(): JsonRpcProvider {
+  if (!cachedReadProvider) {
+    cachedReadProvider = new JsonRpcProvider(RPC_URL, undefined, { staticNetwork: true, batchMaxCount: 1 });
+  }
+  return cachedReadProvider;
+}
+
+async function getMarketStage(marketAddress: string): Promise<number> {
+  const normalized = normalizeAddress(marketAddress);
+  const now = Date.now();
+  const cached = marketStageCache.get(normalized);
+  if (cached && cached.expiresAt > now) return cached.stage;
+
+  const market = new Contract(normalized, MARKET_STAGE_ABI, getReadProvider());
+  const stageRaw: bigint = await market.stage();
+  const stage = Number(stageRaw);
+  marketStageCache.set(normalized, { stage, expiresAt: now + STAGE_CACHE_MS });
+  return stage;
+}
+
+function getClientIp(req: any): string {
+  const xff = req.headers?.['x-forwarded-for'];
+  const raw = Array.isArray(xff) ? xff[0] : (typeof xff === 'string' ? xff.split(',')[0] : req.socket?.remoteAddress || 'unknown');
+  return String(raw || 'unknown').trim().slice(0, 64);
+}
+
+function enforceIpRateLimit(ip: string): void {
+  const now = Date.now();
+  const existing = ipRateLimitMap.get(ip);
+  if (!existing || now > existing.resetAt) {
+    ipRateLimitMap.set(ip, { count: 1, resetAt: now + IP_WINDOW_MS });
+    return;
+  }
+  if (existing.count >= MAX_IP_POSTS_PER_MINUTE) {
+    throw new Error('Too many requests. Please slow down.');
+  }
+  existing.count += 1;
+}
+
+async function enforceUserRateLimits(col: Collection<ChatDoc>, marketAddress: string, authorAddress: string, rawContent: string): Promise<void> {
+  const now = Date.now();
+  const recent = await col.find({ marketAddress, authorAddress }).sort({ createdAt: -1 }).limit(MAX_MESSAGES_PER_MINUTE).toArray();
+  if (recent.length > 0) {
+    const lastAt = recent[0].createdAt.getTime();
+    if (now - lastAt < MIN_MESSAGE_INTERVAL_MS) {
+      throw new Error('You are sending too quickly. Please wait a moment.');
+    }
+    const duplicate = recent.find((msg) => (now - msg.createdAt.getTime()) < DUPLICATE_WINDOW_MS && msg.content.toLowerCase() === rawContent.toLowerCase());
+    if (duplicate) {
+      throw new Error('Duplicate message detected. Please post something new.');
+    }
+  }
+
+  const oneMinuteAgo = new Date(now - 60_000);
+  const countLastMinute = await col.countDocuments({ marketAddress, authorAddress, createdAt: { $gte: oneMinuteAgo } });
+  if (countLastMinute >= MAX_MESSAGES_PER_MINUTE) {
+    throw new Error('Rate limit reached. Please wait before sending again.');
+  }
+}
+
 async function getChatMessages(marketAddress: string, cursor?: string) {
   const client = await getMongoClient();
   const col = client.db(MONGO_DB_NAME).collection<ChatDoc>(CHATS_COLLECTION);
 
-  const query: Record<string, unknown> = { marketAddress: marketAddress.toLowerCase() };
+  const normalizedMarket = normalizeAddress(marketAddress);
+
+  const query: Record<string, unknown> = { marketAddress: normalizedMarket };
   if (cursor) {
     const cursorDate = new Date(cursor);
     if (!isNaN(cursorDate.getTime())) {
@@ -186,7 +275,8 @@ async function getChatMessages(marketAddress: string, cursor?: string) {
     .toArray();
 
   const hasMore = docs.length > PAGE_SIZE;
-  const messages = hasMore ? docs.slice(0, PAGE_SIZE) : docs;
+  const messagesDesc = hasMore ? docs.slice(0, PAGE_SIZE) : docs;
+  const messages = [...messagesDesc].reverse();
 
   const authorAddresses = [...new Set(messages.map(m => m.authorAddress))];
   const replyIds = messages.map(m => m.replyTo).filter((id): id is ObjectId => id !== null);
@@ -232,6 +322,7 @@ async function sendChatMessage(
   payload: Record<string, unknown>,
   timestamp: number,
   signature: string,
+  req: any,
 ) {
   const ts = Number(timestamp);
   if (!Number.isFinite(ts)) throw new Error('Invalid timestamp.');
@@ -247,6 +338,8 @@ async function sendChatMessage(
 
   const content = typeof payload.content === 'string' ? payload.content : '';
   if (!content.trim()) throw new Error('Message cannot be empty.');
+  if (content.length > MAX_MESSAGE_LENGTH) throw new Error(`Message exceeds ${MAX_MESSAGE_LENGTH} character limit.`);
+  if (containsLink(content)) throw new Error('Links are not allowed in chat messages.');
 
   const marketAddress = typeof payload.marketAddress === 'string' ? payload.marketAddress : '';
   if (!marketAddress) throw new Error('Market address is required.');
@@ -255,6 +348,11 @@ async function sendChatMessage(
     normalizeAddress(marketAddress);
   } catch {
     throw new Error('Invalid market address.');
+  }
+
+  const stage = await getMarketStage(marketAddress);
+  if (stage === STAGE_RESOLVED || stage === STAGE_CANCELLED) {
+    throw new Error('Chat is closed for this market.');
   }
 
   const replyTo = payload.replyTo ? String(payload.replyTo) : null;
@@ -272,11 +370,17 @@ async function sendChatMessage(
   }
 
   const sanitized = sanitizeChatContent(content);
-  if (!sanitized) throw new Error('Message cannot contain links.');
-  const mentions = extractMentions(sanitized);
+  if (!sanitized) throw new Error('Message cannot be empty.');
+  if (sanitized.length > MAX_MESSAGE_LENGTH) throw new Error(`Message exceeds ${MAX_MESSAGE_LENGTH} character limit.`);
+  const mentions = extractMentions(sanitized).slice(0, MAX_MENTIONS);
 
   const client = await getMongoClient();
   const col = client.db(MONGO_DB_NAME).collection<ChatDoc>(CHATS_COLLECTION);
+
+  cleanupInMemoryCaches();
+  const clientIp = getClientIp(req);
+  enforceIpRateLimit(clientIp);
+  await enforceUserRateLimits(col, marketAddress.toLowerCase(), normalized, sanitized);
 
   let replyToObj: ObjectId | null = null;
   if (replyTo) {
@@ -348,7 +452,7 @@ export default async function handler(req: any, res: any) {
         return res.status(400).json({ error: 'content and marketAddress required in payload' });
       }
 
-      const data = await sendChatMessage(body.address, body.payload, Number(body.timestamp), body.signature);
+      const data = await sendChatMessage(body.address, body.payload, Number(body.timestamp), body.signature, req);
       return res.status(201).json(data);
     }
 
@@ -359,7 +463,20 @@ export default async function handler(req: any, res: any) {
     let code = 500;
     if (msgLower.includes('expired') || msgLower.includes('invalid signature')) {
       code = 401;
-    } else if (msgLower.includes('profile') || msgLower.includes('empty') || msgLower.includes('required') || msgLower.includes('invalid')) {
+    } else if (msgLower.includes('rate limit') || msgLower.includes('too quickly') || msgLower.includes('too many requests')) {
+      code = 429;
+    } else if (msgLower.includes('duplicate message')) {
+      code = 429;
+    } else if (msgLower.includes('chat is closed')) {
+      code = 403;
+    } else if (
+      msgLower.includes('profile')
+      || msgLower.includes('empty')
+      || msgLower.includes('required')
+      || msgLower.includes('invalid')
+      || msgLower.includes('links are not allowed')
+      || msgLower.includes('exceeds')
+    ) {
       code = 400;
     } else if (msgLower.includes('reply target')) {
       code = 404;

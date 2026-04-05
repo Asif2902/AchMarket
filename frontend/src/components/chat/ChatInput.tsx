@@ -5,6 +5,8 @@ import { showToast } from '../Toast';
 interface ChatInputProps {
   isConnected: boolean;
   hasProfile: boolean;
+  canSend: boolean;
+  disabledReason?: string;
   onSend: (content: string, replyTo: string | null) => Promise<void>;
   replyTo: ChatMessage | null;
   onCancelReply: () => void;
@@ -14,6 +16,8 @@ interface ChatInputProps {
 export default function ChatInput({
   isConnected,
   hasProfile,
+  canSend,
+  disabledReason,
   onSend,
   replyTo,
   onCancelReply,
@@ -148,6 +152,14 @@ export default function ChatInput({
         >
           Create Profile
         </a>
+      </div>
+    );
+  }
+
+  if (!canSend) {
+    return (
+      <div className="p-4 text-center">
+        <p className="text-sm text-dark-400">{disabledReason || 'Chat is closed for this market'}</p>
       </div>
     );
   }

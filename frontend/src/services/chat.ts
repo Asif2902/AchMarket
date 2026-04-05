@@ -1,6 +1,6 @@
 import { ethers } from 'ethers';
 import type { Signer } from 'ethers';
-import type { ChatApiResponse, ChatSendResponse, ChatMessageInput } from '../types/chat';
+import type { ChatApiResponse, ChatSendResponse, ChatMessageInput, ChatServiceError, ChatSendErrorCode } from '../types/chat';
 
 const CHAT_API_PATH = '/api/chat';
 const REQUEST_TIMEOUT_MS = 20000;
@@ -44,11 +44,23 @@ async function fetchWithTimeout(input: RequestInfo | URL, init: RequestInit, tim
   }
 }
 
+function mapErrorCode(status: number, message: string): ChatSendErrorCode {
+  const lower = message.toLowerCase();
+  if (status === 401 || lower.includes('signature')) return 'auth';
+  if (status === 403 || lower.includes('closed')) return 'chat_closed';
+  if (status === 429 || lower.includes('rate limit') || lower.includes('too quickly') || lower.includes('too many')) return 'rate_limited';
+  if (status === 400) return 'validation';
+  return 'unknown';
+}
+
 async function parseApiResponse<T>(response: Response): Promise<T> {
   const body = await response.json().catch(() => ({}));
   if (!response.ok) {
     const errorMessage = typeof body?.error === 'string' ? body.error : 'Request failed';
-    throw new Error(errorMessage);
+    const err = new Error(errorMessage) as ChatServiceError;
+    err.status = response.status;
+    err.code = mapErrorCode(response.status, errorMessage);
+    throw err;
   }
   return body as T;
 }

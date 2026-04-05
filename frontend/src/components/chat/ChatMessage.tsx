@@ -1,11 +1,10 @@
-import { useState } from 'react';
 import type { ChatMessage } from '../../types/chat';
 
 interface ChatMessageProps {
   message: ChatMessage;
   onReply: (message: ChatMessage) => void;
-  allProfiles: Map<string, { displayName: string; profileSlug: string }>;
   onMentionClick: (slug: string) => void;
+  canReply: boolean;
 }
 
 function timeAgo(dateStr: string): string {
@@ -30,19 +29,25 @@ function renderContent(
   let match: RegExpExecArray | null;
 
   while ((match = mentionRegex.exec(content)) !== null) {
-    if (match.index > lastIndex) {
-      parts.push(content.slice(lastIndex, match.index));
+    const matchIndex = match.index;
+    const mentionSlug = match[1];
+    const matchText = match[0];
+
+    if (matchIndex > lastIndex) {
+      parts.push(content.slice(lastIndex, matchIndex));
     }
     parts.push(
       <button
-        key={match.index}
-        onClick={() => onMentionClick(match![1])}
+        key={matchIndex}
+        onClick={() => {
+          onMentionClick(mentionSlug);
+        }}
         className="text-primary-400 hover:text-primary-300 hover:underline transition-colors font-medium"
       >
-        @{match[1]}
+        @{mentionSlug}
       </button>,
     );
-    lastIndex = match.index + match[0].length;
+    lastIndex = matchIndex + matchText.length;
   }
 
   if (lastIndex < content.length) {
@@ -55,11 +60,9 @@ function renderContent(
 export default function ChatMessageItem({
   message,
   onReply,
-  allProfiles,
   onMentionClick,
+  canReply,
 }: ChatMessageProps) {
-  const [showReplyPreview, setShowReplyPreview] = useState(false);
-
   const displayName = message.authorProfile?.displayName ?? 'Anonymous';
   const profileSlug = message.authorProfile?.profileSlug ?? '';
   const avatarUrl = message.authorProfile?.avatarUrl;
@@ -67,17 +70,14 @@ export default function ChatMessageItem({
   return (
     <div className="group px-3 sm:px-4 py-3 hover:bg-white/[0.02] transition-colors">
       {message.replyToMessage && (
-        <button
-          onClick={() => setShowReplyPreview(!showReplyPreview)}
-          className="flex items-center gap-1.5 mb-1.5 ml-10 text-xs text-dark-500 hover:text-dark-300 transition-colors"
-        >
+        <div className="flex items-center gap-1.5 mb-1.5 ml-10 text-xs text-dark-500">
           <svg className="w-3 h-3 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6" />
           </svg>
           <span className="truncate">
             {message.replyToMessage.authorProfile?.displayName ?? 'Unknown'}: {message.replyToMessage.content.slice(0, 50)}{message.replyToMessage.content.length > 50 ? '...' : ''}
           </span>
-        </button>
+        </div>
       )}
 
       <div className="flex gap-2.5">
@@ -105,15 +105,17 @@ export default function ChatMessageItem({
           </div>
         </div>
 
-        <button
-          onClick={() => onReply(message)}
-          className="opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded hover:bg-white/[0.05] text-dark-500 hover:text-primary-400 shrink-0"
-          title="Reply"
-        >
-          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6" />
-          </svg>
-        </button>
+        {canReply && (
+          <button
+            onClick={() => onReply(message)}
+            className="opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded hover:bg-white/[0.05] text-dark-500 hover:text-primary-400 shrink-0"
+            title="Reply"
+          >
+            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6" />
+            </svg>
+          </button>
+        )}
       </div>
     </div>
   );
