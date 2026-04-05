@@ -1597,27 +1597,26 @@ function ProbabilityChart({
 
   // Current values (last point or hovered)
   const displayData = hoveredData ?? (filteredHistory.length > 0 ? filteredHistory[filteredHistory.length - 1] : null);
-  const latestData = filteredHistory.length > 0 ? filteredHistory[filteredHistory.length - 1] : null;
 
   // Compute change from first visible point
   const firstData = filteredHistory.length > 0 ? filteredHistory[0] : null;
 
   return (
-    <div className="card overflow-hidden">
+    <div className="card overflow-hidden border border-white/[0.08] bg-gradient-to-b from-dark-900/95 via-dark-900/80 to-dark-950/95">
       {/* Header */}
       <div className="p-5 pb-0">
-        <div className="flex items-center justify-between mb-3">
+        <div className="flex items-center justify-between mb-3 gap-2">
           <h2 className="section-header">Price History</h2>
           {/* Time range selector */}
-          <div className="flex items-center rounded-lg bg-dark-900/60 p-0.5 border border-white/[0.06] overflow-x-auto scrollbar-hide">
+          <div className="flex items-center rounded-xl bg-dark-900/70 p-0.5 border border-white/[0.08] overflow-x-auto scrollbar-hide shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
             {TIME_RANGES.map(range => (
               <button
                 key={range.key}
                 onClick={() => setTimeRange(range.key)}
-                className={`px-2 py-1 rounded-md text-2xs font-semibold transition-all ${
+                className={`px-2.5 py-1 rounded-lg text-2xs font-semibold transition-all border ${
                   timeRange === range.key
-                    ? 'bg-primary-600/20 text-primary-400'
-                    : 'text-dark-500 hover:text-dark-300'
+                    ? 'bg-primary-500/20 text-primary-300 border-primary-500/35 shadow-[0_0_0_1px_rgba(59,130,246,0.18)]'
+                    : 'border-transparent text-dark-500 hover:text-dark-200 hover:border-white/[0.08]'
                 }`}
               >
                 {range.label}
@@ -1680,11 +1679,11 @@ function ProbabilityChart({
       </div>
 
       {/* Chart */}
-      <div className="h-56 sm:h-72 px-2 pb-3">
+      <div className="h-64 sm:h-80 px-2 pb-4">
         <ResponsiveContainer width="100%" height="100%">
           <AreaChart
             data={filteredHistory}
-            margin={{ top: 4, right: 8, bottom: 0, left: 0 }}
+            margin={{ top: 8, right: 12, bottom: 10, left: 0 }}
             onMouseMove={(state: { activePayload?: Array<{ payload: ProbHistoryPoint }> }) => {
               if (state?.activePayload?.[0]) {
                 setHoveredData(state.activePayload[0].payload);
@@ -1701,48 +1700,51 @@ function ProbabilityChart({
               ))}
             </defs>
             <CartesianGrid
-              strokeDasharray="3 3"
-              stroke="rgba(255,255,255,0.03)"
-              vertical={false}
+              strokeDasharray="4 4"
+              stroke="rgba(148,163,184,0.14)"
+              vertical
             />
             <XAxis
               dataKey="time"
               tickFormatter={(t) => {
                 const d = new Date(t * 1000);
-                if (timeRange === '1H' || timeRange === '6H' || timeRange === '1D') {
+                if (timeRange === '1H') {
                   return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                }
+                if (timeRange === '6H') {
+                  return `${d.toLocaleDateString([], { month: 'short', day: 'numeric' })} ${d.toLocaleTimeString([], { hour: '2-digit' })}`;
                 }
                 return d.toLocaleDateString([], { month: 'short', day: 'numeric' });
               }}
               stroke="transparent"
-              tick={{ fontSize: 10, fill: '#3b4252' }}
+              tick={{ fontSize: 10, fill: '#94a3b8' }}
               axisLine={false}
               tickLine={false}
-              minTickGap={50}
+              minTickGap={40}
             />
             <YAxis
               domain={[0, 100]}
               tickFormatter={(v) => `${v}¢`}
               stroke="transparent"
-              tick={{ fontSize: 10, fill: '#3b4252' }}
+              tick={{ fontSize: 10, fill: '#94a3b8' }}
               axisLine={false}
               tickLine={false}
-              width={32}
+              width={34}
               ticks={[0, 25, 50, 75, 100]}
             />
             <Tooltip
               cursor={{
-                stroke: 'rgba(255,255,255,0.15)',
+                stroke: 'rgba(59,130,246,0.55)',
                 strokeWidth: 1,
               }}
               contentStyle={{
-                backgroundColor: 'rgba(10, 15, 25, 0.95)',
-                border: '1px solid rgba(255,255,255,0.1)',
-                borderRadius: '10px',
+                backgroundColor: 'rgba(8, 12, 20, 0.97)',
+                border: '1px solid rgba(59,130,246,0.35)',
+                borderRadius: '12px',
                 backdropFilter: 'blur(16px)',
-                padding: '10px 14px',
+                padding: '10px 12px',
                 fontSize: '12px',
-                boxShadow: '0 12px 40px rgba(0,0,0,0.5)',
+                boxShadow: '0 20px 45px rgba(2, 6, 23, 0.7)',
               }}
               labelFormatter={(t) => formatDate(t as number)}
               formatter={(value: number, name: string) => {
@@ -1760,12 +1762,12 @@ function ProbabilityChart({
                   type="monotone"
                   dataKey={label}
                   stroke={isVisible ? CHART_COLORS[i % CHART_COLORS.length] : 'transparent'}
-                  strokeWidth={isVisible ? 2 : 0}
+                  strokeWidth={isVisible ? 2.4 : 0}
                   fill={isVisible ? `url(#prob-gradient-${i})` : 'transparent'}
                   fillOpacity={1}
                   dot={false}
                   activeDot={isVisible ? {
-                    r: 4,
+                    r: 4.5,
                     strokeWidth: 2,
                     stroke: CHART_COLORS[i % CHART_COLORS.length],
                     fill: '#0a0f19',
