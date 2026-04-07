@@ -53,6 +53,7 @@ export default function ChatThread({
   const shouldStickToBottom = useRef(true);
   const messagesRef = useRef<ChatMessage[]>([]);
   const profilesRef = useRef<Map<string, { displayName: string; profileSlug: string }>>(new Map());
+  const nextCursorRef = useRef<string | null>(null);
 
   useEffect(() => {
     messagesRef.current = messages;
@@ -79,34 +80,40 @@ export default function ChatThread({
     shouldStickToBottom.current = true;
     messagesRef.current = [];
     profilesRef.current = new Map();
+    nextCursorRef.current = null;
   }, [marketAddress]);
 
   const loadMessages = useCallback(async (append = false) => {
+    let nextMessagesForProfiles: ChatMessage[] = [];
     try {
-      const currentMessages = messagesRef.current;
-      const cursor = append && currentMessages.length > 0
-        ? currentMessages[0].createdAt
-        : undefined;
+      const cursor = append ? (nextCursorRef.current ?? undefined) : undefined;
       const data = await fetchChatMessages(marketAddress, cursor);
 
-      const newMessages = append
-        ? sortByCreatedAsc(mergeUniqueById([...data.messages, ...currentMessages]))
-        : sortByCreatedAsc(mergeUniqueById([...currentMessages, ...data.messages]));
+      setMessages((prev) => {
+        const merged = append
+          ? sortByCreatedAsc(mergeUniqueById([...data.messages, ...prev]))
+          : sortByCreatedAsc(mergeUniqueById([...prev, ...data.messages]));
+        nextMessagesForProfiles = merged;
+        return merged;
+      });
 
-      setMessages(newMessages);
-      setHasMore(data.hasMore);
+      if (append || !nextCursorRef.current || data.nextCursor === null) {
+        nextCursorRef.current = data.nextCursor;
+      }
+      setHasMore(Boolean(nextCursorRef.current));
       setError(null);
 
       const slugsToFetch = new Set<string>();
-      for (const msg of newMessages) {
+      const sourceMessages = nextMessagesForProfiles.length > 0 ? nextMessagesForProfiles : messagesRef.current;
+      for (const msg of sourceMessages) {
         if (msg.authorProfile?.profileSlug) {
-          slugsToFetch.add(msg.authorProfile.profileSlug);
+          slugsToFetch.add(msg.authorProfile.profileSlug.toLowerCase());
         }
         if (msg.replyToMessage?.authorProfile?.profileSlug) {
-          slugsToFetch.add(msg.replyToMessage.authorProfile.profileSlug);
+          slugsToFetch.add(msg.replyToMessage.authorProfile.profileSlug.toLowerCase());
         }
         for (const mention of msg.mentions) {
-          slugsToFetch.add(mention);
+          slugsToFetch.add(mention.toLowerCase());
         }
       }
 
@@ -119,7 +126,8 @@ export default function ChatThread({
             try {
               const resp = await fetchProfileBySlug(slug);
               if (resp.profile) {
-                newProfileMap.set(slug, {
+                const profileSlug = resp.profile.profileSlug.toLowerCase();
+                newProfileMap.set(profileSlug, {
                   displayName: resp.profile.displayName,
                   profileSlug: resp.profile.profileSlug,
                 });
@@ -186,7 +194,7 @@ export default function ChatThread({
   };
 
   const loadMore = async () => {
-    if (!hasMore || loadingMore) return;
+    if (!hasMore || loadingMore || !nextCursorRef.current) return;
     const el = scrollRef.current;
     const prevHeight = el?.scrollHeight ?? 0;
     const prevTop = el?.scrollTop ?? 0;
@@ -226,7 +234,8 @@ export default function ChatThread({
       const authorProfile = result.message.authorProfile;
       setAllProfiles((prev) => {
         const next = new Map(prev);
-        next.set(authorProfile.profileSlug, {
+        const profileSlug = authorProfile.profileSlug.toLowerCase();
+        next.set(profileSlug, {
           displayName: authorProfile.displayName,
           profileSlug: authorProfile.profileSlug,
         });
@@ -239,7 +248,7 @@ export default function ChatThread({
   };
 
   const handleMentionClick = (slug: string) => {
-    const profile = allProfiles.get(slug);
+    const profile = allProfiles.get(slug.toLowerCase());
     if (profile) {
       window.location.href = `/profile/${profile.profileSlug}`;
     }

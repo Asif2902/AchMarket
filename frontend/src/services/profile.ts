@@ -5,9 +5,33 @@ import {
   sanitizeProfilePayload,
   type ProfilePayload,
 } from '../utils/profileAuth';
-import type { PublicProfileResponse } from '../types/profile';
+import type { PublicProfileResponse, ProfileAvatarUploadResponse } from '../types/profile';
 
 const PROFILE_API_PATH = '/api/profile';
+const PROFILE_AVATAR_API_PATH = '/api/profile-avatar';
+const AVATAR_UPLOAD_SIG_VALIDITY_MS = 10 * 60 * 1000;
+
+function uint8ToBase64(bytes: Uint8Array): string {
+  let binary = '';
+  const chunkSize = 0x8000;
+  for (let offset = 0; offset < bytes.length; offset += chunkSize) {
+    const chunk = bytes.subarray(offset, offset + chunkSize);
+    binary += String.fromCharCode(...chunk);
+  }
+  return btoa(binary);
+}
+
+function buildAvatarUploadSigningMessage(address: string, timestamp: number, byteLength: number, contentType: string): string {
+  return [
+    'AchMarket Avatar Upload',
+    `Address: ${address}`,
+    `Timestamp: ${timestamp}`,
+    `ByteLength: ${byteLength}`,
+    `ContentType: ${contentType}`,
+    `ValidForMs: ${AVATAR_UPLOAD_SIG_VALIDITY_MS}`,
+    'No gas fee. Sign only if you trust this request.',
+  ].join('\n');
+}
 
 async function parseApiResponse<T>(response: Response): Promise<T> {
   const body = await response.json().catch(() => ({}));
@@ -59,4 +83,37 @@ export async function saveProfileBySignature(
   });
 
   return parseApiResponse<PublicProfileResponse>(response);
+}
+
+export async function uploadProfileAvatar(file: File, address: string, signer: Signer): Promise<ProfileAvatarUploadResponse> {
+  if (!file || file.size <= 0) {
+    throw new Error('No file selected.');
+  }
+
+  const normalized = ethers.getAddress(address).toLowerCase();
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  const dataBase64 = uint8ToBase64(bytes);
+  const timestamp = Date.now();
+  const contentType = file.type || 'application/octet-stream';
+
+  const message = buildAvatarUploadSigningMessage(normalized, timestamp, file.size, contentType);
+  const signature = await signer.signMessage(message);
+
+  const response = await fetch(PROFILE_AVATAR_API_PATH, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      address: normalized,
+      timestamp,
+      signature,
+      fileName: file.name,
+      contentType,
+      byteLength: file.size,
+      dataBase64,
+    }),
+  });
+
+  return parseApiResponse<ProfileAvatarUploadResponse>(response);
 }

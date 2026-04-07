@@ -108,8 +108,9 @@ export default function ChatMessageItem({
         {canReply && (
           <button
             onClick={() => onReply(message)}
-            className="opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded hover:bg-white/[0.05] text-dark-500 hover:text-primary-400 shrink-0"
+            className="opacity-0 group-hover:opacity-100 focus-visible:opacity-100 transition-opacity p-1 rounded hover:bg-white/[0.05] focus-visible:bg-white/[0.05] text-dark-500 hover:text-primary-400 focus-visible:text-primary-400 shrink-0"
             title="Reply"
+            aria-label="Reply"
           >
             <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6" />

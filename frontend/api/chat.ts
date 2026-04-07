@@ -120,6 +120,11 @@ interface ProfileDoc {
   avatarUrl: string;
 }
 
+interface ChatCursorPayload {
+  createdAt: string;
+  _id: string;
+}
+
 async function getMongoClient(): Promise<MongoClient> {
   if (!MONGO_URI) throw new Error('MONGO_URI is not configured');
 
@@ -194,6 +199,29 @@ function formatChatMessage(doc: ChatDoc, authorProfile: ProfileDoc | null, reply
   };
 }
 
+function encodeChatCursor(doc: ChatDoc): string {
+  const payload: ChatCursorPayload = {
+    createdAt: doc.createdAt.toISOString(),
+    _id: doc._id!.toString(),
+  };
+  return JSON.stringify(payload);
+}
+
+function parseChatCursor(cursor: string): { createdAt: Date; id: ObjectId } {
+  try {
+    const parsed = JSON.parse(cursor) as Partial<ChatCursorPayload>;
+    if (!parsed || typeof parsed.createdAt !== 'string' || typeof parsed._id !== 'string') {
+      throw new Error('Invalid cursor format.');
+    }
+    const createdAt = new Date(parsed.createdAt);
+    if (isNaN(createdAt.getTime())) throw new Error('Invalid cursor timestamp.');
+    const id = new ObjectId(parsed._id);
+    return { createdAt, id };
+  } catch {
+    throw new Error('Invalid cursor.');
+  }
+}
+
 function getReadProvider(): JsonRpcProvider {
   if (!cachedReadProvider) {
     cachedReadProvider = new JsonRpcProvider(RPC_URL, undefined, { staticNetwork: true, batchMaxCount: 1 });
@@ -257,20 +285,22 @@ async function enforceUserRateLimits(col: Collection<ChatDoc>, marketAddress: st
 async function getChatMessages(marketAddress: string, cursor?: string) {
   const client = await getMongoClient();
   const col = client.db(MONGO_DB_NAME).collection<ChatDoc>(CHATS_COLLECTION);
+  const profilesCol = client.db(MONGO_DB_NAME).collection<ProfileDoc>(PROFILES_COLLECTION);
 
   const normalizedMarket = normalizeAddress(marketAddress);
 
   const query: Record<string, unknown> = { marketAddress: normalizedMarket };
   if (cursor) {
-    const cursorDate = new Date(cursor);
-    if (!isNaN(cursorDate.getTime())) {
-      query.createdAt = { $lt: cursorDate };
-    }
+    const parsedCursor = parseChatCursor(cursor);
+    query.$or = [
+      { createdAt: { $lt: parsedCursor.createdAt } },
+      { createdAt: parsedCursor.createdAt, _id: { $lt: parsedCursor.id } },
+    ];
   }
 
   const docs = await col
     .find(query)
-    .sort({ createdAt: -1 })
+    .sort({ createdAt: -1, _id: -1 })
     .limit(PAGE_SIZE + 1)
     .toArray();
 
@@ -281,23 +311,29 @@ async function getChatMessages(marketAddress: string, cursor?: string) {
   const authorAddresses = [...new Set(messages.map(m => m.authorAddress))];
   const replyIds = messages.map(m => m.replyTo).filter((id): id is ObjectId => id !== null);
 
-  const [authorProfiles, replyDocs] = await Promise.all([
-    Promise.all(authorAddresses.map(addr => getProfileByAddress(addr))),
-    replyIds.length > 0
-      ? col.find({ _id: { $in: replyIds } }).toArray()
-      : Promise.resolve([]),
-  ]);
-
-  const authorProfileMap = new Map<string, ProfileDoc | null>();
-  authorAddresses.forEach((addr, i) => {
-    authorProfileMap.set(addr.toLowerCase(), authorProfiles[i]);
-  });
+  const replyDocs = replyIds.length > 0
+    ? await col.find({ _id: { $in: replyIds } }).toArray()
+    : [];
 
   const replyAuthorAddresses = [...new Set(replyDocs.map(d => d.authorAddress))];
-  const replyAuthorProfiles = await Promise.all(replyAuthorAddresses.map(addr => getProfileByAddress(addr)));
+
+  const profileAddresses = [...new Set([...authorAddresses, ...replyAuthorAddresses].map((addr) => addr.toLowerCase()))];
+  const profileDocs = profileAddresses.length > 0
+    ? await profilesCol.find({ address: { $in: profileAddresses } }).toArray()
+    : [];
+  const profileMap = new Map<string, ProfileDoc>();
+  for (const profile of profileDocs) {
+    profileMap.set(profile.address.toLowerCase(), profile);
+  }
+
+  const authorProfileMap = new Map<string, ProfileDoc | null>();
+  authorAddresses.forEach((addr) => {
+    authorProfileMap.set(addr.toLowerCase(), profileMap.get(addr.toLowerCase()) || null);
+  });
+
   const replyAuthorProfileMap = new Map<string, ProfileDoc | null>();
-  replyAuthorAddresses.forEach((addr, i) => {
-    replyAuthorProfileMap.set(addr.toLowerCase(), replyAuthorProfiles[i]);
+  replyAuthorAddresses.forEach((addr) => {
+    replyAuthorProfileMap.set(addr.toLowerCase(), profileMap.get(addr.toLowerCase()) || null);
   });
 
   const replyDocMap = new Map<string, ChatDoc>();
@@ -314,7 +350,11 @@ async function getChatMessages(marketAddress: string, cursor?: string) {
     return formatChatMessage(doc, authorProfile, replyToDoc, replyToProfile);
   });
 
-  return { messages: formatted, hasMore };
+  const nextCursor = hasMore && messagesDesc.length > 0
+    ? encodeChatCursor(messagesDesc[messagesDesc.length - 1])
+    : null;
+
+  return { messages: formatted, hasMore, nextCursor };
 }
 
 async function sendChatMessage(
@@ -331,11 +371,6 @@ async function sendChatMessage(
 
   const normalized = normalizeAddress(address);
 
-  const profile = await getProfileByAddress(normalized);
-  if (!profile) {
-    throw new Error('You need a profile to chat. Create a profile first.');
-  }
-
   const content = typeof payload.content === 'string' ? payload.content : '';
   if (!content.trim()) throw new Error('Message cannot be empty.');
   if (content.length > MAX_MESSAGE_LENGTH) throw new Error(`Message exceeds ${MAX_MESSAGE_LENGTH} character limit.`);
@@ -344,15 +379,11 @@ async function sendChatMessage(
   const marketAddress = typeof payload.marketAddress === 'string' ? payload.marketAddress : '';
   if (!marketAddress) throw new Error('Market address is required.');
 
+  let normalizedMarket: string;
   try {
-    normalizeAddress(marketAddress);
+    normalizedMarket = normalizeAddress(marketAddress);
   } catch {
     throw new Error('Invalid market address.');
-  }
-
-  const stage = await getMarketStage(marketAddress);
-  if (stage === STAGE_RESOLVED || stage === STAGE_CANCELLED) {
-    throw new Error('Chat is closed for this market.');
   }
 
   const replyTo = payload.replyTo ? String(payload.replyTo) : null;
@@ -369,6 +400,16 @@ async function sendChatMessage(
     throw new Error('Invalid signature for wallet address.');
   }
 
+  const profile = await getProfileByAddress(normalized);
+  if (!profile) {
+    throw new Error('You need a profile to chat. Create a profile first.');
+  }
+
+  const stage = await getMarketStage(normalizedMarket);
+  if (stage === STAGE_RESOLVED || stage === STAGE_CANCELLED) {
+    throw new Error('Chat is closed for this market.');
+  }
+
   const sanitized = sanitizeChatContent(content);
   if (!sanitized) throw new Error('Message cannot be empty.');
   if (sanitized.length > MAX_MESSAGE_LENGTH) throw new Error(`Message exceeds ${MAX_MESSAGE_LENGTH} character limit.`);
@@ -380,13 +421,13 @@ async function sendChatMessage(
   cleanupInMemoryCaches();
   const clientIp = getClientIp(req);
   enforceIpRateLimit(clientIp);
-  await enforceUserRateLimits(col, marketAddress.toLowerCase(), normalized, sanitized);
+  await enforceUserRateLimits(col, normalizedMarket, normalized, sanitized);
 
   let replyToObj: ObjectId | null = null;
   if (replyTo) {
     try {
       replyToObj = new ObjectId(replyTo);
-      const exists = await col.findOne({ _id: replyToObj, marketAddress: marketAddress.toLowerCase() });
+      const exists = await col.findOne({ _id: replyToObj, marketAddress: normalizedMarket });
       if (!exists) throw new Error('Reply target not found.');
     } catch (err: any) {
       if (err.message === 'Reply target not found.') throw err;
@@ -396,7 +437,7 @@ async function sendChatMessage(
 
   const now = new Date();
   const doc: Omit<ChatDoc, '_id'> = {
-    marketAddress: marketAddress.toLowerCase(),
+    marketAddress: normalizedMarket,
     authorAddress: normalized,
     content: sanitized,
     replyTo: replyToObj,
@@ -436,7 +477,10 @@ export default async function handler(req: any, res: any) {
       if (Array.isArray(marketAddress) || typeof marketAddress !== 'string' || !marketAddress) {
         return res.status(400).json({ error: 'marketAddress required' });
       }
-      const data = await getChatMessages(marketAddress, cursor);
+      if (Array.isArray(cursor)) {
+        return res.status(400).json({ error: 'cursor must be a single value' });
+      }
+      const data = await getChatMessages(marketAddress, typeof cursor === 'string' ? cursor : undefined);
       return res.status(200).json(data);
     }
 

@@ -31,6 +31,7 @@ export interface ChatMessageInput {
 export interface ChatApiResponse {
   messages: ChatMessage[];
   hasMore: boolean;
+  nextCursor: string | null;
 }
 
 export interface ChatSendResponse {

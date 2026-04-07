@@ -1,12 +1,13 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react';
 import { Link } from 'react-router-dom';
 import { useWallet } from '../../context/WalletContext';
 import ImageWithFallback from '../../components/ImageWithFallback';
 import EmptyState from '../../components/EmptyState';
 import { PageLoader } from '../../components/LoadingSpinner';
 import { EMPTY_PROFILE_PAYLOAD, normalizeProfileSlug, type ProfilePayload } from '../../utils/profileAuth';
-import { fetchProfileByAddress, saveProfileBySignature } from '../../services/profile';
+import { fetchProfileByAddress, saveProfileBySignature, uploadProfileAvatar } from '../../services/profile';
 import type { PublicProfile as PublicProfileType } from '../../types/profile';
+import { compressAvatarImage } from '../../utils/avatarImage';
 
 function toProfilePayload(profile: PublicProfileType | null): ProfilePayload {
   if (!profile) return { ...EMPTY_PROFILE_PAYLOAD };
@@ -27,6 +28,9 @@ export default function ProfileSettings() {
   const { address, signer, isConnected } = useWallet();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [avatarUploading, setAvatarUploading] = useState(false);
+  const [avatarUploadMeta, setAvatarUploadMeta] = useState<{ bytes: number; type: string } | null>(null);
+  const [localAvatarPreviewUrl, setLocalAvatarPreviewUrl] = useState<string | null>(null);
   const [form, setForm] = useState<ProfilePayload>({ ...EMPTY_PROFILE_PAYLOAD });
   const [profileSlug, setProfileSlug] = useState('');
   const [msg, setMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
@@ -42,6 +46,11 @@ export default function ProfileSettings() {
       setLoading(false);
       setForm({ ...EMPTY_PROFILE_PAYLOAD });
       setProfileSlug('');
+      setAvatarUploadMeta(null);
+      setLocalAvatarPreviewUrl((prev) => {
+        if (prev) URL.revokeObjectURL(prev);
+        return null;
+      });
       setSaving(false);
       return;
     }
@@ -53,6 +62,11 @@ export default function ProfileSettings() {
         setMsg(null);
         setForm({ ...EMPTY_PROFILE_PAYLOAD });
         setProfileSlug('');
+        setAvatarUploadMeta(null);
+        setLocalAvatarPreviewUrl((prev) => {
+          if (prev) URL.revokeObjectURL(prev);
+          return null;
+        });
         const response = await fetchProfileByAddress(address);
         if (!cancelled) {
           setForm(toProfilePayload(response.profile));
@@ -76,6 +90,14 @@ export default function ProfileSettings() {
     };
   }, [address]);
 
+  useEffect(() => {
+    return () => {
+      if (localAvatarPreviewUrl) {
+        URL.revokeObjectURL(localAvatarPreviewUrl);
+      }
+    };
+  }, [localAvatarPreviewUrl]);
+
   const publicProfileLink = useMemo(() => {
     if (!profileSlug) return '';
     if (typeof window === 'undefined') return `/profile/${profileSlug}`;
@@ -91,10 +113,44 @@ export default function ProfileSettings() {
 
   const displayName = form.displayName.trim() || (address ? `${address.slice(0, 6)}...${address.slice(-4)}` : 'Trader');
   const avatarUrl = form.avatarUrl.trim();
+  const avatarPreviewSrc = localAvatarPreviewUrl || avatarUrl;
   const shareLinkHref = publicProfileLink || '#';
 
   const updateField = (key: keyof ProfilePayload, value: string) => {
     setForm((prev) => ({ ...prev, [key]: value }));
+  };
+
+  const handleAvatarFileChange = async (event: ChangeEvent<HTMLInputElement>) => {
+    const selected = event.target.files?.[0];
+    if (!selected) return;
+    if (!address || !signer) {
+      setMsg({ type: 'error', text: 'Connect wallet to upload avatar.' });
+      event.target.value = '';
+      return;
+    }
+
+    try {
+      setAvatarUploading(true);
+      setMsg(null);
+
+      const compressed = await compressAvatarImage(selected);
+      const uploaded = await uploadProfileAvatar(compressed.file, address, signer);
+
+      setForm((prev) => ({ ...prev, avatarUrl: uploaded.url }));
+      setAvatarUploadMeta({ bytes: uploaded.byteLength, type: uploaded.contentType });
+      setLocalAvatarPreviewUrl((prev) => {
+        if (prev) URL.revokeObjectURL(prev);
+        return compressed.previewUrl;
+      });
+
+      setMsg({ type: 'success', text: 'Avatar uploaded and optimized.' });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to upload avatar.';
+      setMsg({ type: 'error', text: message });
+    } finally {
+      setAvatarUploading(false);
+      event.target.value = '';
+    }
   };
 
   const handleCopyLink = async () => {
@@ -155,8 +211,8 @@ export default function ProfileSettings() {
         <div className="flex flex-col md:flex-row md:items-start gap-5">
           <div className="w-28">
             <div className="w-24 h-24 rounded-2xl overflow-hidden border border-white/[0.12] bg-dark-900 mb-2">
-              {avatarUrl ? (
-                <ImageWithFallback src={avatarUrl} alt={displayName} className="w-full h-full" />
+              {avatarPreviewSrc ? (
+                <ImageWithFallback src={avatarPreviewSrc} alt={displayName} className="w-full h-full" />
               ) : (
                 <div className="w-full h-full flex items-center justify-center text-2xl font-semibold text-cyan-300">
                   {displayName.charAt(0).toUpperCase()}
@@ -197,15 +253,31 @@ export default function ProfileSettings() {
                 />
               </div>
               <div>
-                <label htmlFor="profile-avatarUrl" className="label">Avatar URL</label>
+                <label htmlFor="profile-avatarUrl" className="label">Avatar (R2 Upload)</label>
                 <input
                   id="profile-avatarUrl"
-                  type="url"
+                  type="text"
                   value={form.avatarUrl}
-                  onChange={(e) => updateField('avatarUrl', e.target.value)}
-                  placeholder="https://..."
-                  className="input-field text-sm"
+                  readOnly
+                  placeholder="Upload image to generate URL"
+                  className="input-field text-sm text-white/70"
                 />
+                <div className="mt-2 flex flex-wrap items-center gap-2">
+                  <label className={`btn-secondary text-2xs px-2.5 py-1.5 cursor-pointer ${avatarUploading ? 'opacity-60 pointer-events-none' : ''}`}>
+                    {avatarUploading ? 'Uploading...' : 'Upload to R2'}
+                    <input
+                      type="file"
+                      accept="image/*"
+                      className="hidden"
+                      onChange={handleAvatarFileChange}
+                      disabled={avatarUploading || saving}
+                    />
+                  </label>
+                  <span className="text-2xs text-dark-500">Auto-compressed · max 2MB</span>
+                  {avatarUploadMeta && (
+                    <span className="text-2xs text-dark-500">{Math.max(1, Math.round(avatarUploadMeta.bytes / 1024))}KB · {avatarUploadMeta.type}</span>
+                  )}
+                </div>
               </div>
               <div>
                 <label htmlFor="profile-twitterUrl" className="label">Twitter URL</label>
