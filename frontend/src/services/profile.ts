@@ -140,3 +140,37 @@ export async function uploadProfileAvatar(file: File, address: string, signer: S
 
   return parseApiResponse<ProfileAvatarUploadResponse>(response);
 }
+
+export async function deleteProfileAvatar(
+  address: string,
+  key: string,
+  signer: Signer,
+): Promise<void> {
+  const normalized = ethers.getAddress(address).toLowerCase();
+  const timestamp = Date.now();
+  const payload = {
+    address: normalized,
+    key,
+    timestamp,
+    action: 'delete-avatar',
+  } as const;
+
+  const message = [
+    'AchMarket Avatar Delete',
+    `Address: ${normalized}`,
+    `Timestamp: ${timestamp}`,
+    `Key: ${key}`,
+    'No gas fee. Sign only if you trust this request.',
+  ].join('\n');
+  const signature = await signer.signMessage(message);
+
+  const response = await fetch(PROFILE_AVATAR_API_PATH, {
+    method: 'DELETE',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ ...payload, signature }),
+  });
+
+  await parseApiResponse<{ ok: true }>(response);
+}

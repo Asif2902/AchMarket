@@ -1,9 +1,10 @@
 import { recoverAddress, hashMessage, getAddress } from 'ethers';
-import { PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
+import { PutObjectCommand, DeleteObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import { randomBytes, createHash } from 'crypto';
 
 const MAX_UPLOAD_BYTES = 2 * 1024 * 1024;
 const SIG_VALIDITY_MS = 10 * 60 * 1000;
+const FUTURE_SKEW_MS = 5000;
 
 const R2_ACCOUNT_ID = process.env.R2_ACCOUNT_ID;
 const R2_ACCESS_KEY_ID = process.env.R2_ACCESS_KEY_ID;
@@ -58,6 +59,16 @@ function buildAvatarUploadSigningMessage(
     `ContentType: ${contentType}`,
     `ContentDigest: ${contentDigest}`,
     `ValidForMs: ${SIG_VALIDITY_MS}`,
+    'No gas fee. Sign only if you trust this request.',
+  ].join('\n');
+}
+
+function buildAvatarDeleteSigningMessage(address: string, timestamp: number, key: string): string {
+  return [
+    'AchMarket Avatar Delete',
+    `Address: ${address}`,
+    `Timestamp: ${timestamp}`,
+    `Key: ${key}`,
     'No gas fee. Sign only if you trust this request.',
   ].join('\n');
 }
@@ -129,6 +140,38 @@ function getExtension(contentType: string): string {
   throw new HttpError(400, 'Unsupported image content type.');
 }
 
+function safeDecodeKey(value: string): string | null {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return null;
+  }
+}
+
+function normalizeDeleteKey(rawKey: unknown): string {
+  if (typeof rawKey !== 'string') return '';
+  const trimmed = rawKey.trim();
+  if (!trimmed) return '';
+
+  const decoded = safeDecodeKey(trimmed);
+  if (!decoded) return '';
+  return decoded.split('?')[0].trim();
+}
+
+function validateTimestamp(timestamp: number): void {
+  if (!Number.isFinite(timestamp)) {
+    throw new HttpError(400, 'Invalid timestamp.');
+  }
+
+  const now = Date.now();
+  if (timestamp > now + FUTURE_SKEW_MS) {
+    throw new HttpError(400, 'Timestamp is in the future.');
+  }
+  if (now - timestamp > SIG_VALIDITY_MS) {
+    throw new HttpError(401, 'Signature expired. Please try again.');
+  }
+}
+
 function resolveCorsOrigin(originHeader: unknown): string | null {
   if (process.env.NODE_ENV !== 'production') {
     return '*';
@@ -154,13 +197,7 @@ async function uploadAvatar(body: Record<string, unknown>) {
   if (!Number.isFinite(timestamp)) {
     throw new HttpError(400, 'Invalid timestamp.');
   }
-  const now = Date.now();
-  if (timestamp > now) {
-    throw new HttpError(400, 'Timestamp is in the future.');
-  }
-  if (now - timestamp > SIG_VALIDITY_MS) {
-    throw new HttpError(401, 'Signature expired. Please try again.');
-  }
+  validateTimestamp(timestamp);
 
   if (!Number.isFinite(byteLength) || byteLength <= 0) {
     throw new HttpError(400, 'Invalid byteLength.');
@@ -232,6 +269,47 @@ async function uploadAvatar(body: Record<string, unknown>) {
   };
 }
 
+async function deleteAvatar(body: Record<string, unknown>): Promise<void> {
+  const addressRaw = typeof body.address === 'string' ? body.address : '';
+  const signature = typeof body.signature === 'string' ? body.signature : '';
+  const key = normalizeDeleteKey(body.key);
+  const timestamp = Number(body.timestamp);
+
+  if (!addressRaw || !signature || !key) {
+    throw new HttpError(400, 'address, signature, and key are required.');
+  }
+
+  validateTimestamp(timestamp);
+
+  const normalized = normalizeAddress(addressRaw);
+  const expectedPrefix = `avatars/${normalized}/`;
+  if (!key.startsWith(expectedPrefix)) {
+    throw new HttpError(400, 'Invalid avatar key.');
+  }
+
+  const message = buildAvatarDeleteSigningMessage(normalized, timestamp, key);
+  let recovered: string;
+  try {
+    recovered = verifyMessage(message, signature);
+  } catch {
+    throw new HttpError(401, 'Invalid signature format.');
+  }
+
+  if (normalizeAddress(recovered) !== normalized) {
+    throw new HttpError(401, 'Invalid signature for wallet address.');
+  }
+
+  if (!R2_BUCKET) {
+    throw new HttpError(503, 'R2 environment is not fully configured.');
+  }
+
+  const s3 = getS3Client();
+  await s3.send(new DeleteObjectCommand({
+    Bucket: R2_BUCKET,
+    Key: key,
+  }));
+}
+
 export default async function handler(req: any, res: any) {
   const corsOrigin = resolveCorsOrigin(req.headers?.origin);
 
@@ -239,7 +317,7 @@ export default async function handler(req: any, res: any) {
     res.setHeader('Access-Control-Allow-Origin', corsOrigin);
     res.setHeader('Vary', 'Origin');
   }
-  res.setHeader('Access-Control-Allow-Methods', 'POST,OPTIONS');
+  res.setHeader('Access-Control-Allow-Methods', 'POST,DELETE,OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
 
@@ -247,7 +325,7 @@ export default async function handler(req: any, res: any) {
     return res.status(200).json({ ok: true });
   }
 
-  if (req.method !== 'POST') {
+  if (req.method !== 'POST' && req.method !== 'DELETE') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
@@ -260,8 +338,13 @@ export default async function handler(req: any, res: any) {
         throw new HttpError(400, 'Invalid JSON');
       }
     }
-    const data = await uploadAvatar(body || {});
-    return res.status(200).json(data);
+    if (req.method === 'POST') {
+      const data = await uploadAvatar(body || {});
+      return res.status(200).json(data);
+    }
+
+    await deleteAvatar(body || {});
+    return res.status(200).json({ ok: true });
   } catch (err: any) {
     if (typeof err?.status === 'number') {
       return res.status(err.status).json({ error: err.message || 'Unexpected error' });

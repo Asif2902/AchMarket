@@ -5,7 +5,7 @@ import ImageWithFallback from '../../components/ImageWithFallback';
 import EmptyState from '../../components/EmptyState';
 import { PageLoader } from '../../components/LoadingSpinner';
 import { EMPTY_PROFILE_PAYLOAD, normalizeProfileSlug, type ProfilePayload } from '../../utils/profileAuth';
-import { fetchProfileByAddress, saveProfileBySignature, uploadProfileAvatar } from '../../services/profile';
+import { fetchProfileByAddress, saveProfileBySignature, uploadProfileAvatar, deleteProfileAvatar } from '../../services/profile';
 import type { PublicProfile as PublicProfileType } from '../../types/profile';
 import { compressAvatarImage } from '../../utils/avatarImage';
 
@@ -39,6 +39,8 @@ export default function ProfileSettings() {
   const addressRef = useRef(address);
   const signerRef = useRef(signer);
   const latestPreviewUrlRef = useRef<string | null>(null);
+  const latestFormRef = useRef<ProfilePayload>({ ...EMPTY_PROFILE_PAYLOAD });
+  const avatarFileInputRef = useRef<HTMLInputElement | null>(null);
   addressRef.current = address;
   signerRef.current = signer;
 
@@ -96,6 +98,10 @@ export default function ProfileSettings() {
   }, [localAvatarPreviewUrl]);
 
   useEffect(() => {
+    latestFormRef.current = form;
+  }, [form]);
+
+  useEffect(() => {
     return () => {
       if (latestPreviewUrlRef.current) {
         URL.revokeObjectURL(latestPreviewUrlRef.current);
@@ -135,6 +141,7 @@ export default function ProfileSettings() {
     }
 
     let previewToRevokeOnFailure: string | null = null;
+    let uploadedResult: { key: string } | null = null;
 
     try {
       setAvatarUploading(true);
@@ -150,7 +157,8 @@ export default function ProfileSettings() {
       }
 
       const uploaded = await uploadProfileAvatar(compressed.file, address, signer);
-      const nextPayload: ProfilePayload = { ...form, avatarUrl: uploaded.url };
+      uploadedResult = { key: uploaded.key };
+      const nextPayload: ProfilePayload = { ...latestFormRef.current, avatarUrl: uploaded.url };
       const saved = await saveProfileBySignature(address, nextPayload, signer);
 
       setForm(toProfilePayload(saved.profile));
@@ -164,6 +172,13 @@ export default function ProfileSettings() {
 
       setMsg({ type: 'success', text: 'Avatar uploaded and saved.' });
     } catch (err) {
+      if (uploadedResult && address && signer) {
+        try {
+          await deleteProfileAvatar(address, uploadedResult.key, signer);
+        } catch (cleanupErr) {
+          console.error('Failed to cleanup orphaned avatar upload:', cleanupErr);
+        }
+      }
       if (previewToRevokeOnFailure) {
         URL.revokeObjectURL(previewToRevokeOnFailure);
       }
@@ -284,18 +299,25 @@ export default function ProfileSettings() {
                   placeholder="Upload image to generate URL"
                   className="input-field text-sm text-white/70"
                 />
-                <label
-                  className={`mt-2 block rounded-xl border border-dashed border-white/[0.2] bg-dark-900/50 p-3 cursor-pointer transition-colors ${
-                    avatarUploading || saving ? 'opacity-60 pointer-events-none' : 'hover:border-cyan-400/40 hover:bg-dark-850/70'
+                <input
+                  ref={avatarFileInputRef}
+                  type="file"
+                  accept="image/*"
+                  className="sr-only"
+                  onChange={handleAvatarFileChange}
+                  disabled={avatarUploading || saving}
+                />
+                <button
+                  type="button"
+                  onClick={() => avatarFileInputRef.current?.click()}
+                  disabled={avatarUploading || saving}
+                  aria-label="Upload avatar image"
+                  className={`mt-2 w-full text-left rounded-xl border border-dashed border-white/[0.2] bg-dark-900/50 p-3 transition-colors ${
+                    avatarUploading || saving
+                      ? 'opacity-60 cursor-not-allowed'
+                      : 'hover:border-cyan-400/40 hover:bg-dark-850/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/40'
                   }`}
                 >
-                  <input
-                    type="file"
-                    accept="image/*"
-                    className="hidden"
-                    onChange={handleAvatarFileChange}
-                    disabled={avatarUploading || saving}
-                  />
                   <div className="flex items-center gap-3">
                     <div className="w-9 h-9 rounded-lg bg-cyan-500/15 border border-cyan-400/30 flex items-center justify-center">
                       <svg className="w-4 h-4 text-cyan-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -309,7 +331,7 @@ export default function ProfileSettings() {
                       <p className="text-2xs text-dark-500">Auto-compressed · max 2MB · WebP optimized</p>
                     </div>
                   </div>
-                </label>
+                </button>
                 <div className="mt-2 flex flex-wrap items-center gap-2">
                   {avatarUploadMeta && (
                     <span className="text-2xs text-dark-500">{Math.max(1, Math.round(avatarUploadMeta.bytes / 1024))}KB · {avatarUploadMeta.type}</span>

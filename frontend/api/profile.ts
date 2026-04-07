@@ -115,19 +115,29 @@ function getR2Client(): S3Client | null {
   return cachedR2Client;
 }
 
-function extractR2KeyFromUrl(urlValue: string): string | null {
+function extractR2KeyFromUrl(urlValue: string, normalizedAddress: string): string | null {
   if (!R2_PUBLIC_BASE_URL || !urlValue) return null;
 
   const base = R2_PUBLIC_BASE_URL.replace(/\/$/, '');
   if (!urlValue.startsWith(`${base}/`)) return null;
 
-  const key = urlValue.slice(base.length + 1).split('?')[0].trim();
-  if (!key || !key.startsWith('avatars/')) return null;
-  return decodeURIComponent(key);
+  const encodedKey = urlValue.slice(base.length + 1).split('?')[0].trim();
+  if (!encodedKey) return null;
+
+  let decodedKey: string;
+  try {
+    decodedKey = decodeURIComponent(encodedKey);
+  } catch {
+    return null;
+  }
+
+  const expectedPrefix = `avatars/${normalizedAddress}/`;
+  if (!decodedKey.startsWith(expectedPrefix)) return null;
+  return decodedKey;
 }
 
-async function cleanupOldAvatar(urlValue: string): Promise<void> {
-  const key = extractR2KeyFromUrl(urlValue);
+async function cleanupOldAvatar(urlValue: string, normalizedAddress: string): Promise<void> {
+  const key = extractR2KeyFromUrl(urlValue, normalizedAddress);
   if (!key || !R2_BUCKET) return;
 
   const r2Client = getR2Client();
@@ -213,7 +223,9 @@ async function getProfile(address: string) {
 async function upsertProfile(address: string, payload: Record<string, unknown>, timestamp: number, signature: string) {
   const ts = Number(timestamp);
   if (!Number.isFinite(ts)) throw new Error('Invalid timestamp.');
-  const diff = Math.abs(Date.now() - ts);
+  const nowMs = Date.now();
+  if (ts > nowMs) throw new Error('Timestamp is in the future.');
+  const diff = nowMs - ts;
   if (diff > SIG_VALIDITY_MS) throw new Error('Signature expired. Please try again.');
 
   const normalized = normalizeAddress(address);
@@ -276,7 +288,7 @@ async function upsertProfile(address: string, payload: Record<string, unknown>, 
 
   const nextAvatarUrl = typeof merged.avatarUrl === 'string' ? merged.avatarUrl.trim() : '';
   if (previousAvatarUrl && previousAvatarUrl !== nextAvatarUrl) {
-    await cleanupOldAvatar(previousAvatarUrl);
+    await cleanupOldAvatar(previousAvatarUrl, normalized);
   }
 
   return getProfile(normalized);
