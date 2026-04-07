@@ -38,6 +38,7 @@ export default function ProfileSettings() {
   const currentRequestIdRef = useRef(0);
   const addressRef = useRef(address);
   const signerRef = useRef(signer);
+  const latestPreviewUrlRef = useRef<string | null>(null);
   addressRef.current = address;
   signerRef.current = signer;
 
@@ -91,12 +92,16 @@ export default function ProfileSettings() {
   }, [address]);
 
   useEffect(() => {
+    latestPreviewUrlRef.current = localAvatarPreviewUrl;
+  }, [localAvatarPreviewUrl]);
+
+  useEffect(() => {
     return () => {
-      if (localAvatarPreviewUrl) {
-        URL.revokeObjectURL(localAvatarPreviewUrl);
+      if (latestPreviewUrlRef.current) {
+        URL.revokeObjectURL(latestPreviewUrlRef.current);
       }
     };
-  }, [localAvatarPreviewUrl]);
+  }, []);
 
   const publicProfileLink = useMemo(() => {
     if (!profileSlug) return '';

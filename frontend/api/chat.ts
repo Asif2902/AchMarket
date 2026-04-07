@@ -76,7 +76,7 @@ const MAX_MESSAGES_PER_MINUTE = 8;
 const DUPLICATE_WINDOW_MS = 2 * 60 * 1000;
 const MAX_IP_POSTS_PER_MINUTE = 40;
 const IP_WINDOW_MS = 60 * 1000;
-const RPC_URL = process.env.RPC_URL ?? 'https://arc-testnet.drpc.org/';
+const RPC_URL = process.env.RPC_URL;
 const MARKET_STAGE_ABI = ['function stage() view returns (uint8)'];
 const STAGE_RESOLVED = 2;
 const STAGE_CANCELLED = 3;
@@ -87,6 +87,18 @@ let indexesReady = false;
 let cachedReadProvider: JsonRpcProvider | null = null;
 const marketStageCache = new Map<string, { stage: number; expiresAt: number }>();
 const ipRateLimitMap = new Map<string, { count: number; resetAt: number }>();
+
+function getRequiredRpcUrl(): string {
+  if (!RPC_URL || !RPC_URL.trim()) {
+    throw new Error('RPC_URL is required for chat stage checks. Configure RPC_URL env var.');
+  }
+  try {
+    new URL(RPC_URL);
+  } catch {
+    throw new Error('RPC_URL is invalid. Configure RPC_URL with a valid URL.');
+  }
+  return RPC_URL;
+}
 
 function cleanupInMemoryCaches(): void {
   const now = Date.now();
@@ -224,7 +236,8 @@ function parseChatCursor(cursor: string): { createdAt: Date; id: ObjectId } {
 
 function getReadProvider(): JsonRpcProvider {
   if (!cachedReadProvider) {
-    cachedReadProvider = new JsonRpcProvider(RPC_URL, undefined, { staticNetwork: true, batchMaxCount: 1 });
+    const rpcUrl = getRequiredRpcUrl();
+    cachedReadProvider = new JsonRpcProvider(rpcUrl, undefined, { staticNetwork: true, batchMaxCount: 1 });
   }
   return cachedReadProvider;
 }
@@ -524,7 +537,7 @@ export default async function handler(req: any, res: any) {
       code = 400;
     } else if (msgLower.includes('reply target')) {
       code = 404;
-    } else if (msgLower.includes('mongo_uri') || msgLower.includes('timeout') || msgLower.includes('enotfound')) {
+    } else if (msgLower.includes('mongo_uri') || msgLower.includes('rpc_url') || msgLower.includes('timeout') || msgLower.includes('enotfound')) {
       code = 503;
     }
     return res.status(code).json({ error: msg });

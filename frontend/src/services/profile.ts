@@ -96,7 +96,7 @@ export async function uploadProfileAvatar(file: File, address: string, signer: S
   const timestamp = Date.now();
   const contentType = file.type || 'application/octet-stream';
 
-  const message = buildAvatarUploadSigningMessage(normalized, timestamp, file.size, contentType);
+  const message = buildAvatarUploadSigningMessage(normalized, timestamp, bytes.length, contentType);
   const signature = await signer.signMessage(message);
 
   const response = await fetch(PROFILE_AVATAR_API_PATH, {
@@ -110,7 +110,7 @@ export async function uploadProfileAvatar(file: File, address: string, signer: S
       signature,
       fileName: file.name,
       contentType,
-      byteLength: file.size,
+      byteLength: bytes.length,
       dataBase64,
     }),
   });

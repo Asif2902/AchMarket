@@ -1,8 +1,9 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { fetchChatMessages, sendChatMessage } from '../../services/chat';
 import type { ChatMessage } from '../../types/chat';
 import type { Signer } from 'ethers';
 import { ethers } from 'ethers';
+import { useNavigate } from 'react-router-dom';
 import ChatMessageItem from './ChatMessage';
 import ChatInput from './ChatInput';
 import { fetchProfileBySlug } from '../../services/profile';
@@ -41,6 +42,7 @@ export default function ChatThread({
   hasProfile,
 }: ChatThreadProps) {
   const { readProvider } = useWallet();
+  const navigate = useNavigate();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -82,6 +84,11 @@ export default function ChatThread({
     profilesRef.current = new Map();
     nextCursorRef.current = null;
   }, [marketAddress]);
+
+  const marketContract = useMemo(
+    () => new ethers.Contract(marketAddress, MARKET_ABI, readProvider),
+    [marketAddress, readProvider],
+  );
 
   const loadMessages = useCallback(async (append = false) => {
     let nextMessagesForProfiles: ChatMessage[] = [];
@@ -151,8 +158,7 @@ export default function ChatThread({
     let cancelled = false;
     const checkStage = async () => {
       try {
-        const market = new ethers.Contract(marketAddress, MARKET_ABI, readProvider);
-        const stageRaw: bigint = await market.stage();
+        const stageRaw: bigint = await marketContract.stage();
         if (cancelled) return;
         const stage = Number(stageRaw);
         setIsChatOpen(stage !== STAGE.Resolved && stage !== STAGE.Cancelled);
@@ -167,7 +173,7 @@ export default function ChatThread({
       cancelled = true;
       clearInterval(interval);
     };
-  }, [marketAddress, readProvider]);
+  }, [marketContract]);
 
   useEffect(() => {
     loadMessages();
@@ -250,7 +256,7 @@ export default function ChatThread({
   const handleMentionClick = (slug: string) => {
     const profile = allProfiles.get(slug.toLowerCase());
     if (profile) {
-      window.location.href = `/profile/${profile.profileSlug}`;
+      navigate(`/profile/${profile.profileSlug}`);
     }
   };
 

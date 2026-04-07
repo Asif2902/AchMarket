@@ -10,6 +10,16 @@ const R2_ACCESS_KEY_ID = process.env.R2_ACCESS_KEY_ID;
 const R2_SECRET_ACCESS_KEY = process.env.R2_SECRET_ACCESS_KEY;
 const R2_BUCKET = process.env.R2_BUCKET;
 const R2_PUBLIC_BASE_URL = process.env.R2_PUBLIC_BASE_URL;
+const ALLOWED_ORIGIN = process.env.ALLOWED_ORIGIN;
+
+class HttpError extends Error {
+  status: number;
+
+  constructor(status: number, message: string) {
+    super(message);
+    this.status = status;
+  }
+}
 
 let cachedS3: S3Client | null = null;
 
@@ -36,7 +46,7 @@ function buildAvatarUploadSigningMessage(address: string, timestamp: number, byt
 
 function getS3Client(): S3Client {
   if (!R2_ACCOUNT_ID || !R2_ACCESS_KEY_ID || !R2_SECRET_ACCESS_KEY || !R2_BUCKET) {
-    throw new Error('R2 environment is not fully configured.');
+    throw new HttpError(503, 'R2 environment is not fully configured.');
   }
 
   if (!cachedS3) {
@@ -61,13 +71,15 @@ function sanitizeContentType(value: unknown): string {
 }
 
 function buildPublicUrl(key: string): string {
-  if (R2_PUBLIC_BASE_URL) {
-    return `${R2_PUBLIC_BASE_URL.replace(/\/$/, '')}/${key}`;
+  if (!R2_PUBLIC_BASE_URL || !R2_PUBLIC_BASE_URL.trim()) {
+    throw new HttpError(503, 'R2_PUBLIC_BASE_URL is required. Configure R2_PUBLIC_BASE_URL env var for avatar URLs.');
   }
-  if (!R2_BUCKET) {
-    throw new Error('R2 bucket is missing for URL construction.');
+  try {
+    new URL(R2_PUBLIC_BASE_URL);
+  } catch {
+    throw new HttpError(503, 'R2_PUBLIC_BASE_URL is invalid. Configure R2_PUBLIC_BASE_URL with a valid URL.');
   }
-  return `https://pub-${R2_BUCKET}.r2.dev/${key}`;
+  return `${R2_PUBLIC_BASE_URL.replace(/\/$/, '')}/${key}`;
 }
 
 function getExtension(contentType: string): string {
@@ -87,22 +99,22 @@ async function uploadAvatar(body: Record<string, unknown>) {
   const contentType = sanitizeContentType(body.contentType);
 
   if (!addressRaw || !signature || !dataBase64 || !contentType) {
-    throw new Error('address, signature, contentType, and image data are required.');
+    throw new HttpError(400, 'address, signature, contentType, and image data are required.');
   }
 
   if (!Number.isFinite(timestamp)) {
-    throw new Error('Invalid timestamp.');
+    throw new HttpError(400, 'Invalid timestamp.');
   }
   const age = Math.abs(Date.now() - timestamp);
   if (age > SIG_VALIDITY_MS) {
-    throw new Error('Signature expired. Please try again.');
+    throw new HttpError(401, 'Signature expired. Please try again.');
   }
 
   if (!Number.isFinite(byteLength) || byteLength <= 0) {
-    throw new Error('Invalid byteLength.');
+    throw new HttpError(400, 'Invalid byteLength.');
   }
   if (byteLength > MAX_UPLOAD_BYTES) {
-    throw new Error('Image exceeds 2MB limit.');
+    throw new HttpError(400, 'Image exceeds 2MB limit.');
   }
 
   const normalized = normalizeAddress(addressRaw);
@@ -112,22 +124,22 @@ async function uploadAvatar(body: Record<string, unknown>) {
   try {
     recovered = verifyMessage(message, signature);
   } catch {
-    throw new Error('Invalid signature format.');
+    throw new HttpError(401, 'Invalid signature format.');
   }
 
   if (normalizeAddress(recovered) !== normalized) {
-    throw new Error('Invalid signature for wallet address.');
+    throw new HttpError(401, 'Invalid signature for wallet address.');
   }
 
   const bytes = Buffer.from(dataBase64, 'base64');
   if (!bytes.length) {
-    throw new Error('Invalid image data.');
+    throw new HttpError(400, 'Invalid image data.');
   }
   if (bytes.length !== byteLength) {
-    throw new Error('byteLength mismatch.');
+    throw new HttpError(400, 'byteLength mismatch.');
   }
   if (bytes.length > MAX_UPLOAD_BYTES) {
-    throw new Error('Image exceeds 2MB limit.');
+    throw new HttpError(400, 'Image exceeds 2MB limit.');
   }
 
   const randomSuffix = randomBytes(6).toString('hex');
@@ -152,7 +164,13 @@ async function uploadAvatar(body: Record<string, unknown>) {
 }
 
 export default async function handler(req: any, res: any) {
-  res.setHeader('Access-Control-Allow-Origin', '*');
+  const isDevelopment = process.env.NODE_ENV !== 'production';
+  const corsOrigin = isDevelopment ? '*' : (ALLOWED_ORIGIN || '');
+  if (!corsOrigin) {
+    return res.status(503).json({ error: 'ALLOWED_ORIGIN is required in production.' });
+  }
+
+  res.setHeader('Access-Control-Allow-Origin', corsOrigin);
   res.setHeader('Access-Control-Allow-Methods', 'POST,OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
@@ -168,18 +186,29 @@ export default async function handler(req: any, res: any) {
   try {
     let body = req.body;
     if (typeof body === 'string') {
-      body = JSON.parse(body);
+      try {
+        body = JSON.parse(body);
+      } catch {
+        throw new HttpError(400, 'Invalid JSON');
+      }
     }
     const data = await uploadAvatar(body || {});
     return res.status(200).json(data);
   } catch (err: any) {
+    if (typeof err?.status === 'number') {
+      return res.status(err.status).json({ error: err.message || 'Unexpected error' });
+    }
+
+    if (err?.code === 'AccessDenied' || err?.code === 'InvalidAccessKeyId' || err?.code === 'SignatureDoesNotMatch') {
+      return res.status(503).json({ error: 'R2 credentials are invalid or unauthorized.' });
+    }
+
     const message = err?.message || 'Unexpected error';
     const lower = message.toLowerCase();
     let code = 500;
-    if (lower.includes('method')) code = 405;
-    else if (lower.includes('invalid') || lower.includes('required') || lower.includes('limit') || lower.includes('mismatch')) code = 400;
-    else if (lower.includes('signature')) code = 401;
-    else if (lower.includes('expired')) code = 401;
+    if (lower.includes('signature') || lower.includes('expired')) code = 401;
+    else if (lower.includes('method')) code = 405;
+    else if (lower.includes('required') || lower.includes('invalid') || lower.includes('limit') || lower.includes('mismatch')) code = 400;
     else if (lower.includes('configured')) code = 503;
     return res.status(code).json({ error: message });
   }

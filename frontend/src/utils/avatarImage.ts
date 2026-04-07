@@ -55,6 +55,13 @@ function clampDimension(width: number, height: number): { width: number; height:
   };
 }
 
+/**
+ * Compresses an avatar image for upload.
+ *
+ * Note: The returned `previewUrl` is created via `URL.createObjectURL(...)`.
+ * Callers must invoke `URL.revokeObjectURL(previewUrl)` when the preview is
+ * no longer needed to avoid memory leaks.
+ */
 export async function compressAvatarImage(file: File): Promise<CompressedAvatarImage> {
   if (!file.type.startsWith('image/')) {
     throw new Error('Please select an image file.');
@@ -90,7 +97,6 @@ export async function compressAvatarImage(file: File): Promise<CompressedAvatarI
       }
 
       if (compressed.size <= TARGET_BYTES) {
-        attemptBest = compressed;
         break;
       }
     }
