@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { resolveImageUri } from '../utils/format';
 
 interface Props {
@@ -11,6 +11,11 @@ export default function ImageWithFallback({ src, alt, className = '' }: Props) {
   const [error, setError] = useState(false);
   const [loading, setLoading] = useState(true);
   const resolved = resolveImageUri(src);
+
+  useEffect(() => {
+    setError(false);
+    setLoading(Boolean(src));
+  }, [src]);
 
   if (!src || error) {
     return (

@@ -77,6 +77,10 @@ const DUPLICATE_WINDOW_MS = 2 * 60 * 1000;
 const MAX_IP_POSTS_PER_MINUTE = 40;
 const IP_WINDOW_MS = 60 * 1000;
 const RPC_URL = process.env.RPC_URL;
+const CORS_ALLOWED_ORIGINS = (process.env.CORS_ALLOWED_ORIGINS ?? '')
+  .split(',')
+  .map((value) => value.trim())
+  .filter(Boolean);
 const MARKET_STAGE_ABI = ['function stage() view returns (uint8)'];
 const STAGE_RESOLVED = 2;
 const STAGE_CANCELLED = 3;
@@ -98,6 +102,13 @@ function getRequiredRpcUrl(): string {
     throw new Error('RPC_URL is invalid. Configure RPC_URL with a valid URL.');
   }
   return RPC_URL;
+}
+
+function resolveCorsOrigin(originHeader: unknown): string | null {
+  if (process.env.NODE_ENV === 'development') return '*';
+  if (typeof originHeader !== 'string' || !originHeader) return null;
+  if (CORS_ALLOWED_ORIGINS.includes('*')) return originHeader;
+  return CORS_ALLOWED_ORIGINS.includes(originHeader) ? originHeader : null;
 }
 
 function cleanupInMemoryCaches(): void {
@@ -289,7 +300,11 @@ async function enforceUserRateLimits(col: Collection<ChatDoc>, marketAddress: st
   }
 
   const oneMinuteAgo = new Date(now - 60_000);
-  const countLastMinute = await col.countDocuments({ marketAddress, authorAddress, createdAt: { $gte: oneMinuteAgo } });
+  const recentCountLastMinute = recent.filter((msg) => msg.createdAt >= oneMinuteAgo).length;
+  let countLastMinute = recentCountLastMinute;
+  if (recent.length === MAX_MESSAGES_PER_MINUTE && recentCountLastMinute >= MAX_MESSAGES_PER_MINUTE) {
+    countLastMinute = await col.countDocuments({ marketAddress, authorAddress, createdAt: { $gte: oneMinuteAgo } });
+  }
   if (countLastMinute >= MAX_MESSAGES_PER_MINUTE) {
     throw new Error('Rate limit reached. Please wait before sending again.');
   }
@@ -477,7 +492,11 @@ async function sendChatMessage(
 }
 
 export default async function handler(req: any, res: any) {
-  res.setHeader('Access-Control-Allow-Origin', '*');
+  const corsOrigin = resolveCorsOrigin(req.headers?.origin);
+  if (corsOrigin) {
+    res.setHeader('Access-Control-Allow-Origin', corsOrigin);
+    res.setHeader('Vary', 'Origin');
+  }
   res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
   res.setHeader('Content-Type', 'application/json; charset=utf-8');

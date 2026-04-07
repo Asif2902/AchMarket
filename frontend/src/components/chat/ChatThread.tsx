@@ -65,9 +65,12 @@ export default function ChatThread({
     profilesRef.current = allProfiles;
   }, [allProfiles]);
 
-  const canSend = isConnected && hasProfile && isChatOpen;
+  const signerReady = Boolean(signer);
+  const canSend = isConnected && signerReady && hasProfile && isChatOpen;
   const disabledReason = !isConnected
     ? 'Connect your wallet to join the conversation'
+    : !signerReady
+      ? 'Connecting wallet...'
     : !hasProfile
       ? 'You need a profile to chat'
       : 'Chat is closed for resolved or cancelled markets';
@@ -91,18 +94,16 @@ export default function ChatThread({
   );
 
   const loadMessages = useCallback(async (append = false) => {
-    let nextMessagesForProfiles: ChatMessage[] = [];
     try {
       const cursor = append ? (nextCursorRef.current ?? undefined) : undefined;
       const data = await fetchChatMessages(marketAddress, cursor);
 
-      setMessages((prev) => {
-        const merged = append
-          ? sortByCreatedAsc(mergeUniqueById([...data.messages, ...prev]))
-          : sortByCreatedAsc(mergeUniqueById([...prev, ...data.messages]));
-        nextMessagesForProfiles = merged;
-        return merged;
-      });
+      const existingMessages = messagesRef.current;
+      const merged = append
+        ? sortByCreatedAsc(mergeUniqueById([...data.messages, ...existingMessages]))
+        : sortByCreatedAsc(mergeUniqueById([...existingMessages, ...data.messages]));
+
+      setMessages(merged);
 
       if (append || !nextCursorRef.current || data.nextCursor === null) {
         nextCursorRef.current = data.nextCursor;
@@ -111,8 +112,7 @@ export default function ChatThread({
       setError(null);
 
       const slugsToFetch = new Set<string>();
-      const sourceMessages = nextMessagesForProfiles.length > 0 ? nextMessagesForProfiles : messagesRef.current;
-      for (const msg of sourceMessages) {
+      for (const msg of merged) {
         if (msg.authorProfile?.profileSlug) {
           slugsToFetch.add(msg.authorProfile.profileSlug.toLowerCase());
         }
@@ -220,8 +220,11 @@ export default function ChatThread({
     if (!isChatOpen) {
       throw new Error('Chat is closed for resolved or cancelled markets.');
     }
-    if (!signer || !userAddress) {
+    if (!isConnected || !userAddress) {
       throw new Error('Connect wallet to send messages.');
+    }
+    if (!signer) {
+      throw new Error('Connecting wallet... please wait a moment.');
     }
 
     const result = await sendChatMessage(

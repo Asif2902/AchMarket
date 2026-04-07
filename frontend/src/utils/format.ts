@@ -225,7 +225,7 @@ export function resolveImageUri(uri: string): string {
   // Validate URL schemes for security
   try {
     const url = new URL(uri);
-    const allowedSchemes = ['https:', 'http:'];
+    const allowedSchemes = ['https:', 'http:', 'blob:'];
     if (!allowedSchemes.includes(url.protocol)) {
       console.warn('Blocked unsafe URL scheme:', url.protocol);
       return '';

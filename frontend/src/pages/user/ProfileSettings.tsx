@@ -267,18 +267,33 @@ export default function ProfileSettings() {
                   placeholder="Upload image to generate URL"
                   className="input-field text-sm text-white/70"
                 />
+                <label
+                  className={`mt-2 block rounded-xl border border-dashed border-white/[0.2] bg-dark-900/50 p-3 cursor-pointer transition-colors ${
+                    avatarUploading || saving ? 'opacity-60 pointer-events-none' : 'hover:border-cyan-400/40 hover:bg-dark-850/70'
+                  }`}
+                >
+                  <input
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    onChange={handleAvatarFileChange}
+                    disabled={avatarUploading || saving}
+                  />
+                  <div className="flex items-center gap-3">
+                    <div className="w-9 h-9 rounded-lg bg-cyan-500/15 border border-cyan-400/30 flex items-center justify-center">
+                      <svg className="w-4 h-4 text-cyan-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                      </svg>
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-xs font-semibold text-white">
+                        {avatarUploading ? 'Uploading avatar...' : 'Click to upload avatar'}
+                      </p>
+                      <p className="text-2xs text-dark-500">Auto-compressed · max 2MB · WebP optimized</p>
+                    </div>
+                  </div>
+                </label>
                 <div className="mt-2 flex flex-wrap items-center gap-2">
-                  <label className={`btn-secondary text-2xs px-2.5 py-1.5 cursor-pointer ${avatarUploading ? 'opacity-60 pointer-events-none' : ''}`}>
-                    {avatarUploading ? 'Uploading...' : 'Upload to R2'}
-                    <input
-                      type="file"
-                      accept="image/*"
-                      className="hidden"
-                      onChange={handleAvatarFileChange}
-                      disabled={avatarUploading || saving}
-                    />
-                  </label>
-                  <span className="text-2xs text-dark-500">Auto-compressed · max 2MB</span>
                   {avatarUploadMeta && (
                     <span className="text-2xs text-dark-500">{Math.max(1, Math.round(avatarUploadMeta.bytes / 1024))}KB · {avatarUploadMeta.type}</span>
                   )}

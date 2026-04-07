@@ -11,6 +11,10 @@ const PROFILE_API_PATH = '/api/profile';
 const PROFILE_AVATAR_API_PATH = '/api/profile-avatar';
 const AVATAR_UPLOAD_SIG_VALIDITY_MS = 10 * 60 * 1000;
 
+function uint8ToHex(bytes: Uint8Array): string {
+  return Array.from(bytes).map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+
 function uint8ToBase64(bytes: Uint8Array): string {
   let binary = '';
   const chunkSize = 0x8000;
@@ -21,13 +25,30 @@ function uint8ToBase64(bytes: Uint8Array): string {
   return btoa(binary);
 }
 
-function buildAvatarUploadSigningMessage(address: string, timestamp: number, byteLength: number, contentType: string): string {
+async function sha256Hex(bytes: Uint8Array): Promise<string> {
+  if (!globalThis.crypto?.subtle) {
+    throw new Error('Web Crypto API is unavailable in this browser.');
+  }
+  const stableInput = new Uint8Array(bytes.byteLength);
+  stableInput.set(bytes);
+  const digest = await globalThis.crypto.subtle.digest('SHA-256', stableInput);
+  return uint8ToHex(new Uint8Array(digest));
+}
+
+function buildAvatarUploadSigningMessage(
+  address: string,
+  timestamp: number,
+  byteLength: number,
+  contentType: string,
+  contentDigest: string,
+): string {
   return [
     'AchMarket Avatar Upload',
     `Address: ${address}`,
     `Timestamp: ${timestamp}`,
     `ByteLength: ${byteLength}`,
     `ContentType: ${contentType}`,
+    `ContentDigest: ${contentDigest}`,
     `ValidForMs: ${AVATAR_UPLOAD_SIG_VALIDITY_MS}`,
     'No gas fee. Sign only if you trust this request.',
   ].join('\n');
@@ -95,8 +116,9 @@ export async function uploadProfileAvatar(file: File, address: string, signer: S
   const dataBase64 = uint8ToBase64(bytes);
   const timestamp = Date.now();
   const contentType = file.type || 'application/octet-stream';
+  const contentDigest = await sha256Hex(bytes);
 
-  const message = buildAvatarUploadSigningMessage(normalized, timestamp, bytes.length, contentType);
+  const message = buildAvatarUploadSigningMessage(normalized, timestamp, bytes.length, contentType, contentDigest);
   const signature = await signer.signMessage(message);
 
   const response = await fetch(PROFILE_AVATAR_API_PATH, {
@@ -111,6 +133,7 @@ export async function uploadProfileAvatar(file: File, address: string, signer: S
       fileName: file.name,
       contentType,
       byteLength: bytes.length,
+      contentDigest,
       dataBase64,
     }),
   });

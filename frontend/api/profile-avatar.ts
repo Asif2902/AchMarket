@@ -1,6 +1,6 @@
 import { recoverAddress, hashMessage, getAddress } from 'ethers';
 import { PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
-import { randomBytes } from 'crypto';
+import { randomBytes, createHash } from 'crypto';
 
 const MAX_UPLOAD_BYTES = 2 * 1024 * 1024;
 const SIG_VALIDITY_MS = 10 * 60 * 1000;
@@ -32,16 +32,44 @@ function verifyMessage(message: string, signature: string): string {
   return addr.toLowerCase();
 }
 
-function buildAvatarUploadSigningMessage(address: string, timestamp: number, byteLength: number, contentType: string): string {
+function buildAvatarUploadSigningMessage(
+  address: string,
+  timestamp: number,
+  byteLength: number,
+  contentType: string,
+  contentDigest: string,
+): string {
   return [
     'AchMarket Avatar Upload',
     `Address: ${address}`,
     `Timestamp: ${timestamp}`,
     `ByteLength: ${byteLength}`,
     `ContentType: ${contentType}`,
+    `ContentDigest: ${contentDigest}`,
     `ValidForMs: ${SIG_VALIDITY_MS}`,
     'No gas fee. Sign only if you trust this request.',
   ].join('\n');
+}
+
+function normalizeHexDigest(value: unknown): string {
+  if (typeof value !== 'string') return '';
+  const trimmed = value.trim().toLowerCase();
+  return /^[a-f0-9]{64}$/.test(trimmed) ? trimmed : '';
+}
+
+function estimateDecodedBase64Bytes(value: string): number {
+  const normalized = value.trim().replace(/\s+/g, '');
+  if (!normalized || normalized.length % 4 !== 0) return -1;
+  if (!/^[A-Za-z0-9+/]+={0,2}$/.test(normalized)) return -1;
+
+  let padding = 0;
+  if (normalized.endsWith('==')) padding = 2;
+  else if (normalized.endsWith('=')) padding = 1;
+  return (normalized.length / 4) * 3 - padding;
+}
+
+function sha256HexFromBuffer(bytes: Buffer): string {
+  return createHash('sha256').update(bytes).digest('hex');
 }
 
 function getS3Client(): S3Client {
@@ -97,16 +125,20 @@ async function uploadAvatar(body: Record<string, unknown>) {
   const byteLength = Number(body.byteLength);
   const dataBase64 = typeof body.dataBase64 === 'string' ? body.dataBase64 : '';
   const contentType = sanitizeContentType(body.contentType);
+  const contentDigest = normalizeHexDigest(body.contentDigest);
 
-  if (!addressRaw || !signature || !dataBase64 || !contentType) {
-    throw new HttpError(400, 'address, signature, contentType, and image data are required.');
+  if (!addressRaw || !signature || !dataBase64 || !contentType || !contentDigest) {
+    throw new HttpError(400, 'address, signature, contentType, contentDigest, and image data are required.');
   }
 
   if (!Number.isFinite(timestamp)) {
     throw new HttpError(400, 'Invalid timestamp.');
   }
-  const age = Math.abs(Date.now() - timestamp);
-  if (age > SIG_VALIDITY_MS) {
+  const now = Date.now();
+  if (timestamp > now) {
+    throw new HttpError(400, 'Timestamp is in the future.');
+  }
+  if (now - timestamp > SIG_VALIDITY_MS) {
     throw new HttpError(401, 'Signature expired. Please try again.');
   }
 
@@ -117,9 +149,20 @@ async function uploadAvatar(body: Record<string, unknown>) {
     throw new HttpError(400, 'Image exceeds 2MB limit.');
   }
 
+  const estimatedBytes = estimateDecodedBase64Bytes(dataBase64);
+  if (estimatedBytes <= 0) {
+    throw new HttpError(400, 'Invalid base64 image payload.');
+  }
+  if (estimatedBytes > MAX_UPLOAD_BYTES) {
+    throw new HttpError(400, 'Image exceeds 2MB limit.');
+  }
+  if (estimatedBytes !== byteLength) {
+    throw new HttpError(400, 'byteLength mismatch.');
+  }
+
   const normalized = normalizeAddress(addressRaw);
 
-  const message = buildAvatarUploadSigningMessage(normalized, timestamp, byteLength, contentType);
+  const message = buildAvatarUploadSigningMessage(normalized, timestamp, byteLength, contentType, contentDigest);
   let recovered: string;
   try {
     recovered = verifyMessage(message, signature);
@@ -142,9 +185,15 @@ async function uploadAvatar(body: Record<string, unknown>) {
     throw new HttpError(400, 'Image exceeds 2MB limit.');
   }
 
+  const computedDigest = sha256HexFromBuffer(bytes);
+  if (computedDigest !== contentDigest) {
+    throw new HttpError(400, 'contentDigest mismatch.');
+  }
+
   const randomSuffix = randomBytes(6).toString('hex');
   const ext = getExtension(contentType);
   const key = `avatars/${normalized}/${Date.now()}-${randomSuffix}.${ext}`;
+  const publicUrl = buildPublicUrl(key);
 
   const s3 = getS3Client();
   await s3.send(new PutObjectCommand({
@@ -156,7 +205,7 @@ async function uploadAvatar(body: Record<string, unknown>) {
   }));
 
   return {
-    url: buildPublicUrl(key),
+    url: publicUrl,
     key,
     byteLength: bytes.length,
     contentType,
