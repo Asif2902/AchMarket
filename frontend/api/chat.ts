@@ -1,6 +1,7 @@
 import { recoverAddress, hashMessage, getAddress, JsonRpcProvider, Contract } from 'ethers';
 import { MongoClient, ObjectId } from 'mongodb';
 import type { Collection } from 'mongodb';
+import { createHash } from 'crypto';
 
 function normalizeAddress(address: string): string {
   return getAddress(address).toLowerCase();
@@ -67,6 +68,7 @@ const MONGO_URI = process.env.MONGO_URI;
 const MONGO_DB_NAME = process.env.MONGO_DB_NAME ?? 'achmarket';
 const CHATS_COLLECTION = 'chats';
 const PROFILES_COLLECTION = 'profiles';
+const CHAT_THROTTLES_COLLECTION = 'chat_throttles';
 const SIG_VALIDITY_MS = 10 * 60 * 1000;
 const PAGE_SIZE = 30;
 const MAX_MESSAGE_LENGTH = 500;
@@ -82,8 +84,9 @@ const CORS_ALLOWED_ORIGINS = (process.env.CORS_ALLOWED_ORIGINS ?? '')
   .map((value) => value.trim())
   .filter(Boolean);
 const MARKET_STAGE_ABI = ['function stage() view returns (uint8)'];
-const STAGE_RESOLVED = 2;
-const STAGE_CANCELLED = 3;
+const STAGE_SUSPENDED = 2;
+const STAGE_RESOLVED = 3;
+const STAGE_CANCELLED = 4;
 const STAGE_CACHE_MS = 15_000;
 
 let cachedClient: MongoClient | null = null;
@@ -143,6 +146,22 @@ interface ProfileDoc {
   avatarUrl: string;
 }
 
+interface ChatThrottleHashEntry {
+  hash: string;
+  at: Date;
+}
+
+interface ChatThrottleDoc {
+  _id?: ObjectId;
+  marketAddress: string;
+  authorAddress: string;
+  lastMessageAt: Date;
+  minuteWindowStart: Date;
+  minuteCount: number;
+  recentHashes: ChatThrottleHashEntry[];
+  updatedAt: Date;
+}
+
 interface ChatCursorPayload {
   createdAt: string;
   _id: string;
@@ -156,10 +175,12 @@ async function getMongoClient(): Promise<MongoClient> {
       await cachedClient.db(MONGO_DB_NAME).command({ ping: 1 });
       if (!indexesReady) {
         const col = cachedClient.db(MONGO_DB_NAME).collection<ChatDoc>(CHATS_COLLECTION);
+        const throttleCol = cachedClient.db(MONGO_DB_NAME).collection<ChatThrottleDoc>(CHAT_THROTTLES_COLLECTION);
         await col.createIndex({ marketAddress: 1, createdAt: -1 }, { name: 'idx_market_created' });
         await col.createIndex({ marketAddress: 1, authorAddress: 1, createdAt: -1 }, { name: 'idx_market_author_created' });
         await col.createIndex({ authorAddress: 1 }, { name: 'idx_author' });
         await col.createIndex({ replyTo: 1 }, { name: 'idx_reply_to' });
+        await throttleCol.createIndex({ marketAddress: 1, authorAddress: 1 }, { unique: true, name: 'uniq_market_author' });
         indexesReady = true;
       }
       return cachedClient;
@@ -178,10 +199,12 @@ async function getMongoClient(): Promise<MongoClient> {
   await cachedClient.connect();
 
   const col = cachedClient.db(MONGO_DB_NAME).collection<ChatDoc>(CHATS_COLLECTION);
+  const throttleCol = cachedClient.db(MONGO_DB_NAME).collection<ChatThrottleDoc>(CHAT_THROTTLES_COLLECTION);
   await col.createIndex({ marketAddress: 1, createdAt: -1 }, { name: 'idx_market_created' });
   await col.createIndex({ marketAddress: 1, authorAddress: 1, createdAt: -1 }, { name: 'idx_market_author_created' });
   await col.createIndex({ authorAddress: 1 }, { name: 'idx_author' });
   await col.createIndex({ replyTo: 1 }, { name: 'idx_reply_to' });
+  await throttleCol.createIndex({ marketAddress: 1, authorAddress: 1 }, { unique: true, name: 'uniq_market_author' });
   indexesReady = true;
 
   return cachedClient;
@@ -191,6 +214,10 @@ async function getProfileByAddress(address: string): Promise<ProfileDoc | null> 
   const client = await getMongoClient();
   const col = client.db(MONGO_DB_NAME).collection<ProfileDoc>(PROFILES_COLLECTION);
   return col.findOne({ address: address.toLowerCase() });
+}
+
+function hashChatContent(content: string): string {
+  return createHash('sha256').update(content.toLowerCase()).digest('hex');
 }
 
 function formatChatMessage(doc: ChatDoc, authorProfile: ProfileDoc | null, replyToDoc: ChatDoc | null, replyToProfile: ProfileDoc | null) {
@@ -285,29 +312,120 @@ function enforceIpRateLimit(ip: string): void {
   existing.count += 1;
 }
 
-async function enforceUserRateLimits(col: Collection<ChatDoc>, marketAddress: string, authorAddress: string, rawContent: string): Promise<void> {
-  const now = Date.now();
-  const recent = await col.find({ marketAddress, authorAddress }).sort({ createdAt: -1 }).limit(MAX_MESSAGES_PER_MINUTE).toArray();
-  if (recent.length > 0) {
-    const lastAt = recent[0].createdAt.getTime();
-    if (now - lastAt < MIN_MESSAGE_INTERVAL_MS) {
+async function acquireUserThrottlePermit(
+  throttleCol: Collection<ChatThrottleDoc>,
+  marketAddress: string,
+  authorAddress: string,
+  rawContent: string,
+): Promise<void> {
+  const nowDate = new Date();
+  const minIntervalCutoff = new Date(nowDate.getTime() - MIN_MESSAGE_INTERVAL_MS);
+  const oneMinuteAgo = new Date(nowDate.getTime() - 60_000);
+  const duplicateCutoff = new Date(nowDate.getTime() - DUPLICATE_WINDOW_MS);
+  const contentHash = hashChatContent(rawContent);
+
+  const filter = {
+    marketAddress,
+    authorAddress,
+    $and: [
+      {
+        $or: [
+          { lastMessageAt: { $exists: false } },
+          { lastMessageAt: { $lte: minIntervalCutoff } },
+        ],
+      },
+      {
+        $or: [
+          { minuteWindowStart: { $exists: false } },
+          { minuteWindowStart: { $lt: oneMinuteAgo } },
+          { minuteCount: { $lt: MAX_MESSAGES_PER_MINUTE } },
+        ],
+      },
+      {
+        $nor: [
+          {
+            recentHashes: {
+              $elemMatch: {
+                hash: contentHash,
+                at: { $gte: duplicateCutoff },
+              },
+            },
+          },
+        ],
+      },
+    ],
+  };
+
+  const minuteWindowExpiredExpr = {
+    $lt: [
+      { $ifNull: ['$minuteWindowStart', new Date(0)] },
+      oneMinuteAgo,
+    ],
+  };
+
+  const updatePipeline = [
+    {
+      $set: {
+        marketAddress,
+        authorAddress,
+        minuteWindowStart: {
+          $cond: [minuteWindowExpiredExpr, nowDate, '$minuteWindowStart'],
+        },
+        minuteCount: {
+          $cond: [
+            minuteWindowExpiredExpr,
+            1,
+            { $add: [{ $ifNull: ['$minuteCount', 0] }, 1] },
+          ],
+        },
+        lastMessageAt: nowDate,
+        recentHashes: {
+          $let: {
+            vars: {
+              pruned: {
+                $filter: {
+                  input: { $ifNull: ['$recentHashes', []] },
+                  as: 'entry',
+                  cond: { $gte: ['$$entry.at', duplicateCutoff] },
+                },
+              },
+            },
+            in: {
+              $concatArrays: ['$$pruned', [{ hash: contentHash, at: nowDate }]],
+            },
+          },
+        },
+        updatedAt: nowDate,
+      },
+    },
+  ];
+
+  const result = await throttleCol.findOneAndUpdate(
+    filter,
+    updatePipeline as any,
+    {
+      upsert: true,
+      returnDocument: 'after',
+    },
+  );
+
+  if (result) return;
+
+  const existing = await throttleCol.findOne({ marketAddress, authorAddress });
+  if (existing) {
+    if (existing.lastMessageAt && existing.lastMessageAt > minIntervalCutoff) {
       throw new Error('You are sending too quickly. Please wait a moment.');
     }
-    const duplicate = recent.find((msg) => (now - msg.createdAt.getTime()) < DUPLICATE_WINDOW_MS && msg.content.toLowerCase() === rawContent.toLowerCase());
+    const duplicate = (existing.recentHashes || []).find((entry) => entry.hash === contentHash && entry.at >= duplicateCutoff);
     if (duplicate) {
       throw new Error('Duplicate message detected. Please post something new.');
     }
+    if (existing.minuteWindowStart && existing.minuteWindowStart >= oneMinuteAgo && (existing.minuteCount ?? 0) >= MAX_MESSAGES_PER_MINUTE) {
+      throw new Error('Rate limit reached. Please wait before sending again.');
+    }
   }
 
-  const oneMinuteAgo = new Date(now - 60_000);
-  const recentCountLastMinute = recent.filter((msg) => msg.createdAt >= oneMinuteAgo).length;
-  let countLastMinute = recentCountLastMinute;
-  if (recent.length === MAX_MESSAGES_PER_MINUTE && recentCountLastMinute >= MAX_MESSAGES_PER_MINUTE) {
-    countLastMinute = await col.countDocuments({ marketAddress, authorAddress, createdAt: { $gte: oneMinuteAgo } });
-  }
-  if (countLastMinute >= MAX_MESSAGES_PER_MINUTE) {
-    throw new Error('Rate limit reached. Please wait before sending again.');
-  }
+  throw new Error('Rate limit reached. Please wait before sending again.');
 }
 
 async function getChatMessages(marketAddress: string, cursor?: string) {
@@ -428,6 +546,10 @@ async function sendChatMessage(
     throw new Error('Invalid signature for wallet address.');
   }
 
+  cleanupInMemoryCaches();
+  const clientIp = getClientIp(req);
+  enforceIpRateLimit(clientIp);
+
   const profile = await getProfileByAddress(normalized);
   if (!profile) {
     throw new Error('You need a profile to chat. Create a profile first.');
@@ -445,11 +567,9 @@ async function sendChatMessage(
 
   const client = await getMongoClient();
   const col = client.db(MONGO_DB_NAME).collection<ChatDoc>(CHATS_COLLECTION);
+  const throttleCol = client.db(MONGO_DB_NAME).collection<ChatThrottleDoc>(CHAT_THROTTLES_COLLECTION);
 
-  cleanupInMemoryCaches();
-  const clientIp = getClientIp(req);
-  enforceIpRateLimit(clientIp);
-  await enforceUserRateLimits(col, normalizedMarket, normalized, sanitized);
+  await acquireUserThrottlePermit(throttleCol, normalizedMarket, normalized, sanitized);
 
   let replyToObj: ObjectId | null = null;
   if (replyTo) {

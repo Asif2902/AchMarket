@@ -134,22 +134,39 @@ export default function ProfileSettings() {
       return;
     }
 
+    let previewToRevokeOnFailure: string | null = null;
+
     try {
       setAvatarUploading(true);
       setMsg(null);
 
       const compressed = await compressAvatarImage(selected);
-      const uploaded = await uploadProfileAvatar(compressed.file, address, signer);
+      previewToRevokeOnFailure = compressed.previewUrl;
 
-      setForm((prev) => ({ ...prev, avatarUrl: uploaded.url }));
+      const confirmed = window.confirm('Upload this image as your avatar?');
+      if (!confirmed) {
+        URL.revokeObjectURL(compressed.previewUrl);
+        return;
+      }
+
+      const uploaded = await uploadProfileAvatar(compressed.file, address, signer);
+      const nextPayload: ProfilePayload = { ...form, avatarUrl: uploaded.url };
+      const saved = await saveProfileBySignature(address, nextPayload, signer);
+
+      setForm(toProfilePayload(saved.profile));
+      setProfileSlug(toProfileSlug(saved.profile));
       setAvatarUploadMeta({ bytes: uploaded.byteLength, type: uploaded.contentType });
       setLocalAvatarPreviewUrl((prev) => {
         if (prev) URL.revokeObjectURL(prev);
         return compressed.previewUrl;
       });
+      previewToRevokeOnFailure = null;
 
-      setMsg({ type: 'success', text: 'Avatar uploaded and optimized.' });
+      setMsg({ type: 'success', text: 'Avatar uploaded and saved.' });
     } catch (err) {
+      if (previewToRevokeOnFailure) {
+        URL.revokeObjectURL(previewToRevokeOnFailure);
+      }
       const message = err instanceof Error ? err.message : 'Failed to upload avatar.';
       setMsg({ type: 'error', text: message });
     } finally {

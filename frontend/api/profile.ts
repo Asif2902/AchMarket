@@ -1,5 +1,6 @@
 import { recoverAddress, hashMessage, getAddress } from 'ethers';
 import { MongoClient, MongoServerError } from 'mongodb';
+import { DeleteObjectCommand, S3Client } from '@aws-sdk/client-s3';
 
 // ====== Inline utilities (no cross-directory imports) ======
 
@@ -73,8 +74,15 @@ const MONGO_DB_NAME = process.env.MONGO_DB_NAME ?? 'achmarket';
 const PROFILES_COLLECTION = 'profiles';
 const SIG_VALIDITY_MS = 10 * 60 * 1000;
 
+const R2_ACCOUNT_ID = process.env.R2_ACCOUNT_ID;
+const R2_ACCESS_KEY_ID = process.env.R2_ACCESS_KEY_ID;
+const R2_SECRET_ACCESS_KEY = process.env.R2_SECRET_ACCESS_KEY;
+const R2_BUCKET = process.env.R2_BUCKET;
+const R2_PUBLIC_BASE_URL = process.env.R2_PUBLIC_BASE_URL;
+
 let cachedClient: MongoClient | null = null;
 let indexesReady = false;
+let cachedR2Client: S3Client | null = null;
 
 interface ProfileDoc {
   address: string;
@@ -86,6 +94,53 @@ interface ProfileDoc {
   telegramUrl: string;
   createdAt: Date;
   updatedAt: Date;
+}
+
+function getR2Client(): S3Client | null {
+  if (!R2_ACCOUNT_ID || !R2_ACCESS_KEY_ID || !R2_SECRET_ACCESS_KEY || !R2_BUCKET) {
+    return null;
+  }
+
+  if (!cachedR2Client) {
+    cachedR2Client = new S3Client({
+      region: 'auto',
+      endpoint: `https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com`,
+      credentials: {
+        accessKeyId: R2_ACCESS_KEY_ID,
+        secretAccessKey: R2_SECRET_ACCESS_KEY,
+      },
+    });
+  }
+
+  return cachedR2Client;
+}
+
+function extractR2KeyFromUrl(urlValue: string): string | null {
+  if (!R2_PUBLIC_BASE_URL || !urlValue) return null;
+
+  const base = R2_PUBLIC_BASE_URL.replace(/\/$/, '');
+  if (!urlValue.startsWith(`${base}/`)) return null;
+
+  const key = urlValue.slice(base.length + 1).split('?')[0].trim();
+  if (!key || !key.startsWith('avatars/')) return null;
+  return decodeURIComponent(key);
+}
+
+async function cleanupOldAvatar(urlValue: string): Promise<void> {
+  const key = extractR2KeyFromUrl(urlValue);
+  if (!key || !R2_BUCKET) return;
+
+  const r2Client = getR2Client();
+  if (!r2Client) return;
+
+  try {
+    await r2Client.send(new DeleteObjectCommand({
+      Bucket: R2_BUCKET,
+      Key: key,
+    }));
+  } catch (err) {
+    console.error('Failed to cleanup old avatar from R2:', err);
+  }
 }
 
 async function getMongoClient(): Promise<MongoClient> {
@@ -181,6 +236,7 @@ async function upsertProfile(address: string, payload: Record<string, unknown>, 
   const now = new Date();
 
   const existing = await col.findOne({ address: normalized });
+  const previousAvatarUrl = typeof existing?.avatarUrl === 'string' ? existing.avatarUrl.trim() : '';
   const merged = { ...EMPTY_PAYLOAD, ...(existing ?? {}), ...sanitized };
   const {
     address: _address,
@@ -216,6 +272,11 @@ async function upsertProfile(address: string, payload: Record<string, unknown>, 
       throw new Error(`"${baseSlug}" is already taken. Choose a different display name.`);
     }
     throw err;
+  }
+
+  const nextAvatarUrl = typeof merged.avatarUrl === 'string' ? merged.avatarUrl.trim() : '';
+  if (previousAvatarUrl && previousAvatarUrl !== nextAvatarUrl) {
+    await cleanupOldAvatar(previousAvatarUrl);
   }
 
   return getProfile(normalized);

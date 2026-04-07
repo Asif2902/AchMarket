@@ -10,11 +10,18 @@ const R2_ACCESS_KEY_ID = process.env.R2_ACCESS_KEY_ID;
 const R2_SECRET_ACCESS_KEY = process.env.R2_SECRET_ACCESS_KEY;
 const R2_BUCKET = process.env.R2_BUCKET;
 const R2_PUBLIC_BASE_URL = process.env.R2_PUBLIC_BASE_URL;
-const ALLOWED_ORIGIN = process.env.ALLOWED_ORIGIN;
-const ALLOWED_ORIGINS = (ALLOWED_ORIGIN ?? '')
+const CORS_ALLOWED_ORIGINS = process.env.CORS_ALLOWED_ORIGINS;
+const CORS_ALLOWED_ORIGINS_LIST = (CORS_ALLOWED_ORIGINS ?? '')
   .split(',')
   .map((value) => value.trim())
   .filter(Boolean);
+const ALLOWED_IMAGE_CONTENT_TYPES = new Set([
+  'image/webp',
+  'image/png',
+  'image/jpeg',
+  'image/avif',
+  'image/gif',
+]);
 
 class HttpError extends Error {
   status: number;
@@ -98,8 +105,7 @@ function getS3Client(): S3Client {
 function sanitizeContentType(value: unknown): string {
   if (typeof value !== 'string') return '';
   const trimmed = value.trim().toLowerCase();
-  if (!trimmed.startsWith('image/')) return '';
-  return trimmed;
+  return ALLOWED_IMAGE_CONTENT_TYPES.has(trimmed) ? trimmed : '';
 }
 
 function buildPublicUrl(key: string): string {
@@ -115,11 +121,12 @@ function buildPublicUrl(key: string): string {
 }
 
 function getExtension(contentType: string): string {
+  if (contentType === 'image/webp') return 'webp';
   if (contentType === 'image/png') return 'png';
   if (contentType === 'image/jpeg') return 'jpg';
   if (contentType === 'image/avif') return 'avif';
   if (contentType === 'image/gif') return 'gif';
-  return 'webp';
+  throw new HttpError(400, 'Unsupported image content type.');
 }
 
 function resolveCorsOrigin(originHeader: unknown): string | null {
@@ -127,8 +134,8 @@ function resolveCorsOrigin(originHeader: unknown): string | null {
     return '*';
   }
   if (typeof originHeader !== 'string' || !originHeader) return null;
-  if (ALLOWED_ORIGINS.includes('*')) return originHeader;
-  return ALLOWED_ORIGINS.includes(originHeader) ? originHeader : null;
+  if (CORS_ALLOWED_ORIGINS_LIST.includes('*')) return originHeader;
+  return CORS_ALLOWED_ORIGINS_LIST.includes(originHeader) ? originHeader : null;
 }
 
 async function uploadAvatar(body: Record<string, unknown>) {
