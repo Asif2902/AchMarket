@@ -11,6 +11,10 @@ const R2_SECRET_ACCESS_KEY = process.env.R2_SECRET_ACCESS_KEY;
 const R2_BUCKET = process.env.R2_BUCKET;
 const R2_PUBLIC_BASE_URL = process.env.R2_PUBLIC_BASE_URL;
 const ALLOWED_ORIGIN = process.env.ALLOWED_ORIGIN;
+const ALLOWED_ORIGINS = (ALLOWED_ORIGIN ?? '')
+  .split(',')
+  .map((value) => value.trim())
+  .filter(Boolean);
 
 class HttpError extends Error {
   status: number;
@@ -118,6 +122,15 @@ function getExtension(contentType: string): string {
   return 'webp';
 }
 
+function resolveCorsOrigin(originHeader: unknown): string | null {
+  if (process.env.NODE_ENV !== 'production') {
+    return '*';
+  }
+  if (typeof originHeader !== 'string' || !originHeader) return null;
+  if (ALLOWED_ORIGINS.includes('*')) return originHeader;
+  return ALLOWED_ORIGINS.includes(originHeader) ? originHeader : null;
+}
+
 async function uploadAvatar(body: Record<string, unknown>) {
   const addressRaw = typeof body.address === 'string' ? body.address : '';
   const signature = typeof body.signature === 'string' ? body.signature : '';
@@ -213,13 +226,12 @@ async function uploadAvatar(body: Record<string, unknown>) {
 }
 
 export default async function handler(req: any, res: any) {
-  const isDevelopment = process.env.NODE_ENV !== 'production';
-  const corsOrigin = isDevelopment ? '*' : (ALLOWED_ORIGIN || '');
-  if (!corsOrigin) {
-    return res.status(503).json({ error: 'ALLOWED_ORIGIN is required in production.' });
-  }
+  const corsOrigin = resolveCorsOrigin(req.headers?.origin);
 
-  res.setHeader('Access-Control-Allow-Origin', corsOrigin);
+  if (corsOrigin) {
+    res.setHeader('Access-Control-Allow-Origin', corsOrigin);
+    res.setHeader('Vary', 'Origin');
+  }
   res.setHeader('Access-Control-Allow-Methods', 'POST,OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
