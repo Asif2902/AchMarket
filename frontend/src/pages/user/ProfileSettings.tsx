@@ -29,6 +29,7 @@ export default function ProfileSettings() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [avatarUploading, setAvatarUploading] = useState(false);
+  const [avatarUploadSessionId, setAvatarUploadSessionId] = useState<string | null>(null);
   const [avatarUploadMeta, setAvatarUploadMeta] = useState<{ bytes: number; type: string } | null>(null);
   const [localAvatarPreviewUrl, setLocalAvatarPreviewUrl] = useState<string | null>(null);
   const [form, setForm] = useState<ProfilePayload>({ ...EMPTY_PROFILE_PAYLOAD });
@@ -36,13 +37,21 @@ export default function ProfileSettings() {
   const [msg, setMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [linkCopied, setLinkCopied] = useState(false);
   const currentRequestIdRef = useRef(0);
+  const avatarUploadSessionIdRef = useRef<string | null>(null);
   const addressRef = useRef(address);
   const signerRef = useRef(signer);
   const latestPreviewUrlRef = useRef<string | null>(null);
   const latestFormRef = useRef<ProfilePayload>({ ...EMPTY_PROFILE_PAYLOAD });
   const avatarFileInputRef = useRef<HTMLInputElement | null>(null);
+  avatarUploadSessionIdRef.current = avatarUploadSessionId;
   addressRef.current = address;
   signerRef.current = signer;
+
+  const clearAvatarUploadSessionIfMatches = (sessionId: string) => {
+    if (avatarUploadSessionIdRef.current !== sessionId) return;
+    setAvatarUploading(false);
+    setAvatarUploadSessionId(null);
+  };
 
   useEffect(() => {
     if (!address) {
@@ -55,6 +64,13 @@ export default function ProfileSettings() {
         return null;
       });
       setSaving(false);
+      setAvatarUploadSessionId((current) => {
+        if (current) {
+          setAvatarUploading(false);
+          return null;
+        }
+        return current;
+      });
       return;
     }
 
@@ -69,6 +85,13 @@ export default function ProfileSettings() {
         setLocalAvatarPreviewUrl((prev) => {
           if (prev) URL.revokeObjectURL(prev);
           return null;
+        });
+        setAvatarUploadSessionId((current) => {
+          if (current) {
+            setAvatarUploading(false);
+            return null;
+          }
+          return current;
         });
         const response = await fetchProfileByAddress(address);
         if (!cancelled) {
@@ -148,8 +171,10 @@ export default function ProfileSettings() {
 
     let previewToRevokeOnFailure: string | null = null;
     let uploadedResult: { key: string } | null = null;
+    const sessionId = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 
     try {
+      setAvatarUploadSessionId(sessionId);
       setAvatarUploading(true);
       setMsg(null);
 
@@ -238,7 +263,7 @@ export default function ProfileSettings() {
         setMsg({ type: 'error', text: message });
       }
     } finally {
-      setAvatarUploading(false);
+      clearAvatarUploadSessionIfMatches(sessionId);
       event.target.value = '';
     }
   };

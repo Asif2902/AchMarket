@@ -1,6 +1,6 @@
 import { recoverAddress, hashMessage, getAddress } from 'ethers';
 import { PutObjectCommand, DeleteObjectCommand, S3Client } from '@aws-sdk/client-s3';
-import { randomBytes, createHash } from 'crypto';
+import { createHash } from 'crypto';
 import {
   AVATAR_UPLOAD_SIG_VALIDITY_MS,
   buildAvatarUploadSigningMessage,
@@ -30,7 +30,11 @@ const ALLOWED_IMAGE_CONTENT_TYPES = new Set([
   'image/avif',
   'image/gif',
 ]);
-const mutationRequestWindows = new Map<string, number[]>();
+type MutationWindowBucket = {
+  hits: number[];
+  lastSeen: number;
+};
+const mutationRequestWindows = new Map<string, MutationWindowBucket>();
 
 class HttpError extends Error {
   status: number;
@@ -119,6 +123,28 @@ function getExtension(contentType: string): string {
   throw new HttpError(400, 'Unsupported image content type.');
 }
 
+function buildDeterministicAvatarKey(
+  normalizedAddress: string,
+  timestamp: number,
+  byteLength: number,
+  contentType: string,
+  contentDigest: string,
+): string {
+  const ext = getExtension(contentType);
+  const stableDigest = createHash('sha256')
+    .update([
+      normalizedAddress,
+      String(timestamp),
+      String(byteLength),
+      contentType,
+      contentDigest,
+    ].join('|'))
+    .digest('hex')
+    .slice(0, 40);
+
+  return `avatars/${normalizedAddress}/${timestamp}-${stableDigest}.${ext}`;
+}
+
 function safeDecodeKey(value: string): string | null {
   try {
     return decodeURIComponent(value);
@@ -171,27 +197,54 @@ function resolveClientKey(req: any): string {
 
 function consumeMutationPermit(clientKey: string): number | null {
   const now = Date.now();
-  const existing = mutationRequestWindows.get(clientKey) ?? [];
+  const existing = mutationRequestWindows.get(clientKey);
   const windowStart = now - MUTATION_WINDOW_MS;
-  const recent = existing.filter((value) => value >= windowStart);
+  const recent = (existing?.hits ?? []).filter((value) => value >= windowStart);
+
+  const enforceCacheBounds = () => {
+    for (const [key, bucket] of mutationRequestWindows.entries()) {
+      const filtered = bucket.hits.filter((value) => value >= windowStart);
+      if (!filtered.length && now - bucket.lastSeen > MUTATION_WINDOW_MS) {
+        mutationRequestWindows.delete(key);
+        continue;
+      }
+      if (filtered.length !== bucket.hits.length) {
+        mutationRequestWindows.set(key, {
+          hits: filtered,
+          lastSeen: bucket.lastSeen,
+        });
+      }
+    }
+
+    if (mutationRequestWindows.size > MUTATION_CLIENT_CACHE_LIMIT) {
+      const oldestFirst = Array.from(mutationRequestWindows.entries())
+        .sort((a, b) => a[1].lastSeen - b[1].lastSeen)
+        .map(([key]) => key);
+
+      const overflow = mutationRequestWindows.size - MUTATION_CLIENT_CACHE_LIMIT;
+      for (let index = 0; index < overflow; index += 1) {
+        const key = oldestFirst[index];
+        if (key) mutationRequestWindows.delete(key);
+      }
+    }
+  };
 
   if (recent.length >= MUTATION_MAX_REQUESTS) {
-    mutationRequestWindows.set(clientKey, recent);
+    mutationRequestWindows.set(clientKey, {
+      hits: recent,
+      lastSeen: now,
+    });
+    enforceCacheBounds();
     const retryMs = Math.max(0, MUTATION_WINDOW_MS - (now - recent[0]));
     return Math.max(1, Math.ceil(retryMs / 1000));
   }
 
   recent.push(now);
-  mutationRequestWindows.set(clientKey, recent);
-
-  if (mutationRequestWindows.size > MUTATION_CLIENT_CACHE_LIMIT) {
-    for (const [key, entries] of mutationRequestWindows.entries()) {
-      const filtered = entries.filter((value) => value >= windowStart);
-      if (!filtered.length) mutationRequestWindows.delete(key);
-      else mutationRequestWindows.set(key, filtered);
-      if (mutationRequestWindows.size <= MUTATION_CLIENT_CACHE_LIMIT) break;
-    }
-  }
+  mutationRequestWindows.set(clientKey, {
+    hits: recent,
+    lastSeen: now,
+  });
+  enforceCacheBounds();
 
   return null;
 }
@@ -271,9 +324,7 @@ async function uploadAvatar(body: Record<string, unknown>) {
     throw new HttpError(400, 'contentDigest mismatch.');
   }
 
-  const randomSuffix = randomBytes(6).toString('hex');
-  const ext = getExtension(contentType);
-  const key = `avatars/${normalized}/${Date.now()}-${randomSuffix}.${ext}`;
+  const key = buildDeterministicAvatarKey(normalized, timestamp, byteLength, contentType, contentDigest);
   const publicUrl = buildPublicUrl(key);
 
   const s3 = getS3Client();
