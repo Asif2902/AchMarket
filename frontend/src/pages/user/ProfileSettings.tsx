@@ -131,10 +131,16 @@ export default function ProfileSettings() {
     setForm((prev) => ({ ...prev, [key]: value }));
   };
 
+  const isWalletSessionCurrent = (expectedAddress: string, expectedSigner: typeof signer): boolean => {
+    return addressRef.current === expectedAddress && signerRef.current === expectedSigner;
+  };
+
   const handleAvatarFileChange = async (event: ChangeEvent<HTMLInputElement>) => {
     const selected = event.target.files?.[0];
     if (!selected) return;
-    if (!address || !signer) {
+    const localAddress = address;
+    const localSigner = signer;
+    if (!localAddress || !localSigner) {
       setMsg({ type: 'error', text: 'Connect wallet to upload avatar.' });
       event.target.value = '';
       return;
@@ -150,18 +156,63 @@ export default function ProfileSettings() {
       const compressed = await compressAvatarImage(selected);
       previewToRevokeOnFailure = compressed.previewUrl;
 
-      const confirmed = window.confirm('Upload this image as your avatar?');
-      if (!confirmed) {
-        URL.revokeObjectURL(compressed.previewUrl);
+      if (!isWalletSessionCurrent(localAddress, localSigner)) {
+        if (previewToRevokeOnFailure) {
+          URL.revokeObjectURL(previewToRevokeOnFailure);
+          previewToRevokeOnFailure = null;
+        }
         return;
       }
 
-      const uploaded = await uploadProfileAvatar(compressed.file, address, signer);
-      uploadedResult = { key: uploaded.key };
-      const nextPayload: ProfilePayload = { ...latestFormRef.current, avatarUrl: uploaded.url };
-      const saved = await saveProfileBySignature(address, nextPayload, signer);
+      const confirmed = window.confirm('Upload this image as your avatar?');
+      if (!confirmed) {
+        URL.revokeObjectURL(compressed.previewUrl);
+        previewToRevokeOnFailure = null;
+        return;
+      }
 
-      setForm(toProfilePayload(saved.profile));
+      if (!isWalletSessionCurrent(localAddress, localSigner)) {
+        if (previewToRevokeOnFailure) {
+          URL.revokeObjectURL(previewToRevokeOnFailure);
+          previewToRevokeOnFailure = null;
+        }
+        return;
+      }
+
+      const uploaded = await uploadProfileAvatar(compressed.file, localAddress, localSigner);
+      uploadedResult = { key: uploaded.key };
+
+      if (!isWalletSessionCurrent(localAddress, localSigner)) {
+        try {
+          await deleteProfileAvatar(localAddress, uploaded.key, localSigner);
+        } catch (cleanupErr) {
+          console.error('Failed to cleanup orphaned avatar upload:', cleanupErr);
+        }
+        if (previewToRevokeOnFailure) {
+          URL.revokeObjectURL(previewToRevokeOnFailure);
+          previewToRevokeOnFailure = null;
+        }
+        return;
+      }
+
+      const nextPayload: ProfilePayload = { ...latestFormRef.current, avatarUrl: uploaded.url };
+      const saved = await saveProfileBySignature(localAddress, nextPayload, localSigner);
+
+      if (!isWalletSessionCurrent(localAddress, localSigner)) {
+        if (previewToRevokeOnFailure) {
+          URL.revokeObjectURL(previewToRevokeOnFailure);
+          previewToRevokeOnFailure = null;
+        }
+        return;
+      }
+
+      const savedPayload = toProfilePayload(saved.profile);
+      const mergedPayload: ProfilePayload = {
+        ...latestFormRef.current,
+        avatarUrl: savedPayload.avatarUrl,
+      };
+
+      setForm(mergedPayload);
       setProfileSlug(toProfileSlug(saved.profile));
       setAvatarUploadMeta({ bytes: uploaded.byteLength, type: uploaded.contentType });
       setLocalAvatarPreviewUrl((prev) => {
@@ -172,9 +223,9 @@ export default function ProfileSettings() {
 
       setMsg({ type: 'success', text: 'Avatar uploaded and saved.' });
     } catch (err) {
-      if (uploadedResult && address && signer) {
+      if (uploadedResult) {
         try {
-          await deleteProfileAvatar(address, uploadedResult.key, signer);
+          await deleteProfileAvatar(localAddress, uploadedResult.key, localSigner);
         } catch (cleanupErr) {
           console.error('Failed to cleanup orphaned avatar upload:', cleanupErr);
         }
@@ -182,8 +233,10 @@ export default function ProfileSettings() {
       if (previewToRevokeOnFailure) {
         URL.revokeObjectURL(previewToRevokeOnFailure);
       }
-      const message = err instanceof Error ? err.message : 'Failed to upload avatar.';
-      setMsg({ type: 'error', text: message });
+      if (isWalletSessionCurrent(localAddress, localSigner)) {
+        const message = err instanceof Error ? err.message : 'Failed to upload avatar.';
+        setMsg({ type: 'error', text: message });
+      }
     } finally {
       setAvatarUploading(false);
       event.target.value = '';
@@ -202,7 +255,7 @@ export default function ProfileSettings() {
   };
 
   const handleSave = async () => {
-    if (!address || !signer) return;
+    if (!address || !signer || avatarUploading) return;
     const requestIdCaptured = ++currentRequestIdRef.current;
 
     try {
@@ -284,6 +337,7 @@ export default function ProfileSettings() {
                   type="text"
                   value={form.displayName}
                   onChange={(e) => updateField('displayName', e.target.value)}
+                  disabled={avatarUploading || saving}
                   maxLength={40}
                   placeholder="Your display name"
                   className="input-field text-sm"
@@ -345,6 +399,7 @@ export default function ProfileSettings() {
                   type="url"
                   value={form.twitterUrl}
                   onChange={(e) => updateField('twitterUrl', e.target.value)}
+                  disabled={avatarUploading || saving}
                   placeholder="https://x.com/..."
                   className="input-field text-sm"
                 />
@@ -356,6 +411,7 @@ export default function ProfileSettings() {
                   type="url"
                   value={form.discordUrl}
                   onChange={(e) => updateField('discordUrl', e.target.value)}
+                  disabled={avatarUploading || saving}
                   placeholder="https://discord.gg/..."
                   className="input-field text-sm"
                 />
@@ -367,6 +423,7 @@ export default function ProfileSettings() {
                   type="url"
                   value={form.telegramUrl}
                   onChange={(e) => updateField('telegramUrl', e.target.value)}
+                  disabled={avatarUploading || saving}
                   placeholder="https://t.me/..."
                   className="input-field text-sm"
                 />
@@ -396,7 +453,7 @@ export default function ProfileSettings() {
                   View Public Profile
                 </button>
               )}
-              <button onClick={handleSave} disabled={saving || !signer} className="btn-primary text-xs px-3 py-2">
+              <button onClick={handleSave} disabled={saving || avatarUploading || !signer} className="btn-primary text-xs px-3 py-2">
                 {saving ? 'Saving...' : 'Save Changes'}
               </button>
             </div>

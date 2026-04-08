@@ -1,10 +1,17 @@
 import { recoverAddress, hashMessage, getAddress } from 'ethers';
 import { PutObjectCommand, DeleteObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import { randomBytes, createHash } from 'crypto';
+import {
+  AVATAR_UPLOAD_SIG_VALIDITY_MS,
+  buildAvatarUploadSigningMessage,
+  buildAvatarDeleteSigningMessage,
+} from '../src/utils/avatarSigning';
 
 const MAX_UPLOAD_BYTES = 2 * 1024 * 1024;
-const SIG_VALIDITY_MS = 10 * 60 * 1000;
 const FUTURE_SKEW_MS = 5000;
+const MUTATION_WINDOW_MS = 30 * 1000;
+const MUTATION_MAX_REQUESTS = 20;
+const MUTATION_CLIENT_CACHE_LIMIT = 2000;
 
 const R2_ACCOUNT_ID = process.env.R2_ACCOUNT_ID;
 const R2_ACCESS_KEY_ID = process.env.R2_ACCESS_KEY_ID;
@@ -23,6 +30,7 @@ const ALLOWED_IMAGE_CONTENT_TYPES = new Set([
   'image/avif',
   'image/gif',
 ]);
+const mutationRequestWindows = new Map<string, number[]>();
 
 class HttpError extends Error {
   status: number;
@@ -42,35 +50,6 @@ function normalizeAddress(address: string): string {
 function verifyMessage(message: string, signature: string): string {
   const addr = recoverAddress(hashMessage(message), signature);
   return addr.toLowerCase();
-}
-
-function buildAvatarUploadSigningMessage(
-  address: string,
-  timestamp: number,
-  byteLength: number,
-  contentType: string,
-  contentDigest: string,
-): string {
-  return [
-    'AchMarket Avatar Upload',
-    `Address: ${address}`,
-    `Timestamp: ${timestamp}`,
-    `ByteLength: ${byteLength}`,
-    `ContentType: ${contentType}`,
-    `ContentDigest: ${contentDigest}`,
-    `ValidForMs: ${SIG_VALIDITY_MS}`,
-    'No gas fee. Sign only if you trust this request.',
-  ].join('\n');
-}
-
-function buildAvatarDeleteSigningMessage(address: string, timestamp: number, key: string): string {
-  return [
-    'AchMarket Avatar Delete',
-    `Address: ${address}`,
-    `Timestamp: ${timestamp}`,
-    `Key: ${key}`,
-    'No gas fee. Sign only if you trust this request.',
-  ].join('\n');
 }
 
 function normalizeHexDigest(value: unknown): string {
@@ -167,9 +146,54 @@ function validateTimestamp(timestamp: number): void {
   if (timestamp > now + FUTURE_SKEW_MS) {
     throw new HttpError(400, 'Timestamp is in the future.');
   }
-  if (now - timestamp > SIG_VALIDITY_MS) {
+  if (now - timestamp > AVATAR_UPLOAD_SIG_VALIDITY_MS) {
     throw new HttpError(401, 'Signature expired. Please try again.');
   }
+}
+
+function readForwardedFor(raw: unknown): string {
+  if (typeof raw === 'string') {
+    return raw.split(',')[0]?.trim() ?? '';
+  }
+  if (Array.isArray(raw)) {
+    const first = raw.find((entry) => typeof entry === 'string' && entry.trim());
+    return typeof first === 'string' ? first.split(',')[0]?.trim() ?? '' : '';
+  }
+  return '';
+}
+
+function resolveClientKey(req: any): string {
+  const fromForwarded = readForwardedFor(req.headers?.['x-forwarded-for']);
+  const fromSocket = typeof req.socket?.remoteAddress === 'string' ? req.socket.remoteAddress.trim() : '';
+  const base = fromForwarded || fromSocket || 'unknown-client';
+  return base.slice(0, 120);
+}
+
+function consumeMutationPermit(clientKey: string): number | null {
+  const now = Date.now();
+  const existing = mutationRequestWindows.get(clientKey) ?? [];
+  const windowStart = now - MUTATION_WINDOW_MS;
+  const recent = existing.filter((value) => value >= windowStart);
+
+  if (recent.length >= MUTATION_MAX_REQUESTS) {
+    mutationRequestWindows.set(clientKey, recent);
+    const retryMs = Math.max(0, MUTATION_WINDOW_MS - (now - recent[0]));
+    return Math.max(1, Math.ceil(retryMs / 1000));
+  }
+
+  recent.push(now);
+  mutationRequestWindows.set(clientKey, recent);
+
+  if (mutationRequestWindows.size > MUTATION_CLIENT_CACHE_LIMIT) {
+    for (const [key, entries] of mutationRequestWindows.entries()) {
+      const filtered = entries.filter((value) => value >= windowStart);
+      if (!filtered.length) mutationRequestWindows.delete(key);
+      else mutationRequestWindows.set(key, filtered);
+      if (mutationRequestWindows.size <= MUTATION_CLIENT_CACHE_LIMIT) break;
+    }
+  }
+
+  return null;
 }
 
 function resolveCorsOrigin(originHeader: unknown): string | null {
@@ -327,6 +351,15 @@ export default async function handler(req: any, res: any) {
 
   if (req.method !== 'POST' && req.method !== 'DELETE') {
     return res.status(405).json({ error: 'Method not allowed' });
+  }
+
+  if (req.method === 'POST' || req.method === 'DELETE') {
+    const clientKey = resolveClientKey(req);
+    const retryAfterSeconds = consumeMutationPermit(clientKey);
+    if (retryAfterSeconds !== null) {
+      res.setHeader('Retry-After', String(retryAfterSeconds));
+      return res.status(429).json({ error: 'Too many avatar requests. Please retry shortly.' });
+    }
   }
 
   try {

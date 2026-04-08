@@ -5,11 +5,14 @@ import {
   sanitizeProfilePayload,
   type ProfilePayload,
 } from '../utils/profileAuth';
+import {
+  buildAvatarUploadSigningMessage,
+  buildAvatarDeleteSigningMessage,
+} from '../utils/avatarSigning';
 import type { PublicProfileResponse, ProfileAvatarUploadResponse } from '../types/profile';
 
 const PROFILE_API_PATH = '/api/profile';
 const PROFILE_AVATAR_API_PATH = '/api/profile-avatar';
-const AVATAR_UPLOAD_SIG_VALIDITY_MS = 10 * 60 * 1000;
 
 function uint8ToHex(bytes: Uint8Array): string {
   return Array.from(bytes).map((b) => b.toString(16).padStart(2, '0')).join('');
@@ -33,25 +36,6 @@ async function sha256Hex(bytes: Uint8Array): Promise<string> {
   stableInput.set(bytes);
   const digest = await globalThis.crypto.subtle.digest('SHA-256', stableInput);
   return uint8ToHex(new Uint8Array(digest));
-}
-
-function buildAvatarUploadSigningMessage(
-  address: string,
-  timestamp: number,
-  byteLength: number,
-  contentType: string,
-  contentDigest: string,
-): string {
-  return [
-    'AchMarket Avatar Upload',
-    `Address: ${address}`,
-    `Timestamp: ${timestamp}`,
-    `ByteLength: ${byteLength}`,
-    `ContentType: ${contentType}`,
-    `ContentDigest: ${contentDigest}`,
-    `ValidForMs: ${AVATAR_UPLOAD_SIG_VALIDITY_MS}`,
-    'No gas fee. Sign only if you trust this request.',
-  ].join('\n');
 }
 
 async function parseApiResponse<T>(response: Response): Promise<T> {
@@ -155,13 +139,7 @@ export async function deleteProfileAvatar(
     action: 'delete-avatar',
   } as const;
 
-  const message = [
-    'AchMarket Avatar Delete',
-    `Address: ${normalized}`,
-    `Timestamp: ${timestamp}`,
-    `Key: ${key}`,
-    'No gas fee. Sign only if you trust this request.',
-  ].join('\n');
+  const message = buildAvatarDeleteSigningMessage(normalized, timestamp, key);
   const signature = await signer.signMessage(message);
 
   const response = await fetch(PROFILE_AVATAR_API_PATH, {
