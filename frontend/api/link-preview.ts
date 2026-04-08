@@ -1,5 +1,9 @@
+import dns from 'dns/promises';
+import { isIP } from 'net';
+
 const REQUEST_TIMEOUT_MS = 8000;
-const MAX_HTML_CHARS = 300000;
+const MAX_HTML_BYTES = 300000;
+const MAX_REDIRECTS = 5;
 
 class HttpError extends Error {
   status: number;
@@ -26,36 +30,94 @@ function isPrivateIpv4(host: string): boolean {
   return false;
 }
 
+function parseIpv6(value: string): number[] | null {
+  const raw = value.trim().toLowerCase();
+  if (!raw || !raw.includes(':')) return null;
+
+  const segments = raw.split('::');
+  if (segments.length > 2) return null;
+
+  const parseHalf = (part: string): number[] => {
+    if (!part) return [];
+    return part.split(':').map((segment) => {
+      if (!segment) return -1;
+      const valueNum = parseInt(segment, 16);
+      return Number.isNaN(valueNum) || valueNum < 0 || valueNum > 0xffff ? -1 : valueNum;
+    });
+  };
+
+  const left = parseHalf(segments[0]);
+  const right = parseHalf(segments[1] ?? '');
+  if (left.includes(-1) || right.includes(-1)) return null;
+
+  if (segments.length === 1 && left.length !== 8) return null;
+  if (segments.length === 2 && left.length + right.length > 8) return null;
+
+  const fillCount = 8 - (left.length + right.length);
+  const filled = segments.length === 2 ? [...left, ...new Array(fillCount).fill(0), ...right] : left;
+  return filled.length === 8 ? filled : null;
+}
+
+function isPrivateIpv6(host: string): boolean {
+  const normalized = host.trim().toLowerCase();
+  if (normalized === '::1') return true;
+
+  const parts = parseIpv6(normalized);
+  if (!parts) return false;
+
+  const first = parts[0];
+  if ((first & 0xfe00) === 0xfc00) return true; // fc00::/7 unique local
+  if ((first & 0xffc0) === 0xfe80) return true; // fe80::/10 link local
+  return false;
+}
+
 function isPrivateHost(hostname: string): boolean {
   const host = hostname.trim().toLowerCase();
   if (!host) return true;
   if (host === 'localhost') return true;
   if (host.endsWith('.localhost')) return true;
   if (host.endsWith('.local')) return true;
-  if (host === '::1') return true;
-  if (host.startsWith('fc') || host.startsWith('fd') || host.startsWith('fe80')) return true;
-  if (/^\d+\.\d+\.\d+\.\d+$/.test(host) && isPrivateIpv4(host)) return true;
+
+  const ipVersion = isIP(host);
+  if (ipVersion === 4) return isPrivateIpv4(host);
+  if (ipVersion === 6) return isPrivateIpv6(host);
+
   return false;
+}
+
+function decodeHtmlEntities(value: string): string {
+  return value
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;|&apos;/gi, "'")
+    .replace(/&amp;/gi, '&')
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .trim();
 }
 
 function extractMetaByKey(html: string, key: string, attr: 'name' | 'property'): string {
   const escapedKey = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const patternA = new RegExp(
-    `<meta[^>]*${attr}=["']${escapedKey}["'][^>]*content=["']([^"']+)["'][^>]*>`,
+    `<meta[^>]*${attr}=(['"])${escapedKey}\\1[^>]*content=(['"])([\\s\\S]*?)\\2[^>]*>`,
     'i',
   );
   const patternB = new RegExp(
-    `<meta[^>]*content=["']([^"']+)["'][^>]*${attr}=["']${escapedKey}["'][^>]*>`,
+    `<meta[^>]*content=(['"])([\\s\\S]*?)\\1[^>]*${attr}=(['"])${escapedKey}\\3[^>]*>`,
     'i',
   );
 
-  const match = html.match(patternA) || html.match(patternB);
-  return match?.[1]?.trim() ?? '';
+  const matchA = html.match(patternA);
+  if (matchA?.[3]) return decodeHtmlEntities(matchA[3]);
+
+  const matchB = html.match(patternB);
+  if (matchB?.[2]) return decodeHtmlEntities(matchB[2]);
+
+  return '';
 }
 
 function extractTitle(html: string): string {
   const match = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
-  return match?.[1]?.replace(/\s+/g, ' ').trim() ?? '';
+  return decodeHtmlEntities(match?.[1] ?? '').replace(/\s+/g, ' ').trim();
 }
 
 function pickFirstNonEmpty(values: Array<string | null | undefined>): string {
@@ -97,6 +159,244 @@ function toAbsoluteUrl(urlLike: string, baseUrl: string): string {
   }
 }
 
+function normalizeOrigin(raw: unknown): string {
+  if (typeof raw !== 'string' || !raw.trim()) return '';
+  try {
+    return new URL(raw).origin;
+  } catch {
+    return '';
+  }
+}
+
+function matchesWildcardOrigin(pattern: string, origin: string): boolean {
+  try {
+    const parsedOrigin = new URL(origin);
+    const parsedPattern = new URL(pattern.replace('*.', 'placeholder.'));
+    if (parsedOrigin.protocol !== parsedPattern.protocol) return false;
+    const host = parsedOrigin.hostname;
+    const wildcardSuffix = parsedPattern.hostname.replace('placeholder.', '');
+    if (!wildcardSuffix || host === wildcardSuffix) return false;
+    return host.endsWith(`.${wildcardSuffix}`);
+  } catch {
+    return false;
+  }
+}
+
+function tokenAllowsOrigin(token: string, embedOrigin: string, targetOrigin: string): boolean {
+  const normalized = token.trim();
+  if (!normalized) return false;
+
+  if (normalized === "'self'") {
+    return embedOrigin !== '' && embedOrigin === targetOrigin;
+  }
+  if (normalized === '*') {
+    return true;
+  }
+  if (normalized === 'https:') {
+    return embedOrigin.startsWith('https://');
+  }
+  if (normalized === 'http:') {
+    return embedOrigin.startsWith('http://');
+  }
+
+  if (normalized.includes('://*.')) {
+    return embedOrigin !== '' && matchesWildcardOrigin(normalized, embedOrigin);
+  }
+
+  try {
+    return new URL(normalized).origin === embedOrigin;
+  } catch {
+    return false;
+  }
+}
+
+function analyzeFrameEmbeddability(params: {
+  finalUrl: string;
+  xFrameOptions: string;
+  contentSecurityPolicy: string;
+  embedOrigin: string;
+}): { embeddable: boolean; reason: string } {
+  const { finalUrl, xFrameOptions, contentSecurityPolicy, embedOrigin } = params;
+
+  let targetOrigin = '';
+  try {
+    targetOrigin = new URL(finalUrl).origin;
+  } catch {
+    targetOrigin = '';
+  }
+
+  const xfo = xFrameOptions.trim().toLowerCase();
+  if (xfo.includes('deny')) {
+    return { embeddable: false, reason: 'Blocked by X-Frame-Options: DENY.' };
+  }
+
+  if (xfo.includes('sameorigin')) {
+    if (!embedOrigin || !targetOrigin || embedOrigin !== targetOrigin) {
+      return { embeddable: false, reason: 'Blocked by X-Frame-Options: SAMEORIGIN.' };
+    }
+  }
+
+  const allowFromMatch = xfo.match(/allow-from\s+([^\s]+)/i);
+  if (allowFromMatch) {
+    const allowedOrigin = normalizeOrigin(allowFromMatch[1]);
+    if (!embedOrigin || !allowedOrigin || allowedOrigin !== embedOrigin) {
+      return { embeddable: false, reason: 'Blocked by X-Frame-Options ALLOW-FROM policy.' };
+    }
+  }
+
+  const csp = contentSecurityPolicy.trim();
+  if (csp) {
+    const directives = csp
+      .split(';')
+      .map((part) => part.trim())
+      .filter(Boolean);
+    const frameAncestorsDirective = directives.find((directive) =>
+      directive.toLowerCase().startsWith('frame-ancestors'),
+    );
+
+    if (frameAncestorsDirective) {
+      const tokens = frameAncestorsDirective.split(/\s+/).slice(1);
+      if (tokens.length === 0) {
+        return { embeddable: false, reason: 'Blocked by CSP frame-ancestors policy.' };
+      }
+
+      if (tokens.includes("'none'")) {
+        return { embeddable: false, reason: 'Blocked by CSP frame-ancestors: none.' };
+      }
+
+      const allows = tokens.some((token) => tokenAllowsOrigin(token, embedOrigin, targetOrigin));
+      if (!allows) {
+        return { embeddable: false, reason: 'Blocked by CSP frame-ancestors policy.' };
+      }
+    }
+  }
+
+  return { embeddable: true, reason: '' };
+}
+
+async function ensureHostResolvesPublic(hostname: string): Promise<void> {
+  const host = hostname.trim();
+  if (!host) {
+    throw new HttpError(400, 'Invalid host.');
+  }
+
+  if (isPrivateHost(host)) {
+    throw new HttpError(400, 'Private/local URLs are not allowed.');
+  }
+
+  const ipVersion = isIP(host);
+  if (ipVersion === 4 || ipVersion === 6) {
+    if (isPrivateHost(host)) {
+      throw new HttpError(400, 'Private/local URLs are not allowed.');
+    }
+    return;
+  }
+
+  let records: Array<{ address: string; family: number }>;
+  try {
+    records = await dns.lookup(host, { all: true });
+  } catch {
+    throw new HttpError(422, 'Failed to resolve target hostname.');
+  }
+
+  if (!records.length) {
+    throw new HttpError(422, 'Failed to resolve target hostname.');
+  }
+
+  for (const record of records) {
+    if (isPrivateHost(record.address)) {
+      throw new HttpError(400, 'Target resolves to a private address, which is not allowed.');
+    }
+  }
+}
+
+async function fetchWithValidatedRedirects(
+  startUrl: URL,
+  signal: AbortSignal,
+): Promise<Response> {
+  let currentUrl = startUrl;
+
+  for (let redirectCount = 0; redirectCount <= MAX_REDIRECTS; redirectCount += 1) {
+    await ensureHostResolvesPublic(currentUrl.hostname);
+
+    const response = await fetch(currentUrl.toString(), {
+      method: 'GET',
+      redirect: 'manual',
+      signal,
+      headers: {
+        'user-agent': 'AchMarketLinkPreviewBot/1.0 (+https://prediction.achswap.app)',
+        accept: 'text/html,application/xhtml+xml;q=0.9,*/*;q=0.5',
+      },
+    });
+
+    if (response.status >= 300 && response.status < 400) {
+      const location = response.headers.get('location');
+      if (!location) {
+        throw new HttpError(422, `Redirect response missing location header (status ${response.status}).`);
+      }
+
+      let nextUrl: URL;
+      try {
+        nextUrl = new URL(location, currentUrl);
+      } catch {
+        throw new HttpError(422, 'Invalid redirect URL.');
+      }
+
+      if (nextUrl.protocol !== 'https:' && nextUrl.protocol !== 'http:') {
+        throw new HttpError(400, 'Redirected to an unsupported protocol.');
+      }
+
+      if (isPrivateHost(nextUrl.hostname)) {
+        throw new HttpError(400, 'Redirected to a private/local URL, which is not allowed.');
+      }
+
+      currentUrl = nextUrl;
+      continue;
+    }
+
+    return response;
+  }
+
+  throw new HttpError(422, `Too many redirects (max ${MAX_REDIRECTS}).`);
+}
+
+async function readHtmlWithLimit(response: Response, abortController: AbortController): Promise<string> {
+  const stream = response.body;
+  if (!stream) {
+    throw new HttpError(422, 'Empty response body.');
+  }
+
+  const reader = stream.getReader();
+  const decoder = new TextDecoder();
+  let totalBytes = 0;
+  let html = '';
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (!value) continue;
+
+      totalBytes += value.byteLength;
+      if (totalBytes > MAX_HTML_BYTES) {
+        abortController.abort();
+        throw new HttpError(422, 'Preview page is too large (max 300KB).');
+      }
+
+      html += decoder.decode(value, { stream: true });
+    }
+
+    html += decoder.decode();
+    return html;
+  } finally {
+    try {
+      reader.releaseLock();
+    } catch {
+      // ignore
+    }
+  }
+}
+
 export default async function handler(req: any, res: any) {
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
 
@@ -104,26 +404,14 @@ export default async function handler(req: any, res: any) {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
+  const abortController = new AbortController();
+  const timeout = setTimeout(() => abortController.abort(), REQUEST_TIMEOUT_MS);
+
   try {
     const targetUrl = normalizeTargetUrl(req.query?.url);
+    const embedOrigin = normalizeOrigin(req.query?.origin);
 
-    const abortController = new AbortController();
-    const timeout = setTimeout(() => abortController.abort(), REQUEST_TIMEOUT_MS);
-
-    let response: Response;
-    try {
-      response = await fetch(targetUrl.toString(), {
-        method: 'GET',
-        redirect: 'follow',
-        signal: abortController.signal,
-        headers: {
-          'user-agent': 'AchMarketLinkPreviewBot/1.0 (+https://prediction.achswap.app)',
-          accept: 'text/html,application/xhtml+xml;q=0.9,*/*;q=0.5',
-        },
-      });
-    } finally {
-      clearTimeout(timeout);
-    }
+    const response = await fetchWithValidatedRedirects(targetUrl, abortController.signal);
 
     if (!response.ok) {
       throw new HttpError(422, `Target URL responded with ${response.status}.`);
@@ -134,9 +422,16 @@ export default async function handler(req: any, res: any) {
       throw new HttpError(422, 'Preview is available only for HTML pages.');
     }
 
-    const htmlRaw = await response.text();
-    const html = htmlRaw.slice(0, MAX_HTML_CHARS);
     const finalUrl = response.url || targetUrl.toString();
+    const html = await readHtmlWithLimit(response, abortController);
+    const xFrameOptions = response.headers.get('x-frame-options') || '';
+    const contentSecurityPolicy = response.headers.get('content-security-policy') || '';
+    const framePolicy = analyzeFrameEmbeddability({
+      finalUrl,
+      xFrameOptions,
+      contentSecurityPolicy,
+      embedOrigin,
+    });
 
     const title = pickFirstNonEmpty([
       extractMetaByKey(html, 'og:title', 'property'),
@@ -171,6 +466,8 @@ export default async function handler(req: any, res: any) {
         description,
         image,
         siteName,
+        embeddable: framePolicy.embeddable,
+        embedBlockReason: framePolicy.reason,
       },
     });
   } catch (error: any) {
@@ -183,5 +480,7 @@ export default async function handler(req: any, res: any) {
     }
 
     return res.status(500).json({ error: error?.message || 'Preview request failed.' });
+  } finally {
+    clearTimeout(timeout);
   }
 }

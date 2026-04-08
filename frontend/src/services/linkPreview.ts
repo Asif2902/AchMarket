@@ -4,10 +4,13 @@ export interface LinkPreviewData {
   description: string;
   image: string;
   siteName: string;
+  embeddable: boolean;
+  embedBlockReason: string;
 }
 
 export async function fetchLinkPreview(url: string): Promise<LinkPreviewData> {
-  const response = await fetch(`/api/link-preview?url=${encodeURIComponent(url)}`);
+  const origin = window.location.origin;
+  const response = await fetch(`/api/link-preview?url=${encodeURIComponent(url)}&origin=${encodeURIComponent(origin)}`);
   const body = await response.json().catch(() => ({}));
 
   if (!response.ok) {
@@ -26,5 +29,7 @@ export async function fetchLinkPreview(url: string): Promise<LinkPreviewData> {
     description: typeof preview.description === 'string' ? preview.description : '',
     image: typeof preview.image === 'string' ? preview.image : '',
     siteName: typeof preview.siteName === 'string' ? preview.siteName : '',
+    embeddable: Boolean(preview.embeddable),
+    embedBlockReason: typeof preview.embedBlockReason === 'string' ? preview.embedBlockReason : '',
   };
 }

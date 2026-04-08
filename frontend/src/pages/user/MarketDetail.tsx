@@ -472,6 +472,41 @@ export default function MarketDetail() {
     }
   }, [detail?.market, refreshTrigger]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  const proofInfo = parseProofLinks(detail?.proofUri ?? '');
+
+  useEffect(() => {
+    const isResolvedStage = detail?.stage === STAGE.Resolved;
+    const link = proofInfo.mainLink?.trim();
+    if (!isResolvedStage || !link) {
+      setMainLinkPreview(null);
+      setMainLinkPreviewError(null);
+      setMainLinkPreviewLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+    setMainLinkPreviewLoading(true);
+    setMainLinkPreviewError(null);
+
+    fetchLinkPreview(link)
+      .then((preview) => {
+        if (cancelled) return;
+        setMainLinkPreview(preview);
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        setMainLinkPreview(null);
+        setMainLinkPreviewError(err instanceof Error ? err.message : 'Preview unavailable.');
+      })
+      .finally(() => {
+        if (!cancelled) setMainLinkPreviewLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [detail?.stage, proofInfo.mainLink]);
+
   useEffect(() => {
     if (!detail || !slug) return;
 
@@ -731,39 +766,6 @@ export default function MarketDetail() {
   const selectedOutcomeLabel = detail.outcomeLabels[selectedOutcome] ?? `Outcome ${selectedOutcome + 1}`;
   const selectedOutcomePrice = probToPercent(detail.impliedProbabilitiesWad[selectedOutcome] ?? 0n) / 100;
   const selectedOwnedShares = userInfo?.shares[selectedOutcome] ?? 0n;
-  const proofInfo = parseProofLinks(detail.proofUri);
-
-  useEffect(() => {
-    const link = proofInfo.mainLink?.trim();
-    if (!isResolved || !link) {
-      setMainLinkPreview(null);
-      setMainLinkPreviewError(null);
-      setMainLinkPreviewLoading(false);
-      return;
-    }
-
-    let cancelled = false;
-    setMainLinkPreviewLoading(true);
-    setMainLinkPreviewError(null);
-
-    fetchLinkPreview(link)
-      .then((preview) => {
-        if (cancelled) return;
-        setMainLinkPreview(preview);
-      })
-      .catch((err) => {
-        if (cancelled) return;
-        setMainLinkPreview(null);
-        setMainLinkPreviewError(err instanceof Error ? err.message : 'Preview unavailable.');
-      })
-      .finally(() => {
-        if (!cancelled) setMainLinkPreviewLoading(false);
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [isResolved, proofInfo.mainLink]);
 
   return (
     <div className="min-h-screen animate-fade-in">
@@ -996,10 +998,10 @@ export default function MarketDetail() {
                               </button>
                             )}
                           </div>
-                           {unsupported ? (
-                             <a
-                               href={resolveImageUri(mainLinkStr)}
-                               target="_blank"
+                          {unsupported ? (
+                            <a
+                              href={resolveImageUri(mainLinkStr)}
+                              target="_blank"
                               rel="noopener noreferrer"
                               className="text-xs text-emerald-300/70 hover:text-emerald-300 transition-colors inline-flex items-center gap-1"
                             >
@@ -1008,19 +1010,43 @@ export default function MarketDetail() {
                               </svg>
                               Open {mainLinkStr.length > 40 ? mainLinkStr.slice(0, 40) + '...' : mainLinkStr}
                             </a>
-                           ) : showMainFrame ? (
-                             <div className="space-y-2">
-                               <iframe
-                                 src={resolveImageUri(mainLinkStr)}
-                                 className="w-full h-64 rounded-lg border border-white/[0.06] bg-dark-900"
-                                 title="Main proof"
-                                 sandbox="allow-same-origin allow-scripts allow-popups allow-popups-to-escape-sandbox allow-forms allow-pointer-lock allow-top-navigation-by-user-activation allow-downloads"
-                                 referrerPolicy="no-referrer-when-downgrade"
-                               />
-                               <p className="text-2xs text-dark-500">
-                                 If frame stays blank, that site blocks embedding. Use the preview card/open link below.
-                               </p>
-                             </div>
+                          ) : showMainFrame ? (
+                             mainLinkPreviewLoading ? (
+                               <div className="w-full h-64 rounded-lg border border-white/[0.06] bg-dark-900/60 flex items-center justify-center">
+                                 <p className="text-xs text-dark-400">Checking iframe support...</p>
+                               </div>
+                             ) : mainLinkPreview && !mainLinkPreview.embeddable ? (
+                               <div className="w-full rounded-lg border border-amber-500/20 bg-amber-500/5 p-3 space-y-2">
+                                 <p className="text-xs font-semibold text-amber-300">This site blocks iframe embedding.</p>
+                                 <p className="text-2xs text-amber-200/80">
+                                   {mainLinkPreview.embedBlockReason || 'The target site sends security headers that prevent preview in an iframe.'}
+                                 </p>
+                                 <a
+                                   href={resolveImageUri(mainLinkStr)}
+                                   target="_blank"
+                                   rel="noopener noreferrer"
+                                   className="inline-flex items-center gap-1.5 text-xs text-amber-200 hover:text-amber-100"
+                                 >
+                                   <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                     <path strokeLinecap="round" strokeLinejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                                   </svg>
+                                   Open in new tab
+                                 </a>
+                               </div>
+                             ) : (
+                               <div className="space-y-2">
+                                 <iframe
+                                   src={resolveImageUri(mainLinkStr)}
+                                   className="w-full h-64 rounded-lg border border-white/[0.06] bg-dark-900"
+                                   title="Main proof"
+                                   sandbox="allow-same-origin allow-scripts allow-popups allow-popups-to-escape-sandbox allow-forms allow-pointer-lock allow-top-navigation-by-user-activation allow-downloads"
+                                   referrerPolicy="no-referrer-when-downgrade"
+                                 />
+                                 <p className="text-2xs text-dark-500">
+                                   If frame stays blank, that site blocks embedding. Use the preview card/open link below.
+                                 </p>
+                               </div>
+                             )
                            ) : (
                              <a
                                href={resolveImageUri(mainLinkStr)}
