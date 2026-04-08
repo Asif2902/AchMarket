@@ -1,12 +1,40 @@
 import { recoverAddress, hashMessage, getAddress } from 'ethers';
 import { PutObjectCommand, DeleteObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import { randomBytes, createHash } from 'crypto';
-import {
-  MARKET_MEDIA_SIG_VALIDITY_MS,
-  buildMarketMediaUploadSigningMessage,
-  buildMarketMediaDeleteSigningMessage,
-  type MarketMediaKind,
-} from '../src/utils/marketMediaSigning';
+
+const MARKET_MEDIA_SIG_VALIDITY_MS = 10 * 60 * 1000;
+type MarketMediaKind = 'market-image' | 'resolution-proof' | 'cancellation-proof';
+
+function buildMarketMediaUploadSigningMessage(
+  address: string,
+  kind: MarketMediaKind,
+  timestamp: number,
+  byteLength: number,
+  contentType: string,
+  contentDigest: string,
+): string {
+  return [
+    'AchMarket Market Media Upload',
+    `Address: ${address}`,
+    `Kind: ${kind}`,
+    `Timestamp: ${timestamp}`,
+    `ByteLength: ${byteLength}`,
+    `ContentType: ${contentType}`,
+    `ContentDigest: ${contentDigest}`,
+    `ValidForMs: ${MARKET_MEDIA_SIG_VALIDITY_MS}`,
+    'No gas fee. Sign only if you trust this request.',
+  ].join('\n');
+}
+
+function buildMarketMediaDeleteSigningMessage(address: string, timestamp: number, key: string): string {
+  return [
+    'AchMarket Market Media Delete',
+    `Address: ${address}`,
+    `Timestamp: ${timestamp}`,
+    `Key: ${key}`,
+    'No gas fee. Sign only if you trust this request.',
+  ].join('\n');
+}
 
 const MAX_UPLOAD_BYTES = 2 * 1024 * 1024;
 const FUTURE_SKEW_MS = 5000;

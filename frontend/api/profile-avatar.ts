@@ -1,11 +1,37 @@
 import { recoverAddress, hashMessage, getAddress } from 'ethers';
 import { PutObjectCommand, DeleteObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import { createHash } from 'crypto';
-import {
-  AVATAR_UPLOAD_SIG_VALIDITY_MS,
-  buildAvatarUploadSigningMessage,
-  buildAvatarDeleteSigningMessage,
-} from '../src/utils/avatarSigning';
+
+const AVATAR_UPLOAD_SIG_VALIDITY_MS = 10 * 60 * 1000;
+
+function buildAvatarUploadSigningMessage(
+  address: string,
+  timestamp: number,
+  byteLength: number,
+  contentType: string,
+  contentDigest: string,
+): string {
+  return [
+    'AchMarket Avatar Upload',
+    `Address: ${address}`,
+    `Timestamp: ${timestamp}`,
+    `ByteLength: ${byteLength}`,
+    `ContentType: ${contentType}`,
+    `ContentDigest: ${contentDigest}`,
+    `ValidForMs: ${AVATAR_UPLOAD_SIG_VALIDITY_MS}`,
+    'No gas fee. Sign only if you trust this request.',
+  ].join('\n');
+}
+
+function buildAvatarDeleteSigningMessage(address: string, timestamp: number, key: string): string {
+  return [
+    'AchMarket Avatar Delete',
+    `Address: ${address}`,
+    `Timestamp: ${timestamp}`,
+    `Key: ${key}`,
+    'No gas fee. Sign only if you trust this request.',
+  ].join('\n');
+}
 
 const MAX_UPLOAD_BYTES = 2 * 1024 * 1024;
 const FUTURE_SKEW_MS = 5000;
