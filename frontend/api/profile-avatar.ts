@@ -264,10 +264,10 @@ async function uploadAvatar(body: Record<string, unknown>) {
   const timestamp = Number(body.timestamp);
   const byteLength = Number(body.byteLength);
   const dataBase64 = typeof body.dataBase64 === 'string' ? body.dataBase64 : '';
-  const contentType = sanitizeContentType(body.contentType);
+  const rawContentType = typeof body.contentType === 'string' ? body.contentType : '';
   const contentDigest = normalizeHexDigest(body.contentDigest);
 
-  if (!addressRaw || !signature || !dataBase64 || !contentType || !contentDigest) {
+  if (!addressRaw || !signature || !dataBase64 || !rawContentType || !contentDigest) {
     throw new HttpError(400, 'address, signature, contentType, contentDigest, and image data are required.');
   }
 
@@ -296,7 +296,7 @@ async function uploadAvatar(body: Record<string, unknown>) {
 
   const normalized = normalizeAddress(addressRaw);
 
-  const message = buildAvatarUploadSigningMessage(normalized, timestamp, byteLength, contentType, contentDigest);
+  const message = buildAvatarUploadSigningMessage(normalized, timestamp, byteLength, rawContentType, contentDigest);
   let recovered: string;
   try {
     recovered = verifyMessage(message, signature);
@@ -306,6 +306,11 @@ async function uploadAvatar(body: Record<string, unknown>) {
 
   if (normalizeAddress(recovered) !== normalized) {
     throw new HttpError(401, 'Invalid signature for wallet address.');
+  }
+
+  const contentType = sanitizeContentType(rawContentType);
+  if (!contentType) {
+    throw new HttpError(400, 'address, signature, contentType, contentDigest, and image data are required.');
   }
 
   const bytes = Buffer.from(dataBase64, 'base64');
@@ -347,22 +352,17 @@ async function uploadAvatar(body: Record<string, unknown>) {
 async function deleteAvatar(body: Record<string, unknown>): Promise<void> {
   const addressRaw = typeof body.address === 'string' ? body.address : '';
   const signature = typeof body.signature === 'string' ? body.signature : '';
-  const key = normalizeDeleteKey(body.key);
+  const rawKey = typeof body.key === 'string' ? body.key : '';
   const timestamp = Number(body.timestamp);
 
-  if (!addressRaw || !signature || !key) {
+  if (!addressRaw || !signature || !rawKey) {
     throw new HttpError(400, 'address, signature, and key are required.');
   }
 
   validateTimestamp(timestamp);
 
   const normalized = normalizeAddress(addressRaw);
-  const expectedPrefix = `avatars/${normalized}/`;
-  if (!key.startsWith(expectedPrefix)) {
-    throw new HttpError(400, 'Invalid avatar key.');
-  }
-
-  const message = buildAvatarDeleteSigningMessage(normalized, timestamp, key);
+  const message = buildAvatarDeleteSigningMessage(normalized, timestamp, rawKey);
   let recovered: string;
   try {
     recovered = verifyMessage(message, signature);
@@ -372,6 +372,15 @@ async function deleteAvatar(body: Record<string, unknown>): Promise<void> {
 
   if (normalizeAddress(recovered) !== normalized) {
     throw new HttpError(401, 'Invalid signature for wallet address.');
+  }
+
+  const key = normalizeDeleteKey(rawKey);
+  if (!key) {
+    throw new HttpError(400, 'Invalid avatar key.');
+  }
+  const expectedPrefix = `avatars/${normalized}/`;
+  if (!key.startsWith(expectedPrefix)) {
+    throw new HttpError(400, 'Invalid avatar key.');
   }
 
   if (!R2_BUCKET) {
