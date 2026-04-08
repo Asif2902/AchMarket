@@ -20,6 +20,7 @@ import { showToast } from '../../components/Toast';
 import { NETWORK } from '../../config/network';
 import ChatThread from '../../components/chat/ChatThread';
 import { fetchProfileByAddress } from '../../services/profile';
+import { fetchLinkPreview, type LinkPreviewData } from '../../services/linkPreview';
 
 const DEFAULT_META_TITLE = 'AchMarket - Prediction Markets';
 const DEFAULT_META_DESCRIPTION = 'Trade prediction markets on ARC Testnet with USDC.';
@@ -115,6 +116,9 @@ export default function MarketDetail() {
   const txMessageTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [poolBalance, setPoolBalance] = useState<bigint>(0n);
   const [showMainFrame, setShowMainFrame] = useState(false);
+  const [mainLinkPreview, setMainLinkPreview] = useState<LinkPreviewData | null>(null);
+  const [mainLinkPreviewLoading, setMainLinkPreviewLoading] = useState(false);
+  const [mainLinkPreviewError, setMainLinkPreviewError] = useState<string | null>(null);
   const [hoveredImage, setHoveredImage] = useState<number | null>(null);
   const [aboutExpanded, setAboutExpanded] = useState(false);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
@@ -727,6 +731,39 @@ export default function MarketDetail() {
   const selectedOutcomeLabel = detail.outcomeLabels[selectedOutcome] ?? `Outcome ${selectedOutcome + 1}`;
   const selectedOutcomePrice = probToPercent(detail.impliedProbabilitiesWad[selectedOutcome] ?? 0n) / 100;
   const selectedOwnedShares = userInfo?.shares[selectedOutcome] ?? 0n;
+  const proofInfo = parseProofLinks(detail.proofUri);
+
+  useEffect(() => {
+    const link = proofInfo.mainLink?.trim();
+    if (!isResolved || !link) {
+      setMainLinkPreview(null);
+      setMainLinkPreviewError(null);
+      setMainLinkPreviewLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+    setMainLinkPreviewLoading(true);
+    setMainLinkPreviewError(null);
+
+    fetchLinkPreview(link)
+      .then((preview) => {
+        if (cancelled) return;
+        setMainLinkPreview(preview);
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        setMainLinkPreview(null);
+        setMainLinkPreviewError(err instanceof Error ? err.message : 'Preview unavailable.');
+      })
+      .finally(() => {
+        if (!cancelled) setMainLinkPreviewLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isResolved, proofInfo.mainLink]);
 
   return (
     <div className="min-h-screen animate-fade-in">
@@ -784,7 +821,7 @@ export default function MarketDetail() {
           <div className="space-y-4 md:space-y-5">
             {/* Quick stats */}
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-              <MiniStat label="Volume" value={`${formatCompactUSDC(accurateVolume ?? detail.totalVolumeWei)}`} suffix="USDC" icon={<UsdcIcon size={14} />} />
+              <MiniStat label="Volume" value={`${formatCompactUSDC(detail.totalVolumeWei)}`} suffix="USDC" icon={<UsdcIcon size={14} />} />
               <MiniStat label="Traders" value={detail.participants.toString()} />
               <MiniStat label="Created" value={formatDate(detail.createdAt)} small />
               <MiniStat label={isActive ? 'Ends' : 'Ended'} value={formatDate(detail.marketDeadline)} small />
@@ -852,7 +889,7 @@ export default function MarketDetail() {
 
             {/* Resolution proof */}
             {isResolved && detail.proofUri && (() => {
-              const proof = parseProofLinks(detail.proofUri);
+              const proof = proofInfo;
               return (
                 <div className="card border-emerald-500/20 bg-emerald-500/5 p-4">
                   <div className="flex items-start gap-3">
@@ -959,10 +996,10 @@ export default function MarketDetail() {
                               </button>
                             )}
                           </div>
-                          {unsupported ? (
-                            <a
-                              href={resolveImageUri(mainLinkStr)}
-                              target="_blank"
+                           {unsupported ? (
+                             <a
+                               href={resolveImageUri(mainLinkStr)}
+                               target="_blank"
                               rel="noopener noreferrer"
                               className="text-xs text-emerald-300/70 hover:text-emerald-300 transition-colors inline-flex items-center gap-1"
                             >
@@ -971,16 +1008,22 @@ export default function MarketDetail() {
                               </svg>
                               Open {mainLinkStr.length > 40 ? mainLinkStr.slice(0, 40) + '...' : mainLinkStr}
                             </a>
-                          ) : showMainFrame ? (
-                            <iframe
-                              src={resolveImageUri(mainLinkStr)}
-                              className="w-full h-64 rounded-lg border border-white/[0.06] bg-dark-900"
-                              title="Main proof"
-                              sandbox="allow-same-origin allow-forms"
-                            />
-                          ) : (
-                            <a
-                              href={resolveImageUri(mainLinkStr)}
+                           ) : showMainFrame ? (
+                             <div className="space-y-2">
+                               <iframe
+                                 src={resolveImageUri(mainLinkStr)}
+                                 className="w-full h-64 rounded-lg border border-white/[0.06] bg-dark-900"
+                                 title="Main proof"
+                                 sandbox="allow-same-origin allow-scripts allow-popups allow-popups-to-escape-sandbox allow-forms allow-pointer-lock allow-top-navigation-by-user-activation allow-downloads"
+                                 referrerPolicy="no-referrer-when-downgrade"
+                               />
+                               <p className="text-2xs text-dark-500">
+                                 If frame stays blank, that site blocks embedding. Use the preview card/open link below.
+                               </p>
+                             </div>
+                           ) : (
+                             <a
+                               href={resolveImageUri(mainLinkStr)}
                               target="_blank"
                               rel="noopener noreferrer"
                               className="text-xs text-emerald-300/70 hover:text-emerald-300 transition-colors inline-flex items-center gap-1"
@@ -992,8 +1035,50 @@ export default function MarketDetail() {
                             </a>
                           )}
                         </div>
-                        );
+                       );
                       })() : null}
+
+                      {proof.mainLink && (
+                        <div className="mt-3 p-3 rounded-lg border border-white/[0.08] bg-dark-900/50">
+                          <p className="text-2xs font-medium text-emerald-500/70 uppercase tracking-wider mb-2">Link Preview</p>
+                          {mainLinkPreviewLoading ? (
+                            <p className="text-xs text-dark-400">Loading preview...</p>
+                          ) : mainLinkPreview ? (
+                            <a
+                              href={mainLinkPreview.url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="group block rounded-lg border border-white/[0.08] bg-dark-850/70 overflow-hidden hover:border-emerald-400/30 transition-colors"
+                            >
+                              {mainLinkPreview.image && (
+                                <div className="w-full h-36 bg-dark-800 overflow-hidden">
+                                  <img
+                                    src={resolveImageUri(mainLinkPreview.image)}
+                                    alt={mainLinkPreview.title || 'Preview image'}
+                                    className="w-full h-full object-cover"
+                                    onError={(e) => {
+                                      (e.target as HTMLImageElement).style.display = 'none';
+                                    }}
+                                  />
+                                </div>
+                              )}
+                              <div className="p-3">
+                                <p className="text-xs text-dark-500 mb-1">{mainLinkPreview.siteName}</p>
+                                <p className="text-sm font-semibold text-white group-hover:text-emerald-300 transition-colors line-clamp-2">
+                                  {mainLinkPreview.title || 'Open proof link'}
+                                </p>
+                                {mainLinkPreview.description && (
+                                  <p className="text-xs text-dark-400 mt-1 line-clamp-2">{mainLinkPreview.description}</p>
+                                )}
+                              </div>
+                            </a>
+                          ) : (
+                            <p className="text-xs text-dark-400">
+                              {mainLinkPreviewError || 'Preview unavailable for this link.'}
+                            </p>
+                          )}
+                        </div>
+                      )}
                       
                       {/* Extra links */}
                       {proof.extraLinks.length > 0 && (
