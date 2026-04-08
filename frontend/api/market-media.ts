@@ -219,11 +219,11 @@ async function uploadMarketMedia(body: Record<string, unknown>) {
   const timestamp = Number(body.timestamp);
   const byteLength = Number(body.byteLength);
   const dataBase64 = typeof body.dataBase64 === 'string' ? body.dataBase64 : '';
-  const contentType = sanitizeContentType(body.contentType);
+  const rawContentType = typeof body.contentType === 'string' ? body.contentType : '';
+  const rawKind = typeof body.kind === 'string' ? body.kind : '';
   const contentDigest = normalizeHexDigest(body.contentDigest);
-  const kind = sanitizeKind(body.kind);
 
-  if (!addressRaw || !signature || !dataBase64 || !contentType || !contentDigest || !kind) {
+  if (!addressRaw || !signature || !dataBase64 || !rawContentType || !contentDigest || !rawKind) {
     throw new HttpError(400, 'address, signature, kind, contentType, contentDigest, and image data are required.');
   }
 
@@ -252,7 +252,14 @@ async function uploadMarketMedia(body: Record<string, unknown>) {
 
   const normalized = normalizeAddress(addressRaw);
 
-  const message = buildMarketMediaUploadSigningMessage(normalized, kind, timestamp, byteLength, contentType, contentDigest);
+  const message = buildMarketMediaUploadSigningMessage(
+    normalized,
+    rawKind as MarketMediaKind,
+    timestamp,
+    byteLength,
+    rawContentType,
+    contentDigest,
+  );
   let recovered: string;
   try {
     recovered = verifyMessage(message, signature);
@@ -262,6 +269,12 @@ async function uploadMarketMedia(body: Record<string, unknown>) {
 
   if (normalizeAddress(recovered) !== normalized) {
     throw new HttpError(401, 'Invalid signature for wallet address.');
+  }
+
+  const contentType = sanitizeContentType(rawContentType);
+  const kind = sanitizeKind(rawKind);
+  if (!contentType || !kind) {
+    throw new HttpError(400, 'address, signature, kind, contentType, contentDigest, and image data are required.');
   }
 
   const bytes = Buffer.from(dataBase64, 'base64');
@@ -306,23 +319,17 @@ async function uploadMarketMedia(body: Record<string, unknown>) {
 async function deleteMarketMedia(body: Record<string, unknown>): Promise<void> {
   const addressRaw = typeof body.address === 'string' ? body.address : '';
   const signature = typeof body.signature === 'string' ? body.signature : '';
-  const key = normalizeDeleteKey(body.key);
+  const rawKey = typeof body.key === 'string' ? body.key : '';
   const timestamp = Number(body.timestamp);
 
-  if (!addressRaw || !signature || !key) {
+  if (!addressRaw || !signature || !rawKey) {
     throw new HttpError(400, 'address, signature, and key are required.');
   }
 
   validateTimestamp(timestamp);
 
   const normalized = normalizeAddress(addressRaw);
-  const expectedPrefix = 'market-media/';
-  const userPrefix = `/${normalized}/`;
-  if (!key.startsWith(expectedPrefix) || !key.includes(userPrefix)) {
-    throw new HttpError(400, 'Invalid media key.');
-  }
-
-  const message = buildMarketMediaDeleteSigningMessage(normalized, timestamp, key);
+  const message = buildMarketMediaDeleteSigningMessage(normalized, timestamp, rawKey);
   let recovered: string;
   try {
     recovered = verifyMessage(message, signature);
@@ -332,6 +339,16 @@ async function deleteMarketMedia(body: Record<string, unknown>): Promise<void> {
 
   if (normalizeAddress(recovered) !== normalized) {
     throw new HttpError(401, 'Invalid signature for wallet address.');
+  }
+
+  const key = normalizeDeleteKey(rawKey);
+  if (!key) {
+    throw new HttpError(400, 'Invalid media key.');
+  }
+  const expectedPrefix = 'market-media/';
+  const userPrefix = `/${normalized}/`;
+  if (!key.startsWith(expectedPrefix) || !key.includes(userPrefix)) {
+    throw new HttpError(400, 'Invalid media key.');
   }
 
   if (!R2_BUCKET) {
