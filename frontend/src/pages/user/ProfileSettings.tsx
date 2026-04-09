@@ -1,12 +1,14 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react';
 import { Link } from 'react-router-dom';
 import { useWallet } from '../../context/WalletContext';
 import ImageWithFallback from '../../components/ImageWithFallback';
 import EmptyState from '../../components/EmptyState';
 import { PageLoader } from '../../components/LoadingSpinner';
 import { EMPTY_PROFILE_PAYLOAD, normalizeProfileSlug, type ProfilePayload } from '../../utils/profileAuth';
-import { fetchProfileByAddress, saveProfileBySignature } from '../../services/profile';
+import { fetchProfileByAddress, saveProfileBySignature, uploadProfileAvatar, deleteProfileAvatar } from '../../services/profile';
 import type { PublicProfile as PublicProfileType } from '../../types/profile';
+import { compressAvatarImage } from '../../utils/avatarImage';
+import { withImageVersion } from '../../utils/format';
 
 function toProfilePayload(profile: PublicProfileType | null): ProfilePayload {
   if (!profile) return { ...EMPTY_PROFILE_PAYLOAD };
@@ -27,22 +29,51 @@ export default function ProfileSettings() {
   const { address, signer, isConnected } = useWallet();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [avatarUploading, setAvatarUploading] = useState(false);
+  const [avatarUploadSessionId, setAvatarUploadSessionId] = useState<string | null>(null);
+  const [avatarUploadMeta, setAvatarUploadMeta] = useState<{ bytes: number; type: string } | null>(null);
+  const [localAvatarPreviewUrl, setLocalAvatarPreviewUrl] = useState<string | null>(null);
   const [form, setForm] = useState<ProfilePayload>({ ...EMPTY_PROFILE_PAYLOAD });
   const [profileSlug, setProfileSlug] = useState('');
+  const [profileUpdatedAt, setProfileUpdatedAt] = useState('');
   const [msg, setMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [linkCopied, setLinkCopied] = useState(false);
   const currentRequestIdRef = useRef(0);
+  const avatarUploadSessionIdRef = useRef<string | null>(null);
   const addressRef = useRef(address);
   const signerRef = useRef(signer);
+  const latestPreviewUrlRef = useRef<string | null>(null);
+  const latestFormRef = useRef<ProfilePayload>({ ...EMPTY_PROFILE_PAYLOAD });
+  const avatarFileInputRef = useRef<HTMLInputElement | null>(null);
+  avatarUploadSessionIdRef.current = avatarUploadSessionId;
   addressRef.current = address;
   signerRef.current = signer;
+
+  const clearAvatarUploadSessionIfMatches = (sessionId: string) => {
+    if (avatarUploadSessionIdRef.current !== sessionId) return;
+    setAvatarUploading(false);
+    setAvatarUploadSessionId(null);
+  };
 
   useEffect(() => {
     if (!address) {
       setLoading(false);
       setForm({ ...EMPTY_PROFILE_PAYLOAD });
       setProfileSlug('');
+      setProfileUpdatedAt('');
+      setAvatarUploadMeta(null);
+      setLocalAvatarPreviewUrl((prev) => {
+        if (prev) URL.revokeObjectURL(prev);
+        return null;
+      });
       setSaving(false);
+      setAvatarUploadSessionId((current) => {
+        if (current) {
+          setAvatarUploading(false);
+          return null;
+        }
+        return current;
+      });
       return;
     }
 
@@ -53,15 +84,30 @@ export default function ProfileSettings() {
         setMsg(null);
         setForm({ ...EMPTY_PROFILE_PAYLOAD });
         setProfileSlug('');
+        setProfileUpdatedAt('');
+        setAvatarUploadMeta(null);
+        setLocalAvatarPreviewUrl((prev) => {
+          if (prev) URL.revokeObjectURL(prev);
+          return null;
+        });
+        setAvatarUploadSessionId((current) => {
+          if (current) {
+            setAvatarUploading(false);
+            return null;
+          }
+          return current;
+        });
         const response = await fetchProfileByAddress(address);
         if (!cancelled) {
           setForm(toProfilePayload(response.profile));
           setProfileSlug(toProfileSlug(response.profile));
+          setProfileUpdatedAt(response.profile?.updatedAt ?? '');
         }
       } catch (err) {
         if (!cancelled) {
           setForm({ ...EMPTY_PROFILE_PAYLOAD });
           setProfileSlug('');
+          setProfileUpdatedAt('');
           const message = err instanceof Error ? err.message : 'Failed to load profile';
           setMsg({ type: 'error', text: message });
         }
@@ -75,6 +121,22 @@ export default function ProfileSettings() {
       cancelled = true;
     };
   }, [address]);
+
+  useEffect(() => {
+    latestPreviewUrlRef.current = localAvatarPreviewUrl;
+  }, [localAvatarPreviewUrl]);
+
+  useEffect(() => {
+    latestFormRef.current = form;
+  }, [form]);
+
+  useEffect(() => {
+    return () => {
+      if (latestPreviewUrlRef.current) {
+        URL.revokeObjectURL(latestPreviewUrlRef.current);
+      }
+    };
+  }, []);
 
   const publicProfileLink = useMemo(() => {
     if (!profileSlug) return '';
@@ -91,10 +153,126 @@ export default function ProfileSettings() {
 
   const displayName = form.displayName.trim() || (address ? `${address.slice(0, 6)}...${address.slice(-4)}` : 'Trader');
   const avatarUrl = form.avatarUrl.trim();
+  const avatarPreviewSrc = localAvatarPreviewUrl || withImageVersion(avatarUrl, profileUpdatedAt);
   const shareLinkHref = publicProfileLink || '#';
 
   const updateField = (key: keyof ProfilePayload, value: string) => {
     setForm((prev) => ({ ...prev, [key]: value }));
+  };
+
+  const isWalletSessionCurrent = (expectedAddress: string, expectedSigner: typeof signer): boolean => {
+    return addressRef.current === expectedAddress && signerRef.current === expectedSigner;
+  };
+
+  const handleAvatarFileChange = async (event: ChangeEvent<HTMLInputElement>) => {
+    const selected = event.target.files?.[0];
+    if (!selected) return;
+    const localAddress = address;
+    const localSigner = signer;
+    if (!localAddress || !localSigner) {
+      setMsg({ type: 'error', text: 'Connect wallet to upload avatar.' });
+      event.target.value = '';
+      return;
+    }
+
+    let previewToRevokeOnFailure: string | null = null;
+    let uploadedResult: { key: string } | null = null;
+    const sessionId = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+
+    try {
+      setAvatarUploadSessionId(sessionId);
+      setAvatarUploading(true);
+      setMsg(null);
+
+      const compressed = await compressAvatarImage(selected);
+      previewToRevokeOnFailure = compressed.previewUrl;
+
+      if (!isWalletSessionCurrent(localAddress, localSigner)) {
+        if (previewToRevokeOnFailure) {
+          URL.revokeObjectURL(previewToRevokeOnFailure);
+          previewToRevokeOnFailure = null;
+        }
+        return;
+      }
+
+      const confirmed = window.confirm('Upload this image as your avatar?');
+      if (!confirmed) {
+        URL.revokeObjectURL(compressed.previewUrl);
+        previewToRevokeOnFailure = null;
+        return;
+      }
+
+      if (!isWalletSessionCurrent(localAddress, localSigner)) {
+        if (previewToRevokeOnFailure) {
+          URL.revokeObjectURL(previewToRevokeOnFailure);
+          previewToRevokeOnFailure = null;
+        }
+        return;
+      }
+
+      const uploaded = await uploadProfileAvatar(compressed.file, localAddress, localSigner);
+      uploadedResult = { key: uploaded.key };
+
+      if (!isWalletSessionCurrent(localAddress, localSigner)) {
+        try {
+          await deleteProfileAvatar(localAddress, uploaded.key, localSigner);
+        } catch (cleanupErr) {
+          console.error('Failed to cleanup orphaned avatar upload:', cleanupErr);
+        }
+        if (previewToRevokeOnFailure) {
+          URL.revokeObjectURL(previewToRevokeOnFailure);
+          previewToRevokeOnFailure = null;
+        }
+        return;
+      }
+
+      const nextPayload: ProfilePayload = { ...latestFormRef.current, avatarUrl: uploaded.url };
+      const saved = await saveProfileBySignature(localAddress, nextPayload, localSigner);
+
+      if (!isWalletSessionCurrent(localAddress, localSigner)) {
+        if (previewToRevokeOnFailure) {
+          URL.revokeObjectURL(previewToRevokeOnFailure);
+          previewToRevokeOnFailure = null;
+        }
+        return;
+      }
+
+      const savedPayload = toProfilePayload(saved.profile);
+      const mergedPayload: ProfilePayload = {
+        ...latestFormRef.current,
+        avatarUrl: savedPayload.avatarUrl,
+      };
+
+      setForm(mergedPayload);
+      setProfileSlug(toProfileSlug(saved.profile));
+      setProfileUpdatedAt(saved.profile?.updatedAt ?? '');
+      setAvatarUploadMeta({ bytes: uploaded.byteLength, type: uploaded.contentType });
+      setLocalAvatarPreviewUrl((prev) => {
+        if (prev) URL.revokeObjectURL(prev);
+        return compressed.previewUrl;
+      });
+      previewToRevokeOnFailure = null;
+
+      setMsg({ type: 'success', text: 'Avatar uploaded and saved.' });
+    } catch (err) {
+      if (uploadedResult) {
+        try {
+          await deleteProfileAvatar(localAddress, uploadedResult.key, localSigner);
+        } catch (cleanupErr) {
+          console.error('Failed to cleanup orphaned avatar upload:', cleanupErr);
+        }
+      }
+      if (previewToRevokeOnFailure) {
+        URL.revokeObjectURL(previewToRevokeOnFailure);
+      }
+      if (isWalletSessionCurrent(localAddress, localSigner)) {
+        const message = err instanceof Error ? err.message : 'Failed to upload avatar.';
+        setMsg({ type: 'error', text: message });
+      }
+    } finally {
+      clearAvatarUploadSessionIfMatches(sessionId);
+      event.target.value = '';
+    }
   };
 
   const handleCopyLink = async () => {
@@ -109,7 +287,7 @@ export default function ProfileSettings() {
   };
 
   const handleSave = async () => {
-    if (!address || !signer) return;
+    if (!address || !signer || avatarUploading) return;
     const requestIdCaptured = ++currentRequestIdRef.current;
 
     try {
@@ -119,6 +297,7 @@ export default function ProfileSettings() {
       if (requestIdCaptured === currentRequestIdRef.current && addressRef.current === address && signerRef.current === signer) {
         setForm(toProfilePayload(response.profile));
         setProfileSlug(toProfileSlug(response.profile));
+        setProfileUpdatedAt(response.profile?.updatedAt ?? '');
         setMsg({ type: 'success', text: 'Profile updated.' });
       }
     } catch (err) {
@@ -155,8 +334,8 @@ export default function ProfileSettings() {
         <div className="flex flex-col md:flex-row md:items-start gap-5">
           <div className="w-28">
             <div className="w-24 h-24 rounded-2xl overflow-hidden border border-white/[0.12] bg-dark-900 mb-2">
-              {avatarUrl ? (
-                <ImageWithFallback src={avatarUrl} alt={displayName} className="w-full h-full" />
+              {avatarPreviewSrc ? (
+                <ImageWithFallback src={avatarPreviewSrc} alt={displayName} className="w-full h-full" />
               ) : (
                 <div className="w-full h-full flex items-center justify-center text-2xl font-semibold text-cyan-300">
                   {displayName.charAt(0).toUpperCase()}
@@ -191,21 +370,60 @@ export default function ProfileSettings() {
                   type="text"
                   value={form.displayName}
                   onChange={(e) => updateField('displayName', e.target.value)}
+                  disabled={avatarUploading || saving}
                   maxLength={40}
                   placeholder="Your display name"
                   className="input-field text-sm"
                 />
               </div>
               <div>
-                <label htmlFor="profile-avatarUrl" className="label">Avatar URL</label>
+                <label htmlFor="profile-avatarUrl" className="label">Avatar (R2 Upload)</label>
                 <input
                   id="profile-avatarUrl"
-                  type="url"
+                  type="text"
                   value={form.avatarUrl}
-                  onChange={(e) => updateField('avatarUrl', e.target.value)}
-                  placeholder="https://..."
-                  className="input-field text-sm"
+                  readOnly
+                  placeholder="Upload image to generate URL"
+                  className="input-field text-sm text-white/70"
                 />
+                <input
+                  ref={avatarFileInputRef}
+                  type="file"
+                  accept="image/*"
+                  className="sr-only"
+                  onChange={handleAvatarFileChange}
+                  disabled={avatarUploading || saving}
+                />
+                <button
+                  type="button"
+                  onClick={() => avatarFileInputRef.current?.click()}
+                  disabled={avatarUploading || saving}
+                  aria-label="Upload avatar image"
+                  className={`mt-2 w-full text-left rounded-xl border border-dashed border-white/[0.2] bg-dark-900/50 p-3 transition-colors ${
+                    avatarUploading || saving
+                      ? 'opacity-60 cursor-not-allowed'
+                      : 'hover:border-cyan-400/40 hover:bg-dark-850/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/40'
+                  }`}
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="w-9 h-9 rounded-lg bg-cyan-500/15 border border-cyan-400/30 flex items-center justify-center">
+                      <svg className="w-4 h-4 text-cyan-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                      </svg>
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-xs font-semibold text-white">
+                        {avatarUploading ? 'Uploading avatar...' : 'Click to upload avatar'}
+                      </p>
+                      <p className="text-2xs text-dark-500">Auto-compressed · max 2MB · WebP optimized</p>
+                    </div>
+                  </div>
+                </button>
+                <div className="mt-2 flex flex-wrap items-center gap-2">
+                  {avatarUploadMeta && (
+                    <span className="text-2xs text-dark-500">{Math.max(1, Math.round(avatarUploadMeta.bytes / 1024))}KB · {avatarUploadMeta.type}</span>
+                  )}
+                </div>
               </div>
               <div>
                 <label htmlFor="profile-twitterUrl" className="label">Twitter URL</label>
@@ -214,6 +432,7 @@ export default function ProfileSettings() {
                   type="url"
                   value={form.twitterUrl}
                   onChange={(e) => updateField('twitterUrl', e.target.value)}
+                  disabled={avatarUploading || saving}
                   placeholder="https://x.com/..."
                   className="input-field text-sm"
                 />
@@ -225,6 +444,7 @@ export default function ProfileSettings() {
                   type="url"
                   value={form.discordUrl}
                   onChange={(e) => updateField('discordUrl', e.target.value)}
+                  disabled={avatarUploading || saving}
                   placeholder="https://discord.gg/..."
                   className="input-field text-sm"
                 />
@@ -236,6 +456,7 @@ export default function ProfileSettings() {
                   type="url"
                   value={form.telegramUrl}
                   onChange={(e) => updateField('telegramUrl', e.target.value)}
+                  disabled={avatarUploading || saving}
                   placeholder="https://t.me/..."
                   className="input-field text-sm"
                 />
@@ -265,7 +486,7 @@ export default function ProfileSettings() {
                   View Public Profile
                 </button>
               )}
-              <button onClick={handleSave} disabled={saving || !signer} className="btn-primary text-xs px-3 py-2">
+              <button onClick={handleSave} disabled={saving || avatarUploading || !signer} className="btn-primary text-xs px-3 py-2">
                 {saving ? 'Saving...' : 'Save Changes'}
               </button>
             </div>

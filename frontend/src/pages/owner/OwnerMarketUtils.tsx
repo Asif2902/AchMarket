@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef, type ChangeEvent } from 'react';
 import { ethers } from 'ethers';
 import { useWallet } from '../../context/WalletContext';
 import { FACTORY_ADDRESS, LENS_ADDRESS, STAGE, STAGE_LABELS, STAGE_COLORS } from '../../config/network';
@@ -8,8 +8,10 @@ import ProbabilityBar from '../../components/ProbabilityBar';
 import Countdown from '../../components/Countdown';
 import { PageLoader } from '../../components/LoadingSpinner';
 import EmptyState from '../../components/EmptyState';
-import { formatCompactUSDC, formatDate, formatTimeAgo, parseContractError, resolveImageUri, parseDescription, titleCase } from '../../utils/format';
+import { formatCompactUSDC, formatDate, parseContractError, resolveImageUri, parseDescription, titleCase } from '../../utils/format';
 import { fetchAllMarketVolumes } from '../../services/blockscout';
+import { compressMarketImage } from '../../utils/marketImage';
+import { uploadMarketMedia, deleteMarketMedia } from '../../services/marketMedia';
 
 export interface OwnerMarketData {
   market: string;
@@ -219,22 +221,81 @@ interface ExtraLink {
   url: string;
 }
 
+interface UploadedMediaMeta {
+  key: string;
+  url: string;
+}
+
+function parseUploadedMarketMedia(value: string): UploadedMediaMeta | null {
+  if (!value) return null;
+  const trimmed = value.trim();
+  if (!trimmed.startsWith('uploaded:')) return null;
+  const payload = trimmed.slice('uploaded:'.length);
+  const separatorIndex = payload.indexOf('::');
+  if (separatorIndex <= 0) return null;
+  const key = payload.slice(0, separatorIndex).trim();
+  const url = payload.slice(separatorIndex + 2).trim();
+  if (!key || !url) return null;
+  return { key, url };
+}
+
+function toStoredMarketMediaString(key: string, url: string): string {
+  return `uploaded:${key}::${url}`;
+}
+
+function toReadableMarketMediaValue(value: string): string {
+  const parsed = parseUploadedMarketMedia(value);
+  return parsed?.url ?? value;
+}
+
 export function ResolveModal({ market, onClose, onResolved }: ResolveModalProps) {
-  const { signer } = useWallet();
+  const { signer, address } = useWallet();
   const [selectedOutcome, setSelectedOutcome] = useState<number | null>(null);
   const [imageProof, setImageProof] = useState('');
+  const [imageProofKey, setImageProofKey] = useState('');
+  const [imageProofMeta, setImageProofMeta] = useState<{ bytes: number; type: string } | null>(null);
+  const [imageProofUploading, setImageProofUploading] = useState(false);
   const [mainLink, setMainLink] = useState('');
+  const [mainLinkUploadKey, setMainLinkUploadKey] = useState('');
+  const [mainLinkUploadMeta, setMainLinkUploadMeta] = useState<{ bytes: number; type: string } | null>(null);
+  const [mainLinkUploading, setMainLinkUploading] = useState(false);
   const [extraLinks, setExtraLinks] = useState<ExtraLink[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const imageProofFileInputRef = useRef<HTMLInputElement | null>(null);
+  const mainLinkImageInputRef = useRef<HTMLInputElement | null>(null);
+  const latestMainLinkRef = useRef(mainLink);
+  const keepUploadedProofOnCloseRef = useRef(false);
+  const latestImageProofRef = useRef(imageProof);
+  const addressRef = useRef(address);
+  const signerRef = useRef(signer);
+
+  latestImageProofRef.current = imageProof;
+  latestMainLinkRef.current = mainLink;
+  addressRef.current = address;
+  signerRef.current = signer;
+
+  useEffect(() => {
+    return () => {
+      if (keepUploadedProofOnCloseRef.current) return;
+      const uploaded = parseUploadedMarketMedia(latestImageProofRef.current);
+      if (uploaded?.key && signerRef.current && addressRef.current) {
+        deleteMarketMedia(addressRef.current, uploaded.key, signerRef.current).catch(() => {});
+      }
+      const uploadedMain = parseUploadedMarketMedia(latestMainLinkRef.current);
+      if (uploadedMain?.key && signerRef.current && addressRef.current) {
+        deleteMarketMedia(addressRef.current, uploadedMain.key, signerRef.current).catch(() => {});
+      }
+    };
+  }, []);
 
   const proofUri = [
-    imageProof.trim(),
-    mainLink.trim(),
-    ...extraLinks.filter(l => l.url.trim()).map(l => `${l.type}:${l.url.trim()}`)
+    toReadableMarketMediaValue(imageProof.trim()),
+    toReadableMarketMediaValue(mainLink.trim()),
+    ...extraLinks.filter(l => l.url.trim()).map(l => `${l.type}:${toReadableMarketMediaValue(l.url.trim())}`)
   ].filter(Boolean).join(' || ');
 
-  const canSubmit = selectedOutcome !== null && imageProof.trim().length > 0 && !submitting;
+  const canSubmit = selectedOutcome !== null && imageProof.trim().length > 0 && !submitting && !imageProofUploading && !mainLinkUploading;
 
   const addExtraLink = () => {
     setExtraLinks([...extraLinks, { type: 'link', url: '' }]);
@@ -250,6 +311,98 @@ export function ResolveModal({ market, onClose, onResolved }: ResolveModalProps)
     setExtraLinks(updated);
   };
 
+  const handleImageProofUpload = async (event: ChangeEvent<HTMLInputElement>) => {
+    const selected = event.target.files?.[0];
+    if (!selected) return;
+    if (!address || !signer) {
+      setError('Connect owner wallet to upload proof images.');
+      event.target.value = '';
+      return;
+    }
+
+    let uploadedKeyToCleanup: string | null = null;
+    try {
+      setImageProofUploading(true);
+      setError(null);
+      const compressed = await compressMarketImage(selected);
+      const uploaded = await uploadMarketMedia(compressed.file, address, signer, 'resolution-proof');
+      uploadedKeyToCleanup = uploaded.key;
+
+      const previous = parseUploadedMarketMedia(imageProof);
+      if (previous?.key) {
+        try {
+          await deleteMarketMedia(address, previous.key, signer);
+        } catch (cleanupErr) {
+          console.warn('Failed to cleanup previous proof image:', cleanupErr);
+        }
+      }
+
+      setImageProof(toStoredMarketMediaString(uploaded.key, uploaded.url));
+      setImageProofKey(uploaded.key);
+      setImageProofMeta({ bytes: uploaded.byteLength, type: uploaded.contentType });
+      uploadedKeyToCleanup = null;
+    } catch (err) {
+      if (uploadedKeyToCleanup) {
+        try {
+          await deleteMarketMedia(address, uploadedKeyToCleanup, signer);
+        } catch (cleanupErr) {
+          console.warn('Failed to cleanup uploaded proof image:', cleanupErr);
+        }
+      }
+      const message = err instanceof Error ? err.message : 'Failed to upload proof image.';
+      setError(message);
+    } finally {
+      setImageProofUploading(false);
+      event.target.value = '';
+    }
+  };
+
+  const handleMainLinkImageUpload = async (event: ChangeEvent<HTMLInputElement>) => {
+    const selected = event.target.files?.[0];
+    if (!selected) return;
+    if (!address || !signer) {
+      setError('Connect owner wallet to upload proof images.');
+      event.target.value = '';
+      return;
+    }
+
+    let uploadedKeyToCleanup: string | null = null;
+    try {
+      setMainLinkUploading(true);
+      setError(null);
+      const compressed = await compressMarketImage(selected);
+      const uploaded = await uploadMarketMedia(compressed.file, address, signer, 'resolution-proof');
+      uploadedKeyToCleanup = uploaded.key;
+
+      const previous = parseUploadedMarketMedia(mainLink);
+      if (previous?.key) {
+        try {
+          await deleteMarketMedia(address, previous.key, signer);
+        } catch (cleanupErr) {
+          console.warn('Failed to cleanup previous main proof image:', cleanupErr);
+        }
+      }
+
+      setMainLink(toStoredMarketMediaString(uploaded.key, uploaded.url));
+      setMainLinkUploadKey(uploaded.key);
+      setMainLinkUploadMeta({ bytes: uploaded.byteLength, type: uploaded.contentType });
+      uploadedKeyToCleanup = null;
+    } catch (err) {
+      if (uploadedKeyToCleanup) {
+        try {
+          await deleteMarketMedia(address, uploadedKeyToCleanup, signer);
+        } catch (cleanupErr) {
+          console.warn('Failed to cleanup uploaded main proof image:', cleanupErr);
+        }
+      }
+      const message = err instanceof Error ? err.message : 'Failed to upload main proof image.';
+      setError(message);
+    } finally {
+      setMainLinkUploading(false);
+      event.target.value = '';
+    }
+  };
+
   const handleSubmit = async () => {
     if (!signer || selectedOutcome === null || !proofUri) return;
     setSubmitting(true);
@@ -258,12 +411,43 @@ export function ResolveModal({ market, onClose, onResolved }: ResolveModalProps)
       const marketContract = new ethers.Contract(market.market, MARKET_ABI, signer);
       const tx = await marketContract.resolve(selectedOutcome, proofUri);
       await tx.wait();
+      keepUploadedProofOnCloseRef.current = true;
       onResolved();
     } catch (err) {
       setError(parseContractError(err));
     } finally {
       setSubmitting(false);
     }
+  };
+
+  const imageProofUrl = toReadableMarketMediaValue(imageProof);
+
+  const removeUploadedImageProof = async () => {
+    const uploaded = parseUploadedMarketMedia(imageProof);
+    if (uploaded?.key && address && signer) {
+      try {
+        await deleteMarketMedia(address, uploaded.key, signer);
+      } catch (cleanupErr) {
+        console.warn('Failed to cleanup resolution proof image:', cleanupErr);
+      }
+    }
+    setImageProof('');
+    setImageProofKey('');
+    setImageProofMeta(null);
+  };
+
+  const removeUploadedMainLinkImage = async () => {
+    const uploaded = parseUploadedMarketMedia(mainLink);
+    if (uploaded?.key && address && signer) {
+      try {
+        await deleteMarketMedia(address, uploaded.key, signer);
+      } catch (cleanupErr) {
+        console.warn('Failed to cleanup main proof image:', cleanupErr);
+      }
+    }
+    setMainLink('');
+    setMainLinkUploadKey('');
+    setMainLinkUploadMeta(null);
   };
 
   return (
@@ -324,12 +508,68 @@ export function ResolveModal({ market, onClose, onResolved }: ResolveModalProps)
         <label className="label">Resolution Proof *</label>
         <div className="space-y-3 mb-4">
           {/* Image Proof - Required */}
+          <input
+            ref={imageProofFileInputRef}
+            type="file"
+            accept="image/*"
+            className="sr-only"
+            onChange={handleImageProofUpload}
+            disabled={imageProofUploading || submitting}
+          />
+          <button
+            type="button"
+            onClick={() => imageProofFileInputRef.current?.click()}
+            disabled={imageProofUploading || submitting}
+            className={`w-full text-left rounded-xl border border-dashed border-white/[0.2] bg-dark-900/50 p-3 transition-colors ${
+              imageProofUploading || submitting
+                ? 'opacity-60 cursor-not-allowed'
+                : 'hover:border-emerald-400/40 hover:bg-dark-850/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400/40'
+            }`}
+          >
+            <div className="flex items-center gap-3">
+              <div className="w-9 h-9 rounded-lg bg-emerald-500/15 border border-emerald-400/30 flex items-center justify-center">
+                <svg className="w-4 h-4 text-emerald-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                </svg>
+              </div>
+              <div>
+                <p className="text-xs font-semibold text-white">
+                  {imageProofUploading ? 'Uploading proof image...' : 'Upload proof image to R2'}
+                </p>
+                <p className="text-2xs text-dark-500">Auto-compressed · max 2MB · secure signed upload</p>
+              </div>
+            </div>
+          </button>
+
+          {imageProofMeta && (
+            <div className="text-2xs text-dark-500 flex flex-wrap gap-2">
+              <span>{Math.max(1, Math.round(imageProofMeta.bytes / 1024))}KB · {imageProofMeta.type}</span>
+              {imageProofKey && <span>key:{imageProofKey.slice(-20)}</span>}
+              <button
+                type="button"
+                onClick={removeUploadedImageProof}
+                disabled={imageProofUploading || submitting}
+                className="text-red-300 hover:text-red-200"
+              >
+                Remove uploaded proof
+              </button>
+            </div>
+          )}
+
           <div>
             <span className="text-xs text-dark-400 mb-1.5 block">Image Proof <span className="text-red-400">*</span></span>
             <input
               type="text"
-              value={imageProof}
-              onChange={e => setImageProof(e.target.value)}
+              value={imageProofUrl}
+              onChange={e => {
+                const previous = parseUploadedMarketMedia(imageProof);
+                if (previous?.key && address && signer) {
+                  deleteMarketMedia(address, previous.key, signer).catch(() => {});
+                }
+                setImageProof(e.target.value);
+                setImageProofKey('');
+                setImageProofMeta(null);
+              }}
               placeholder="https://... (screenshot, image URL)"
               className="input-field"
             />
@@ -339,9 +579,56 @@ export function ResolveModal({ market, onClose, onResolved }: ResolveModalProps)
           <div>
             <span className="text-xs text-dark-400 mb-1.5 block">Main Proof Link (optional)</span>
             <input
+              ref={mainLinkImageInputRef}
+              type="file"
+              accept="image/*"
+              className="sr-only"
+              onChange={handleMainLinkImageUpload}
+              disabled={mainLinkUploading || imageProofUploading || submitting}
+            />
+            <button
+              type="button"
+              onClick={() => mainLinkImageInputRef.current?.click()}
+              disabled={mainLinkUploading || imageProofUploading || submitting}
+              className={`w-full text-left rounded-xl border border-dashed border-white/[0.2] bg-dark-900/50 p-3 transition-colors mb-2 ${
+                mainLinkUploading || imageProofUploading || submitting
+                  ? 'opacity-60 cursor-not-allowed'
+                  : 'hover:border-primary-400/40 hover:bg-dark-850/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400/40'
+              }`}
+            >
+              <p className="text-xs font-semibold text-white">
+                {mainLinkUploading ? 'Uploading main proof image...' : 'Upload image as main proof link'}
+              </p>
+              <p className="text-2xs text-dark-500">Optional visual source stored on R2</p>
+            </button>
+
+            {mainLinkUploadMeta && (
+              <div className="text-2xs text-dark-500 flex flex-wrap gap-2 mb-2">
+                <span>{Math.max(1, Math.round(mainLinkUploadMeta.bytes / 1024))}KB · {mainLinkUploadMeta.type}</span>
+                {mainLinkUploadKey && <span>key:{mainLinkUploadKey.slice(-20)}</span>}
+                <button
+                  type="button"
+                  onClick={removeUploadedMainLinkImage}
+                  disabled={mainLinkUploading || submitting}
+                  className="text-red-300 hover:text-red-200"
+                >
+                  Remove uploaded main proof
+                </button>
+              </div>
+            )}
+
+            <input
               type="text"
-              value={mainLink}
-              onChange={e => setMainLink(e.target.value)}
+              value={toReadableMarketMediaValue(mainLink)}
+              onChange={e => {
+                const previous = parseUploadedMarketMedia(mainLink);
+                if (previous?.key && address && signer) {
+                  deleteMarketMedia(address, previous.key, signer).catch(() => {});
+                }
+                setMainLink(e.target.value);
+                setMainLinkUploadKey('');
+                setMainLinkUploadMeta(null);
+              }}
               placeholder="https://... (tweet, news article, website)"
               className="input-field"
             />
@@ -406,15 +693,17 @@ export function ResolveModal({ market, onClose, onResolved }: ResolveModalProps)
                     href = displayText;
                   }
                 }
+                const readableHref = toReadableMarketMediaValue(href);
+                const readableDisplay = toReadableMarketMediaValue(displayText);
                 return (
                   <a 
                     key={i} 
-                    href={href} 
+                    href={readableHref} 
                     target="_blank" 
                     rel="noopener noreferrer" 
                     className="text-xs text-primary-300 hover:text-primary-200 underline break-all block"
                   >
-                    {i + 1}. {displayText}
+                    {i + 1}. {readableDisplay}
                   </a>
                 );
               })}
@@ -771,13 +1060,82 @@ interface CancelModalProps {
 }
 
 export function CancelModal({ market, onClose, onCancelled }: CancelModalProps) {
-  const { signer } = useWallet();
+  const { signer, address } = useWallet();
   const [reason, setReason] = useState('');
   const [proofUri, setProofUri] = useState('');
+  const [proofImageKey, setProofImageKey] = useState('');
+  const [proofImageMeta, setProofImageMeta] = useState<{ bytes: number; type: string } | null>(null);
+  const [proofImageUploading, setProofImageUploading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const proofImageFileInputRef = useRef<HTMLInputElement | null>(null);
+  const keepUploadedProofOnCloseRef = useRef(false);
+  const latestProofUriRef = useRef(proofUri);
+  const addressRef = useRef(address);
+  const signerRef = useRef(signer);
 
-  const canSubmit = reason.trim().length > 0 && proofUri.trim().length > 0 && !submitting;
+  latestProofUriRef.current = proofUri;
+  addressRef.current = address;
+  signerRef.current = signer;
+
+  const canSubmit = reason.trim().length > 0 && proofUri.trim().length > 0 && !submitting && !proofImageUploading;
+  const proofPreviewUrl = toReadableMarketMediaValue(proofUri.trim());
+
+  useEffect(() => {
+    return () => {
+      if (keepUploadedProofOnCloseRef.current) return;
+      const uploaded = parseUploadedMarketMedia(latestProofUriRef.current);
+      if (uploaded?.key && signerRef.current && addressRef.current) {
+        deleteMarketMedia(addressRef.current, uploaded.key, signerRef.current).catch(() => {});
+      }
+    };
+  }, []);
+
+  const handleProofImageUpload = async (event: ChangeEvent<HTMLInputElement>) => {
+    const selected = event.target.files?.[0];
+    if (!selected) return;
+    if (!address || !signer) {
+      setError('Connect owner wallet to upload cancellation proof image.');
+      event.target.value = '';
+      return;
+    }
+
+    let uploadedKeyToCleanup: string | null = null;
+    try {
+      setProofImageUploading(true);
+      setError(null);
+      const compressed = await compressMarketImage(selected);
+      const uploaded = await uploadMarketMedia(compressed.file, address, signer, 'cancellation-proof');
+      uploadedKeyToCleanup = uploaded.key;
+
+      const previous = parseUploadedMarketMedia(proofUri);
+      if (previous?.key) {
+        try {
+          await deleteMarketMedia(address, previous.key, signer);
+        } catch (cleanupErr) {
+          console.warn('Failed to cleanup previous cancellation proof image:', cleanupErr);
+        }
+      }
+
+      setProofUri(toStoredMarketMediaString(uploaded.key, uploaded.url));
+      setProofImageKey(uploaded.key);
+      setProofImageMeta({ bytes: uploaded.byteLength, type: uploaded.contentType });
+      uploadedKeyToCleanup = null;
+    } catch (err) {
+      if (uploadedKeyToCleanup) {
+        try {
+          await deleteMarketMedia(address, uploadedKeyToCleanup, signer);
+        } catch (cleanupErr) {
+          console.warn('Failed to cleanup uploaded cancellation proof image:', cleanupErr);
+        }
+      }
+      const message = err instanceof Error ? err.message : 'Failed to upload cancellation proof image.';
+      setError(message);
+    } finally {
+      setProofImageUploading(false);
+      event.target.value = '';
+    }
+  };
 
   const handleSubmit = async () => {
     if (!signer || !canSubmit) return;
@@ -785,14 +1143,29 @@ export function CancelModal({ market, onClose, onCancelled }: CancelModalProps) 
     setError(null);
     try {
       const marketContract = new ethers.Contract(market.market, MARKET_ABI, signer);
-      const tx = await marketContract.cancel(reason.trim(), proofUri.trim());
+      const tx = await marketContract.cancel(reason.trim(), proofPreviewUrl);
       await tx.wait();
+      keepUploadedProofOnCloseRef.current = true;
       onCancelled();
     } catch (err) {
       setError(parseContractError(err));
     } finally {
       setSubmitting(false);
     }
+  };
+
+  const removeUploadedCancellationProof = async () => {
+    const uploaded = parseUploadedMarketMedia(proofUri);
+    if (uploaded?.key && address && signer) {
+      try {
+        await deleteMarketMedia(address, uploaded.key, signer);
+      } catch (cleanupErr) {
+        console.warn('Failed to cleanup cancellation proof image:', cleanupErr);
+      }
+    }
+    setProofUri('');
+    setProofImageKey('');
+    setProofImageMeta(null);
   };
 
   return (
@@ -844,27 +1217,83 @@ export function CancelModal({ market, onClose, onCancelled }: CancelModalProps) 
 
         <label className="label">Proof / Evidence Image <span className="text-red-400">*</span></label>
         <input
+          ref={proofImageFileInputRef}
+          type="file"
+          accept="image/*"
+          className="sr-only"
+          onChange={handleProofImageUpload}
+          disabled={proofImageUploading || submitting}
+        />
+        <button
+          type="button"
+          onClick={() => proofImageFileInputRef.current?.click()}
+          disabled={proofImageUploading || submitting}
+          className={`w-full text-left rounded-xl border border-dashed border-white/[0.2] bg-dark-900/50 p-3 transition-colors mb-3 ${
+            proofImageUploading || submitting
+              ? 'opacity-60 cursor-not-allowed'
+              : 'hover:border-red-400/40 hover:bg-dark-850/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-400/40'
+          }`}
+        >
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-lg bg-red-500/15 border border-red-400/30 flex items-center justify-center">
+              <svg className="w-4 h-4 text-red-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+              </svg>
+            </div>
+            <div>
+              <p className="text-xs font-semibold text-white">
+                {proofImageUploading ? 'Uploading cancellation proof...' : 'Upload cancellation proof image to R2'}
+              </p>
+              <p className="text-2xs text-dark-500">Secure signed upload · auto-compressed · max 2MB</p>
+            </div>
+          </div>
+        </button>
+
+        {proofImageMeta && (
+          <div className="text-2xs text-dark-500 flex flex-wrap gap-2 mb-2">
+            <span>{Math.max(1, Math.round(proofImageMeta.bytes / 1024))}KB · {proofImageMeta.type}</span>
+            {proofImageKey && <span>key:{proofImageKey.slice(-20)}</span>}
+            <button
+              type="button"
+              onClick={removeUploadedCancellationProof}
+              disabled={proofImageUploading || submitting}
+              className="text-red-300 hover:text-red-200"
+            >
+              Remove uploaded proof
+            </button>
+          </div>
+        )}
+
+        <input
           type="text"
-          value={proofUri}
-          onChange={e => setProofUri(e.target.value)}
+          value={proofPreviewUrl}
+          onChange={e => {
+            const previous = parseUploadedMarketMedia(proofUri);
+            if (previous?.key && address && signer) {
+              deleteMarketMedia(address, previous.key, signer).catch(() => {});
+            }
+            setProofUri(e.target.value);
+            setProofImageKey('');
+            setProofImageMeta(null);
+          }}
           placeholder="https://... or ipfs://... (screenshot, evidence image)"
           className="input-field mb-1"
         />
         <p className="text-2xs text-dark-500 mb-4">Link to a screenshot or image that supports the cancellation reason</p>
 
         {/* Image preview */}
-        {proofUri.trim() && (
+        {proofPreviewUrl && (
           <div className="mb-5 rounded-xl overflow-hidden border border-white/[0.08]">
             <img
-              src={resolveImageUri(proofUri.trim())}
+              src={resolveImageUri(proofPreviewUrl)}
               alt="Cancel proof"
               className="w-full max-h-48 object-cover"
               onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
             />
             <div className="p-2.5 bg-dark-900/60 flex items-center gap-2">
               <svg className="w-3.5 h-3.5 text-primary-400 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" /></svg>
-              <a href={resolveImageUri(proofUri.trim())} target="_blank" rel="noopener noreferrer" className="text-xs text-primary-400 hover:text-primary-300 underline break-all truncate">
-                {proofUri}
+              <a href={resolveImageUri(proofPreviewUrl)} target="_blank" rel="noopener noreferrer" className="text-xs text-primary-400 hover:text-primary-300 underline break-all truncate">
+                {proofPreviewUrl}
               </a>
             </div>
           </div>

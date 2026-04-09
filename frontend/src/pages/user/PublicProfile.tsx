@@ -8,7 +8,7 @@ import { PageLoader } from '../../components/LoadingSpinner';
 import EmptyState from '../../components/EmptyState';
 import ImageWithFallback from '../../components/ImageWithFallback';
 import UsdcIcon from '../../components/UsdcIcon';
-import { formatCompactUSDC, makeMarketSlug } from '../../utils/format';
+import { formatCompactUSDC, makeMarketSlug, withImageVersion } from '../../utils/format';
 import { fetchProfileBySlug } from '../../services/profile';
 import type { PublicProfile as PublicProfileType, PortfolioStats } from '../../types/profile';
 
@@ -178,7 +178,7 @@ export default function PublicProfile() {
 
   const safeAddress = resolvedAddress ?? '';
   const displayName = data.profile?.displayName?.trim() || `${safeAddress.slice(0, 6)}...${safeAddress.slice(-4)}`;
-  const avatarUrl = data.profile?.avatarUrl?.trim() || '';
+  const avatarUrl = withImageVersion(data.profile?.avatarUrl?.trim() || '', data.profile?.updatedAt ?? '');
 
   const socials = [
     { label: 'Twitter', value: data.profile?.twitterUrl || '' },

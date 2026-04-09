@@ -23,3 +23,10 @@ export interface PublicProfileResponse {
   profile: PublicProfile | null;
   stats: PortfolioStats;
 }
+
+export interface ProfileAvatarUploadResponse {
+  url: string;
+  key: string;
+  byteLength: number;
+  contentType: string;
+}

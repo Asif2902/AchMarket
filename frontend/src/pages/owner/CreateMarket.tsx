@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState, type ChangeEvent } from 'react';
 import { ethers } from 'ethers';
 import { useWallet } from '../../context/WalletContext';
 import { FACTORY_ADDRESS } from '../../config/network';
@@ -7,6 +7,8 @@ import ImageWithFallback from '../../components/ImageWithFallback';
 import ProbabilityBar from '../../components/ProbabilityBar';
 import { parseContractError, makeMarketSlug } from '../../utils/format';
 import { useDateTimePicker } from '../../hooks/useDateTimePicker';
+import { compressMarketImage } from '../../utils/marketImage';
+import { uploadMarketMedia, deleteMarketMedia } from '../../services/marketMedia';
 
 const CATEGORIES = ['Crypto', 'Sports', 'Politics', 'Entertainment', 'Science', 'Other'];
 const DURATION_PRESETS = [
@@ -42,7 +44,7 @@ function SectionHeader({ icon, title, subtitle }: { icon: React.ReactNode; title
 }
 
 export default function CreateMarket() {
-  const { signer } = useWallet();
+  const { signer, address } = useWallet();
 
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
@@ -50,6 +52,10 @@ export default function CreateMarket() {
   const [category, setCategory] = useState('Crypto');
   const [customCategory, setCustomCategory] = useState('');
   const [imageUri, setImageUri] = useState('');
+  const [imageUploading, setImageUploading] = useState(false);
+  const [imageUploadMeta, setImageUploadMeta] = useState<{ bytes: number; type: string } | null>(null);
+  const [imageUploadKey, setImageUploadKey] = useState('');
+  const [localImagePreviewUrl, setLocalImagePreviewUrl] = useState<string | null>(null);
   const [outcomes, setOutcomes] = useState(['Yes', 'No']);
   const [durationPreset, setDurationPreset] = useState(604800);
   const [customDays, setCustomDays] = useState('');
@@ -61,6 +67,34 @@ export default function CreateMarket() {
 
   const [submitting, setSubmitting] = useState(false);
   const [txResult, setTxResult] = useState<{ type: 'success' | 'error'; text: string; market?: string; marketId?: string } | null>(null);
+  const imageFileInputRef = useRef<HTMLInputElement | null>(null);
+  const latestImagePreviewRef = useRef<string | null>(null);
+  const latestImageUploadKeyRef = useRef('');
+  const addressRef = useRef(address);
+  const signerRef = useRef(signer);
+  const keepUploadedImageOnCloseRef = useRef(false);
+
+  latestImageUploadKeyRef.current = imageUploadKey;
+  addressRef.current = address;
+  signerRef.current = signer;
+
+  useEffect(() => {
+    latestImagePreviewRef.current = localImagePreviewUrl;
+  }, [localImagePreviewUrl]);
+
+  useEffect(() => {
+    return () => {
+      if (latestImagePreviewRef.current) {
+        URL.revokeObjectURL(latestImagePreviewRef.current);
+      }
+      if (!keepUploadedImageOnCloseRef.current) {
+        const key = latestImageUploadKeyRef.current;
+        if (key && addressRef.current && signerRef.current) {
+          deleteMarketMedia(addressRef.current, key, signerRef.current).catch(() => {});
+        }
+      }
+    };
+  }, []);
 
   const actualCategory = category === 'Other' ? customCategory : category;
   const durationFromPreset = durationPreset > 0
@@ -85,8 +119,87 @@ export default function CreateMarket() {
     setOutcomes(updated);
   };
 
+  const handleImageFileChange = async (event: ChangeEvent<HTMLInputElement>) => {
+    const selected = event.target.files?.[0];
+    if (!selected) return;
+    if (!address || !signer) {
+      setTxResult({ type: 'error', text: 'Connect owner wallet to upload market images.' });
+      event.target.value = '';
+      return;
+    }
+
+    let previewToRevokeOnFailure: string | null = null;
+    let uploadedKeyToCleanup: string | null = null;
+    try {
+      keepUploadedImageOnCloseRef.current = false;
+      setImageUploading(true);
+      setTxResult(null);
+      const compressed = await compressMarketImage(selected);
+      previewToRevokeOnFailure = compressed.previewUrl;
+
+      const previousKey = imageUploadKey;
+      const uploaded = await uploadMarketMedia(compressed.file, address, signer, 'market-image');
+      uploadedKeyToCleanup = uploaded.key;
+
+      if (previousKey && previousKey !== uploaded.key) {
+        try {
+          await deleteMarketMedia(address, previousKey, signer);
+        } catch (cleanupErr) {
+          console.warn('Failed to cleanup previous market image:', cleanupErr);
+        }
+      }
+
+      setImageUri(uploaded.url);
+      setImageUploadKey(uploaded.key);
+      setImageUploadMeta({ bytes: uploaded.byteLength, type: uploaded.contentType });
+      setLocalImagePreviewUrl((prev) => {
+        if (prev) URL.revokeObjectURL(prev);
+        return compressed.previewUrl;
+      });
+      previewToRevokeOnFailure = null;
+      uploadedKeyToCleanup = null;
+      setTxResult({ type: 'success', text: 'Header image uploaded to R2.' });
+    } catch (err) {
+      if (uploadedKeyToCleanup) {
+        try {
+          await deleteMarketMedia(address, uploadedKeyToCleanup, signer);
+        } catch (cleanupErr) {
+          console.error('Failed to cleanup failed market image upload:', cleanupErr);
+        }
+      }
+      if (previewToRevokeOnFailure) {
+        URL.revokeObjectURL(previewToRevokeOnFailure);
+      }
+      const message = err instanceof Error ? err.message : 'Failed to upload image.';
+      setTxResult({ type: 'error', text: message });
+    } finally {
+      setImageUploading(false);
+      event.target.value = '';
+    }
+  };
+
+  const handleClearImage = async () => {
+    const currentKey = imageUploadKey;
+    setImageUri('');
+    setImageUploadKey('');
+    setImageUploadMeta(null);
+    setLocalImagePreviewUrl((prev) => {
+      if (prev) URL.revokeObjectURL(prev);
+      return null;
+    });
+
+    if (currentKey && address && signer) {
+      try {
+        await deleteMarketMedia(address, currentKey, signer);
+      } catch (cleanupErr) {
+        console.warn('Failed to cleanup removed market image:', cleanupErr);
+      }
+    }
+  };
+
   const uniformProb = BigInt(Math.floor(1e18 / outcomes.length));
   const previewProbs = outcomes.map(() => uniformProb);
+  const previewImageSrc = localImagePreviewUrl || imageUri;
 
   const isValid =
     title.trim().length > 0 &&
@@ -95,7 +208,8 @@ export default function CreateMarket() {
     outcomes.length >= 2 &&
     outcomes.every(o => o.trim().length > 0) &&
     durationSeconds >= 3600 &&
-    parseFloat(bValue) >= 1000;
+    parseFloat(bValue) >= 1000 &&
+    !imageUploading;
 
   // Count completed fields for progress
   const completedSteps = [
@@ -108,7 +222,7 @@ export default function CreateMarket() {
   ].filter(Boolean).length;
 
   const handleSubmit = async () => {
-    if (!signer || !isValid) return;
+    if (!signer || !isValid || imageUploading) return;
     setSubmitting(true);
     setTxResult(null);
     try {
@@ -127,6 +241,7 @@ export default function CreateMarket() {
         bWad,
         durationSeconds,
       );
+      keepUploadedImageOnCloseRef.current = true;
 
       setTxResult({ type: 'success', text: 'Transaction submitted. Waiting for confirmation...' });
       const receipt = await tx.wait();
@@ -155,8 +270,15 @@ export default function CreateMarket() {
       setDescription('');
       setSubcategory('');
       setImageUri('');
+      setImageUploadKey('');
+      setImageUploadMeta(null);
+      setLocalImagePreviewUrl((prev) => {
+        if (prev) URL.revokeObjectURL(prev);
+        return null;
+      });
       setOutcomes(['Yes', 'No']);
     } catch (err) {
+      keepUploadedImageOnCloseRef.current = false;
       setTxResult({ type: 'error', text: parseContractError(err) });
     } finally {
       setSubmitting(false);
@@ -287,18 +409,93 @@ export default function CreateMarket() {
               />
             )}
 
-            {/* Image URI */}
-            <label className="label">Header Image URL <span className="text-dark-500 font-normal">(optional)</span></label>
+            {/* Image upload */}
+            <label className="label">Header Image <span className="text-dark-500 font-normal">(optional)</span></label>
+            <input
+              ref={imageFileInputRef}
+              type="file"
+              accept="image/*"
+              className="sr-only"
+              onChange={handleImageFileChange}
+              disabled={imageUploading || submitting}
+            />
+            <button
+              type="button"
+              onClick={() => imageFileInputRef.current?.click()}
+              disabled={imageUploading || submitting}
+              aria-label="Upload market header image"
+              className={`w-full text-left rounded-2xl border border-dashed border-white/[0.2] bg-dark-900/60 p-4 transition-colors ${
+                imageUploading || submitting
+                  ? 'opacity-60 cursor-not-allowed'
+                  : 'hover:border-primary-400/40 hover:bg-dark-850/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400/40'
+              }`}
+            >
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-primary-500/15 border border-primary-400/30 flex items-center justify-center">
+                  <svg className="w-5 h-5 text-primary-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                  </svg>
+                </div>
+                <div className="min-w-0">
+                  <p className="text-sm font-semibold text-white">
+                    {imageUploading ? 'Uploading market image...' : 'Upload market header image'}
+                  </p>
+                  <p className="text-2xs text-dark-500">Stored on R2 · auto-compressed · max 2MB</p>
+                </div>
+              </div>
+            </button>
+
+            <div className="mt-2 flex flex-wrap items-center gap-2">
+              {imageUploadMeta && (
+                <span className="text-2xs text-dark-500">{Math.max(1, Math.round(imageUploadMeta.bytes / 1024))}KB · {imageUploadMeta.type}</span>
+              )}
+              {imageUploadKey && (
+                <span className="text-2xs text-dark-500">key:{imageUploadKey.slice(-20)}</span>
+              )}
+            </div>
+
+            <p className="text-2xs text-dark-500 mt-2">
+              Tip: upload gives the most reliable rendering. You can still paste a URL below if needed.
+            </p>
             <input
               type="text"
               value={imageUri}
-              onChange={e => setImageUri(e.target.value)}
-              placeholder="https://... or ipfs://..."
-              className="input-field"
+              onChange={(e) => {
+                const next = e.target.value;
+                if (next !== imageUri && imageUploadKey && address && signer) {
+                  deleteMarketMedia(address, imageUploadKey, signer).catch(() => {});
+                  setImageUploadKey('');
+                  setImageUploadMeta(null);
+                }
+                setImageUri(next);
+                if (next !== imageUri) {
+                  setLocalImagePreviewUrl((prev) => {
+                    if (prev) URL.revokeObjectURL(prev);
+                    return null;
+                  });
+                }
+              }}
+              placeholder="Optional fallback: https://..."
+              className="input-field mt-2"
             />
+
             {imageUri && (
-              <div className="mt-3 rounded-xl overflow-hidden border border-white/[0.08]">
-                <ImageWithFallback src={imageUri} alt="Preview" className="h-40 w-full" />
+              <div className="mt-3 rounded-xl overflow-hidden border border-white/[0.08] bg-dark-900/40">
+                <div className="px-3 py-2 border-b border-white/[0.08] flex items-center justify-between gap-2">
+                  <span className="text-2xs text-emerald-400 font-medium">R2 image ready</span>
+                  <button
+                    type="button"
+                    onClick={handleClearImage}
+                    disabled={imageUploading || submitting}
+                    className="text-2xs text-red-300 hover:text-red-200"
+                  >
+                    Remove image
+                  </button>
+                </div>
+                <ImageWithFallback src={previewImageSrc} alt="Preview" className="h-48 w-full" />
+                <div className="px-3 py-2 text-2xs text-dark-500 border-t border-white/[0.08]">
+                  {imageUri}
+                </div>
               </div>
             )}
           </div>
@@ -512,6 +709,11 @@ export default function CreateMarket() {
                   <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
                   Creating Market...
                 </span>
+              ) : imageUploading ? (
+                <span className="flex items-center justify-center gap-2">
+                  <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                  Waiting for image upload...
+                </span>
               ) : (
                 <span className="flex items-center justify-center gap-2">
                   <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -522,7 +724,7 @@ export default function CreateMarket() {
               )}
             </button>
             {!isValid && (
-              <p className="text-xs text-dark-500 text-center mt-2">Complete all required fields to enable submission</p>
+              <p className="text-xs text-dark-500 text-center mt-2">Complete all required fields and finish image upload to enable submission</p>
             )}
           </div>
 
@@ -573,7 +775,7 @@ export default function CreateMarket() {
             <div className="card overflow-hidden">
               <div className="relative">
                 <ImageWithFallback
-                  src={imageUri}
+                  src={previewImageSrc}
                   alt={title || 'Market Preview'}
                   className="h-36 w-full"
                 />

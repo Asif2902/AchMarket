@@ -18,6 +18,9 @@ import {
 } from '../../utils/format';
 import { showToast } from '../../components/Toast';
 import { NETWORK } from '../../config/network';
+import ChatThread from '../../components/chat/ChatThread';
+import { fetchProfileByAddress } from '../../services/profile';
+import { fetchLinkPreview, type LinkPreviewData } from '../../services/linkPreview';
 
 const DEFAULT_META_TITLE = 'AchMarket - Prediction Markets';
 const DEFAULT_META_DESCRIPTION = 'Trade prediction markets on ARC Testnet with USDC.';
@@ -113,10 +116,14 @@ export default function MarketDetail() {
   const txMessageTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [poolBalance, setPoolBalance] = useState<bigint>(0n);
   const [showMainFrame, setShowMainFrame] = useState(false);
+  const [mainLinkPreview, setMainLinkPreview] = useState<LinkPreviewData | null>(null);
+  const [mainLinkPreviewLoading, setMainLinkPreviewLoading] = useState(false);
+  const [mainLinkPreviewError, setMainLinkPreviewError] = useState<string | null>(null);
   const [hoveredImage, setHoveredImage] = useState<number | null>(null);
   const [aboutExpanded, setAboutExpanded] = useState(false);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
   const [userBalance, setUserBalance] = useState<bigint | null>(null);
+  const [hasProfile, setHasProfile] = useState(false);
   const hasLoadedOnce = useRef(false);
   const requestSeqRef = useRef(0);
   const prevMarketIdRef = useRef<number | null>(null);
@@ -437,7 +444,7 @@ export default function MarketDetail() {
   useEffect(() => { fetchAll(); }, [fetchAll]);
 
   useEffect(() => {
-    if (!userAddress || !isConnected) { setUserBalance(null); return; }
+    if (!userAddress || !isConnected) { setUserBalance(null); setHasProfile(false); return; }
     let cancelled = false;
     const fetchBalance = async () => {
       try {
@@ -445,7 +452,16 @@ export default function MarketDetail() {
         if (!cancelled) setUserBalance(bal);
       } catch { /* ignore */ }
     };
+    const checkProfile = async () => {
+      try {
+        const resp = await fetchProfileByAddress(userAddress);
+        if (!cancelled) setHasProfile(!!resp.profile);
+      } catch {
+        if (!cancelled) setHasProfile(false);
+      }
+    };
     fetchBalance();
+    checkProfile();
     const interval = setInterval(fetchBalance, 30000);
     return () => { cancelled = true; clearInterval(interval); };
   }, [userAddress, isConnected, readProvider, refreshTrigger]);
@@ -455,6 +471,41 @@ export default function MarketDetail() {
       fetchProbHistory(marketAddress, detail);
     }
   }, [detail?.market, refreshTrigger]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const proofInfo = parseProofLinks(detail?.proofUri ?? '');
+
+  useEffect(() => {
+    const isResolvedStage = detail?.stage === STAGE.Resolved;
+    const link = proofInfo.mainLink?.trim();
+    if (!isResolvedStage || !link) {
+      setMainLinkPreview(null);
+      setMainLinkPreviewError(null);
+      setMainLinkPreviewLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+    setMainLinkPreviewLoading(true);
+    setMainLinkPreviewError(null);
+
+    fetchLinkPreview(link)
+      .then((preview) => {
+        if (cancelled) return;
+        setMainLinkPreview(preview);
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        setMainLinkPreview(null);
+        setMainLinkPreviewError(err instanceof Error ? err.message : 'Preview unavailable.');
+      })
+      .finally(() => {
+        if (!cancelled) setMainLinkPreviewLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [detail?.stage, proofInfo.mainLink]);
 
   useEffect(() => {
     if (!detail || !slug) return;
@@ -772,7 +823,7 @@ export default function MarketDetail() {
           <div className="space-y-4 md:space-y-5">
             {/* Quick stats */}
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-              <MiniStat label="Volume" value={`${formatCompactUSDC(accurateVolume ?? detail.totalVolumeWei)}`} suffix="USDC" icon={<UsdcIcon size={14} />} />
+              <MiniStat label="Volume" value={`${formatCompactUSDC(detail.totalVolumeWei)}`} suffix="USDC" icon={<UsdcIcon size={14} />} />
               <MiniStat label="Traders" value={detail.participants.toString()} />
               <MiniStat label="Created" value={formatDate(detail.createdAt)} small />
               <MiniStat label={isActive ? 'Ends' : 'Ended'} value={formatDate(detail.marketDeadline)} small />
@@ -840,7 +891,7 @@ export default function MarketDetail() {
 
             {/* Resolution proof */}
             {isResolved && detail.proofUri && (() => {
-              const proof = parseProofLinks(detail.proofUri);
+              const proof = proofInfo;
               return (
                 <div className="card border-emerald-500/20 bg-emerald-500/5 p-4">
                   <div className="flex items-start gap-3">
@@ -960,15 +1011,45 @@ export default function MarketDetail() {
                               Open {mainLinkStr.length > 40 ? mainLinkStr.slice(0, 40) + '...' : mainLinkStr}
                             </a>
                           ) : showMainFrame ? (
-                            <iframe
-                              src={resolveImageUri(mainLinkStr)}
-                              className="w-full h-64 rounded-lg border border-white/[0.06] bg-dark-900"
-                              title="Main proof"
-                              sandbox="allow-same-origin allow-forms"
-                            />
-                          ) : (
-                            <a
-                              href={resolveImageUri(mainLinkStr)}
+                             mainLinkPreviewLoading ? (
+                               <div className="w-full h-64 rounded-lg border border-white/[0.06] bg-dark-900/60 flex items-center justify-center">
+                                 <p className="text-xs text-dark-400">Checking iframe support...</p>
+                               </div>
+                             ) : mainLinkPreview && !mainLinkPreview.embeddable ? (
+                               <div className="w-full rounded-lg border border-amber-500/20 bg-amber-500/5 p-3 space-y-2">
+                                 <p className="text-xs font-semibold text-amber-300">This site blocks iframe embedding.</p>
+                                 <p className="text-2xs text-amber-200/80">
+                                   {mainLinkPreview.embedBlockReason || 'The target site sends security headers that prevent preview in an iframe.'}
+                                 </p>
+                                 <a
+                                   href={resolveImageUri(mainLinkStr)}
+                                   target="_blank"
+                                   rel="noopener noreferrer"
+                                   className="inline-flex items-center gap-1.5 text-xs text-amber-200 hover:text-amber-100"
+                                 >
+                                   <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                     <path strokeLinecap="round" strokeLinejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                                   </svg>
+                                   Open in new tab
+                                 </a>
+                               </div>
+                             ) : (
+                               <div className="space-y-2">
+                                 <iframe
+                                   src={resolveImageUri(mainLinkStr)}
+                                   className="w-full h-64 rounded-lg border border-white/[0.06] bg-dark-900"
+                                   title="Main proof"
+                                   sandbox="allow-same-origin allow-scripts allow-popups allow-popups-to-escape-sandbox allow-forms allow-pointer-lock allow-top-navigation-by-user-activation allow-downloads"
+                                   referrerPolicy="no-referrer-when-downgrade"
+                                 />
+                                 <p className="text-2xs text-dark-500">
+                                   If frame stays blank, that site blocks embedding. Use the preview card/open link below.
+                                 </p>
+                               </div>
+                             )
+                           ) : (
+                             <a
+                               href={resolveImageUri(mainLinkStr)}
                               target="_blank"
                               rel="noopener noreferrer"
                               className="text-xs text-emerald-300/70 hover:text-emerald-300 transition-colors inline-flex items-center gap-1"
@@ -980,8 +1061,50 @@ export default function MarketDetail() {
                             </a>
                           )}
                         </div>
-                        );
+                       );
                       })() : null}
+
+                      {proof.mainLink && (
+                        <div className="mt-3 p-3 rounded-lg border border-white/[0.08] bg-dark-900/50">
+                          <p className="text-2xs font-medium text-emerald-500/70 uppercase tracking-wider mb-2">Link Preview</p>
+                          {mainLinkPreviewLoading ? (
+                            <p className="text-xs text-dark-400">Loading preview...</p>
+                          ) : mainLinkPreview ? (
+                            <a
+                              href={mainLinkPreview.url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="group block rounded-lg border border-white/[0.08] bg-dark-850/70 overflow-hidden hover:border-emerald-400/30 transition-colors"
+                            >
+                              {mainLinkPreview.image && (
+                                <div className="w-full h-36 bg-dark-800 overflow-hidden">
+                                  <img
+                                    src={resolveImageUri(mainLinkPreview.image)}
+                                    alt={mainLinkPreview.title || 'Preview image'}
+                                    className="w-full h-full object-cover"
+                                    onError={(e) => {
+                                      (e.target as HTMLImageElement).style.display = 'none';
+                                    }}
+                                  />
+                                </div>
+                              )}
+                              <div className="p-3">
+                                <p className="text-xs text-dark-500 mb-1">{mainLinkPreview.siteName}</p>
+                                <p className="text-sm font-semibold text-white group-hover:text-emerald-300 transition-colors line-clamp-2">
+                                  {mainLinkPreview.title || 'Open proof link'}
+                                </p>
+                                {mainLinkPreview.description && (
+                                  <p className="text-xs text-dark-400 mt-1 line-clamp-2">{mainLinkPreview.description}</p>
+                                )}
+                              </div>
+                            </a>
+                          ) : (
+                            <p className="text-xs text-dark-400">
+                              {mainLinkPreviewError || 'Preview unavailable for this link.'}
+                            </p>
+                          )}
+                        </div>
+                      )}
                       
                       {/* Extra links */}
                       {proof.extraLinks.length > 0 && (
@@ -1145,6 +1268,17 @@ export default function MarketDetail() {
                   </div>
                 )}
               </div>
+            )}
+
+            {/* Market Chat */}
+            {marketAddress && (
+              <ChatThread
+                marketAddress={marketAddress}
+                userAddress={userAddress}
+                signer={signer}
+                isConnected={isConnected}
+                hasProfile={hasProfile}
+              />
             )}
           </div>
 
@@ -1574,27 +1708,26 @@ function ProbabilityChart({
 
   // Current values (last point or hovered)
   const displayData = hoveredData ?? (filteredHistory.length > 0 ? filteredHistory[filteredHistory.length - 1] : null);
-  const latestData = filteredHistory.length > 0 ? filteredHistory[filteredHistory.length - 1] : null;
 
   // Compute change from first visible point
   const firstData = filteredHistory.length > 0 ? filteredHistory[0] : null;
 
   return (
-    <div className="card overflow-hidden">
+    <div className="card overflow-hidden border border-white/[0.08] bg-gradient-to-b from-dark-900/95 via-dark-900/80 to-dark-950/95">
       {/* Header */}
       <div className="p-5 pb-0">
-        <div className="flex items-center justify-between mb-3">
+        <div className="flex items-center justify-between mb-3 gap-2">
           <h2 className="section-header">Price History</h2>
           {/* Time range selector */}
-          <div className="flex items-center rounded-lg bg-dark-900/60 p-0.5 border border-white/[0.06] overflow-x-auto scrollbar-hide">
+          <div className="flex items-center rounded-xl bg-dark-900/70 p-0.5 border border-white/[0.08] overflow-x-auto scrollbar-hide shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
             {TIME_RANGES.map(range => (
               <button
                 key={range.key}
                 onClick={() => setTimeRange(range.key)}
-                className={`px-2 py-1 rounded-md text-2xs font-semibold transition-all ${
+                className={`px-2.5 py-1 rounded-lg text-2xs font-semibold transition-all border ${
                   timeRange === range.key
-                    ? 'bg-primary-600/20 text-primary-400'
-                    : 'text-dark-500 hover:text-dark-300'
+                    ? 'bg-primary-500/20 text-primary-300 border-primary-500/35 shadow-[0_0_0_1px_rgba(59,130,246,0.18)]'
+                    : 'border-transparent text-dark-500 hover:text-dark-200 hover:border-white/[0.08]'
                 }`}
               >
                 {range.label}
@@ -1657,11 +1790,11 @@ function ProbabilityChart({
       </div>
 
       {/* Chart */}
-      <div className="h-56 sm:h-72 px-2 pb-3">
+      <div className="h-64 sm:h-80 px-2 pb-4">
         <ResponsiveContainer width="100%" height="100%">
           <AreaChart
             data={filteredHistory}
-            margin={{ top: 4, right: 8, bottom: 0, left: 0 }}
+            margin={{ top: 8, right: 12, bottom: 10, left: 0 }}
             onMouseMove={(state: { activePayload?: Array<{ payload: ProbHistoryPoint }> }) => {
               if (state?.activePayload?.[0]) {
                 setHoveredData(state.activePayload[0].payload);
@@ -1678,48 +1811,51 @@ function ProbabilityChart({
               ))}
             </defs>
             <CartesianGrid
-              strokeDasharray="3 3"
-              stroke="rgba(255,255,255,0.03)"
-              vertical={false}
+              strokeDasharray="4 4"
+              stroke="rgba(148,163,184,0.14)"
+              vertical
             />
             <XAxis
               dataKey="time"
               tickFormatter={(t) => {
                 const d = new Date(t * 1000);
-                if (timeRange === '1H' || timeRange === '6H' || timeRange === '1D') {
+                if (timeRange === '1H') {
                   return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                }
+                if (timeRange === '6H') {
+                  return `${d.toLocaleDateString([], { month: 'short', day: 'numeric' })} ${d.toLocaleTimeString([], { hour: '2-digit' })}`;
                 }
                 return d.toLocaleDateString([], { month: 'short', day: 'numeric' });
               }}
               stroke="transparent"
-              tick={{ fontSize: 10, fill: '#3b4252' }}
+              tick={{ fontSize: 10, fill: '#94a3b8' }}
               axisLine={false}
               tickLine={false}
-              minTickGap={50}
+              minTickGap={40}
             />
             <YAxis
               domain={[0, 100]}
               tickFormatter={(v) => `${v}¢`}
               stroke="transparent"
-              tick={{ fontSize: 10, fill: '#3b4252' }}
+              tick={{ fontSize: 10, fill: '#94a3b8' }}
               axisLine={false}
               tickLine={false}
-              width={32}
+              width={34}
               ticks={[0, 25, 50, 75, 100]}
             />
             <Tooltip
               cursor={{
-                stroke: 'rgba(255,255,255,0.15)',
+                stroke: 'rgba(59,130,246,0.55)',
                 strokeWidth: 1,
               }}
               contentStyle={{
-                backgroundColor: 'rgba(10, 15, 25, 0.95)',
-                border: '1px solid rgba(255,255,255,0.1)',
-                borderRadius: '10px',
+                backgroundColor: 'rgba(8, 12, 20, 0.97)',
+                border: '1px solid rgba(59,130,246,0.35)',
+                borderRadius: '12px',
                 backdropFilter: 'blur(16px)',
-                padding: '10px 14px',
+                padding: '10px 12px',
                 fontSize: '12px',
-                boxShadow: '0 12px 40px rgba(0,0,0,0.5)',
+                boxShadow: '0 20px 45px rgba(2, 6, 23, 0.7)',
               }}
               labelFormatter={(t) => formatDate(t as number)}
               formatter={(value: number, name: string) => {
@@ -1737,12 +1873,12 @@ function ProbabilityChart({
                   type="monotone"
                   dataKey={label}
                   stroke={isVisible ? CHART_COLORS[i % CHART_COLORS.length] : 'transparent'}
-                  strokeWidth={isVisible ? 2 : 0}
+                  strokeWidth={isVisible ? 2.4 : 0}
                   fill={isVisible ? `url(#prob-gradient-${i})` : 'transparent'}
                   fillOpacity={1}
                   dot={false}
                   activeDot={isVisible ? {
-                    r: 4,
+                    r: 4.5,
                     strokeWidth: 2,
                     stroke: CHART_COLORS[i % CHART_COLORS.length],
                     fill: '#0a0f19',

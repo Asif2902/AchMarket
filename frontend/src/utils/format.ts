@@ -225,7 +225,7 @@ export function resolveImageUri(uri: string): string {
   // Validate URL schemes for security
   try {
     const url = new URL(uri);
-    const allowedSchemes = ['https:', 'http:'];
+    const allowedSchemes = ['https:', 'http:', 'blob:'];
     if (!allowedSchemes.includes(url.protocol)) {
       console.warn('Blocked unsafe URL scheme:', url.protocol);
       return '';
@@ -233,6 +233,18 @@ export function resolveImageUri(uri: string): string {
     return uri;
   } catch {
     // If it's not a valid URL, return as-is (could be a path or other string)
+    return uri;
+  }
+}
+
+export function withImageVersion(uri: string, version: string): string {
+  if (!uri || !version) return uri;
+
+  try {
+    const url = new URL(uri);
+    url.searchParams.set('v', version);
+    return url.toString();
+  } catch {
     return uri;
   }
 }
