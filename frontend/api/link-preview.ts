@@ -20,7 +20,7 @@ function isPrivateIpv4(host: string): boolean {
     return false;
   }
 
-  const [a, b] = parts;
+  const [a, b, c, d] = parts;
   if (a === 10) return true;
   if (a === 127) return true;
   if (a === 0) return true;
@@ -28,6 +28,9 @@ function isPrivateIpv4(host: string): boolean {
   if (a === 169 && b === 254) return true;
   if (a === 172 && b >= 16 && b <= 31) return true;
   if (a === 192 && b === 168) return true;
+  if (a >= 224 && a <= 239) return true;
+  if (a === 255 && b === 255 && c === 255 && d === 255) return true;
+  if (a >= 240) return true;
   return false;
 }
 
@@ -63,8 +66,50 @@ function isPrivateIpv6(host: string): boolean {
   const normalized = host.trim().toLowerCase();
   if (normalized === '::1') return true;
 
+  const isIpv4MappedPrefix = (parts: number[]): boolean => {
+    return (
+      (parts[0] === 0 &&
+        parts[1] === 0 &&
+        parts[2] === 0 &&
+        parts[3] === 0 &&
+        parts[4] === 0 &&
+        parts[5] === 0xffff) ||
+      (parts[0] === 0 &&
+        parts[1] === 0 &&
+        parts[2] === 0 &&
+        parts[3] === 0 &&
+        parts[4] === 0xffff &&
+        parts[5] === 0)
+    );
+  };
+
+  const ipv4FromMappedParts = (parts: number[]): string => {
+    const a = parts[6] >> 8;
+    const b = parts[6] & 0xff;
+    const c = parts[7] >> 8;
+    const d = parts[7] & 0xff;
+    return `${a}.${b}.${c}.${d}`;
+  };
+
+  const mappedIpv4Match = normalized.match(/^(.*:)(\d{1,3}(?:\.\d{1,3}){3})$/);
+  if (mappedIpv4Match?.[2]) {
+    const mappedIpv4 = mappedIpv4Match[2];
+    if (isIP(mappedIpv4) !== 4) return false;
+
+    const [a, b, c, d] = mappedIpv4.split('.').map((part) => Number(part));
+    const high = ((a << 8) | b).toString(16);
+    const low = ((c << 8) | d).toString(16);
+    const mappedParts = parseIpv6(`${mappedIpv4Match[1]}${high}:${low}`);
+
+    return mappedParts && isIpv4MappedPrefix(mappedParts) ? isPrivateIpv4(mappedIpv4) : false;
+  }
+
   const parts = parseIpv6(normalized);
   if (!parts) return false;
+
+  if (isIpv4MappedPrefix(parts)) {
+    return isPrivateIpv4(ipv4FromMappedParts(parts));
+  }
 
   const first = parts[0];
   if ((first & 0xfe00) === 0xfc00) return true; // fc00::/7 unique local
@@ -79,9 +124,11 @@ function isPrivateHost(hostname: string): boolean {
   if (host.endsWith('.localhost')) return true;
   if (host.endsWith('.local')) return true;
 
-  const ipVersion = isIP(host);
-  if (ipVersion === 4) return isPrivateIpv4(host);
-  if (ipVersion === 6) return isPrivateIpv6(host);
+  const normalizedHost = host.startsWith('[') && host.endsWith(']') ? host.slice(1, -1) : host;
+
+  const ipVersion = isIP(normalizedHost);
+  if (ipVersion === 4) return isPrivateIpv4(normalizedHost);
+  if (ipVersion === 6) return isPrivateIpv6(normalizedHost);
 
   return false;
 }
@@ -97,6 +144,13 @@ function decodeHtmlEntities(value: string): string {
 }
 
 function extractMetaByKey(html: string, key: string, attr: 'name' | 'property'): string {
+  const lowerHtml = html.toLowerCase();
+  const headStart = lowerHtml.indexOf('<head');
+  const headOpenEnd = headStart >= 0 ? lowerHtml.indexOf('>', headStart) : -1;
+  const headEnd = headOpenEnd >= 0 ? lowerHtml.indexOf('</head>', headOpenEnd + 1) : -1;
+  const headSlice =
+    headStart >= 0 && headOpenEnd >= 0 && headEnd > headOpenEnd ? html.slice(headOpenEnd + 1, headEnd) : html;
+
   const escapedKey = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const patternA = new RegExp(
     `<meta[^>]*${attr}=(['"])${escapedKey}\\1[^>]*content=(['"])([\\s\\S]*?)\\2[^>]*>`,
@@ -107,10 +161,10 @@ function extractMetaByKey(html: string, key: string, attr: 'name' | 'property'):
     'i',
   );
 
-  const matchA = html.match(patternA);
+  const matchA = headSlice.match(patternA);
   if (matchA?.[3]) return decodeHtmlEntities(matchA[3]);
 
-  const matchB = html.match(patternB);
+  const matchB = headSlice.match(patternB);
   if (matchB?.[2]) return decodeHtmlEntities(matchB[2]);
 
   return '';
