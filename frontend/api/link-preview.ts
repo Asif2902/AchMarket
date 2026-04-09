@@ -296,7 +296,7 @@ function normalizeOrigin(raw: unknown): string {
   }
 }
 
-async function validateImageUrl(urlLike: string, baseUrl: string): Promise<string> {
+async function validateAndProxyImageUrl(urlLike: string, baseUrl: string): Promise<string> {
   const absoluteUrl = toAbsoluteUrl(urlLike, baseUrl);
   if (!absoluteUrl) return '';
 
@@ -313,7 +313,7 @@ async function validateImageUrl(urlLike: string, baseUrl: string): Promise<strin
 
   try {
     await ensureHostResolvesPublic(parsed.hostname);
-    return parsed.toString();
+    return '';
   } catch {
     return '';
   }
@@ -322,7 +322,7 @@ async function validateImageUrl(urlLike: string, baseUrl: string): Promise<strin
 async function pickFirstValidImageUrl(values: Array<string | null | undefined>, baseUrl: string): Promise<string> {
   for (const value of values) {
     if (typeof value !== 'string' || !value.trim()) continue;
-    const validated = await validateImageUrl(value.trim(), baseUrl);
+    const validated = await validateAndProxyImageUrl(value.trim(), baseUrl);
     if (validated) return validated;
   }
 
@@ -424,12 +424,26 @@ function matchesHostSourceOrigin(pattern: string, origin: string, targetOrigin: 
   const parsedPattern = parseHostSourcePattern(pattern);
   if (!parsedPattern) return false;
 
+  const protocolMatchesSchemePart = (patternScheme: string, candidateProtocol: string): boolean => {
+    const normalizedPatternScheme = patternScheme.toLowerCase().replace(/:$/, '');
+    const normalizedCandidateProtocol = candidateProtocol.toLowerCase();
+
+    if (normalizedPatternScheme === 'http') {
+      return normalizedCandidateProtocol === 'http:' || normalizedCandidateProtocol === 'https:';
+    }
+    if (normalizedPatternScheme === 'https') {
+      return normalizedCandidateProtocol === 'https:';
+    }
+
+    return normalizedCandidateProtocol === `${normalizedPatternScheme}:`;
+  };
+
   if (parsedPattern.scheme) {
-    if (parsedOrigin.protocol !== `${parsedPattern.scheme}:`) {
+    if (!protocolMatchesSchemePart(parsedPattern.scheme, parsedOrigin.protocol)) {
       return false;
     }
   } else if (targetParsed) {
-    if (parsedOrigin.protocol !== targetParsed.protocol) {
+    if (!protocolMatchesSchemePart(targetParsed.protocol, parsedOrigin.protocol)) {
       return false;
     }
   }
@@ -456,6 +470,29 @@ function tokenAllowsOrigin(token: string, embedOrigin: string, targetOrigin: str
   const normalized = token.trim();
   if (!normalized) return false;
 
+  let parsedEmbedOrigin: URL | null = null;
+  if (embedOrigin) {
+    try {
+      parsedEmbedOrigin = new URL(embedOrigin);
+    } catch {
+      parsedEmbedOrigin = null;
+    }
+  }
+
+  const protocolMatchesSchemePart = (patternScheme: string, candidateProtocol: string): boolean => {
+    const normalizedPatternScheme = patternScheme.toLowerCase().replace(/:$/, '');
+    const normalizedCandidateProtocol = candidateProtocol.toLowerCase();
+
+    if (normalizedPatternScheme === 'http') {
+      return normalizedCandidateProtocol === 'http:' || normalizedCandidateProtocol === 'https:';
+    }
+    if (normalizedPatternScheme === 'https') {
+      return normalizedCandidateProtocol === 'https:';
+    }
+
+    return normalizedCandidateProtocol === `${normalizedPatternScheme}:`;
+  };
+
   if (normalized === "'self'") {
     return embedOrigin !== '' && embedOrigin === targetOrigin;
   }
@@ -463,10 +500,10 @@ function tokenAllowsOrigin(token: string, embedOrigin: string, targetOrigin: str
     return true;
   }
   if (normalized === 'https:') {
-    return embedOrigin.startsWith('https://');
+    return parsedEmbedOrigin ? protocolMatchesSchemePart('https', parsedEmbedOrigin.protocol) : false;
   }
   if (normalized === 'http:') {
-    return embedOrigin.startsWith('http://');
+    return parsedEmbedOrigin ? protocolMatchesSchemePart('http', parsedEmbedOrigin.protocol) : false;
   }
 
   if (!embedOrigin) return false;
