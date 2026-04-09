@@ -27,6 +27,35 @@ type FetchWithCleanupResult = {
   cleanup: () => Promise<void>;
 };
 
+const HTML_NAMED_ENTITIES: Record<string, string> = {
+  amp: '&',
+  apos: "'",
+  copy: '©',
+  gt: '>',
+  hellip: '…',
+  ldquo: '“',
+  lsquo: '‘',
+  lt: '<',
+  mdash: '—',
+  nbsp: '\u00a0',
+  ndash: '–',
+  quot: '"',
+  rdquo: '”',
+  reg: '®',
+  rsquo: '’',
+};
+
+const ALLOWED_META_KEYS = new Set([
+  'description',
+  'og:description',
+  'og:image',
+  'og:site_name',
+  'og:title',
+  'twitter:description',
+  'twitter:image',
+  'twitter:title',
+]);
+
 function normalizeBracketedHost(hostname: string): string {
   const trimmed = hostname.trim();
   if (trimmed.startsWith('[') && trimmed.endsWith(']')) return trimmed.slice(1, -1);
@@ -167,16 +196,27 @@ function isPrivateHost(hostname: string): boolean {
 }
 
 function decodeHtmlEntities(value: string): string {
-  return value
-    .replace(/&quot;/gi, '"')
-    .replace(/&#39;|&apos;/gi, "'")
-    .replace(/&amp;/gi, '&')
-    .replace(/&lt;/gi, '<')
-    .replace(/&gt;/gi, '>')
-    .trim();
+  return value.replace(/&(#(?:x[0-9a-f]+|\d+)|[a-z][a-z0-9]+);/gi, (entity, token: string) => {
+    const normalized = token.toLowerCase();
+    if (normalized.startsWith('#x')) {
+      const codePoint = Number.parseInt(normalized.slice(2), 16);
+      return Number.isValidCodePoint(codePoint) ? String.fromCodePoint(codePoint) : entity;
+    }
+
+    if (normalized.startsWith('#')) {
+      const codePoint = Number.parseInt(normalized.slice(1), 10);
+      return Number.isValidCodePoint(codePoint) ? String.fromCodePoint(codePoint) : entity;
+    }
+
+    return HTML_NAMED_ENTITIES[normalized] ?? entity;
+  });
 }
 
 function extractMetaByKey(html: string, key: string, attr: 'name' | 'property'): string {
+  if ((attr !== 'name' && attr !== 'property') || !ALLOWED_META_KEYS.has(key)) {
+    return '';
+  }
+
   const lowerHtml = html.toLowerCase();
   const headStart = lowerHtml.indexOf('<head');
   const headOpenEnd = headStart >= 0 ? lowerHtml.indexOf('>', headStart) : -1;
@@ -256,6 +296,39 @@ function normalizeOrigin(raw: unknown): string {
   }
 }
 
+async function validateImageUrl(urlLike: string, baseUrl: string): Promise<string> {
+  const absoluteUrl = toAbsoluteUrl(urlLike, baseUrl);
+  if (!absoluteUrl) return '';
+
+  let parsed: URL;
+  try {
+    parsed = new URL(absoluteUrl);
+  } catch {
+    return '';
+  }
+
+  if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
+    return '';
+  }
+
+  try {
+    await ensureHostResolvesPublic(parsed.hostname);
+    return parsed.toString();
+  } catch {
+    return '';
+  }
+}
+
+async function pickFirstValidImageUrl(values: Array<string | null | undefined>, baseUrl: string): Promise<string> {
+  for (const value of values) {
+    if (typeof value !== 'string' || !value.trim()) continue;
+    const validated = await validateImageUrl(value.trim(), baseUrl);
+    if (validated) return validated;
+  }
+
+  return '';
+}
+
 type HostSourcePattern = {
   scheme: string | null;
   hostname: string;
@@ -317,7 +390,11 @@ function parseHostSourcePattern(pattern: string): HostSourcePattern | null {
   }
 
   if (!hostname) return null;
-  if (port !== null && port !== '*' && !/^\d+$/.test(port)) return null;
+  if (port !== null && port !== '*') {
+    if (!/^\d+$/.test(port)) return null;
+    const parsedPort = Number.parseInt(port, 10);
+    if (Number.isNaN(parsedPort) || parsedPort < 0 || parsedPort > 65535) return null;
+  }
 
   return {
     scheme,
@@ -719,10 +796,13 @@ export default async function handler(req: any, res: any) {
         extractMetaByKey(html, 'description', 'name'),
       ]);
 
-      const image = pickFirstNonEmpty([
-        toAbsoluteUrl(extractMetaByKey(html, 'og:image', 'property'), finalUrl),
-        toAbsoluteUrl(extractMetaByKey(html, 'twitter:image', 'name'), finalUrl),
-      ]);
+      const image = await pickFirstValidImageUrl(
+        [
+          extractMetaByKey(html, 'og:image', 'property'),
+          extractMetaByKey(html, 'twitter:image', 'name'),
+        ],
+        finalUrl,
+      );
 
       const siteName = pickFirstNonEmpty([
         extractMetaByKey(html, 'og:site_name', 'property'),
