@@ -256,18 +256,108 @@ function normalizeOrigin(raw: unknown): string {
   }
 }
 
-function matchesWildcardOrigin(pattern: string, origin: string): boolean {
+type HostSourcePattern = {
+  scheme: string | null;
+  hostname: string;
+  wildcard: boolean;
+  port: string | null;
+};
+
+function getOriginPort(origin: URL): string {
+  if (origin.port) return origin.port;
+  if (origin.protocol === 'https:') return '443';
+  if (origin.protocol === 'http:') return '80';
+  return '';
+}
+
+function parseHostSourcePattern(pattern: string): HostSourcePattern | null {
+  const normalized = pattern.trim().toLowerCase();
+  if (!normalized) return null;
+
+  let scheme: string | null = null;
+  let hostPort = normalized;
+  const schemeSeparator = normalized.indexOf('://');
+  if (schemeSeparator >= 0) {
+    scheme = normalized.slice(0, schemeSeparator);
+    if (!/^[a-z][a-z0-9+.-]*$/.test(scheme)) return null;
+    hostPort = normalized.slice(schemeSeparator + 3);
+  }
+
+  if (!hostPort || hostPort.includes('/') || hostPort.includes('?') || hostPort.includes('#')) {
+    return null;
+  }
+
+  let hostname = '';
+  let port: string | null = null;
+  let wildcard = false;
+
+  if (hostPort.startsWith('[')) {
+    const closeBracket = hostPort.indexOf(']');
+    if (closeBracket < 0) return null;
+    hostname = hostPort.slice(0, closeBracket + 1);
+    const remainder = hostPort.slice(closeBracket + 1);
+    if (remainder) {
+      if (!remainder.startsWith(':')) return null;
+      port = remainder.slice(1);
+    }
+  } else {
+    const colonIndex = hostPort.lastIndexOf(':');
+    const hasSingleColon = colonIndex > -1 && hostPort.indexOf(':') === colonIndex;
+    if (hasSingleColon) {
+      hostname = hostPort.slice(0, colonIndex);
+      port = hostPort.slice(colonIndex + 1);
+    } else {
+      hostname = hostPort;
+    }
+
+    if (hostname.startsWith('*.')) {
+      wildcard = true;
+      hostname = hostname.slice(2);
+    }
+  }
+
+  if (!hostname) return null;
+  if (port !== null && port !== '*' && !/^\d+$/.test(port)) return null;
+
+  return {
+    scheme,
+    hostname,
+    wildcard,
+    port,
+  };
+}
+
+function matchesHostSourceOrigin(pattern: string, origin: string): boolean {
+  let parsedOrigin: URL;
   try {
-    const parsedOrigin = new URL(origin);
-    const parsedPattern = new URL(pattern.replace('*.', 'placeholder.'));
-    if (parsedOrigin.protocol !== parsedPattern.protocol) return false;
-    const host = parsedOrigin.hostname;
-    const wildcardSuffix = parsedPattern.hostname.replace('placeholder.', '');
-    if (!wildcardSuffix || host === wildcardSuffix) return false;
-    return host.endsWith(`.${wildcardSuffix}`);
+    parsedOrigin = new URL(origin);
   } catch {
     return false;
   }
+
+  const parsedPattern = parseHostSourcePattern(pattern);
+  if (!parsedPattern) return false;
+
+  if (parsedPattern.scheme && parsedOrigin.protocol !== `${parsedPattern.scheme}:`) {
+    return false;
+  }
+
+  const originHost = normalizeBracketedHost(parsedOrigin.hostname.toLowerCase());
+  const patternHost = normalizeBracketedHost(parsedPattern.hostname.toLowerCase());
+
+  if (parsedPattern.wildcard) {
+    if (!patternHost || originHost === patternHost) return false;
+    if (!originHost.endsWith(`.${patternHost}`)) return false;
+  } else if (originHost !== patternHost) {
+    return false;
+  }
+
+  if (parsedPattern.port && parsedPattern.port !== '*') {
+    const originPort = getOriginPort(parsedOrigin);
+    if (originPort !== parsedPattern.port) return false;
+  }
+
+  return true;
 }
 
 function tokenAllowsOrigin(token: string, embedOrigin: string, targetOrigin: string): boolean {
@@ -287,8 +377,14 @@ function tokenAllowsOrigin(token: string, embedOrigin: string, targetOrigin: str
     return embedOrigin.startsWith('http://');
   }
 
-  if (normalized.includes('://*.')) {
-    return embedOrigin !== '' && matchesWildcardOrigin(normalized, embedOrigin);
+  if (!embedOrigin) return false;
+
+  if (!normalized.includes('://')) {
+    return matchesHostSourceOrigin(normalized, embedOrigin);
+  }
+
+  if (matchesHostSourceOrigin(normalized, embedOrigin)) {
+    return true;
   }
 
   try {
@@ -574,7 +670,11 @@ export default async function handler(req: any, res: any) {
       }
 
       const contentType = (response.headers.get('content-type') || '').toLowerCase();
-      if (contentType && !contentType.includes('text/html')) {
+      if (
+        contentType &&
+        !contentType.includes('text/html') &&
+        !contentType.includes('application/xhtml+xml')
+      ) {
         throw new HttpError(422, 'Preview is available only for HTML pages.');
       }
 
