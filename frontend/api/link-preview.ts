@@ -198,14 +198,18 @@ function isPrivateHost(hostname: string): boolean {
 function decodeHtmlEntities(value: string): string {
   return value.replace(/&(#(?:x[0-9a-f]+|\d+)|[a-z][a-z0-9]+);/gi, (entity, token: string) => {
     const normalized = token.toLowerCase();
+    const isValidUnicodeCodePoint = (codePoint: number): boolean => {
+      return Number.isInteger(codePoint) && codePoint >= 0 && codePoint <= 0x10ffff;
+    };
+
     if (normalized.startsWith('#x')) {
       const codePoint = Number.parseInt(normalized.slice(2), 16);
-      return Number.isValidCodePoint(codePoint) ? String.fromCodePoint(codePoint) : entity;
+      return isValidUnicodeCodePoint(codePoint) ? String.fromCodePoint(codePoint) : entity;
     }
 
     if (normalized.startsWith('#')) {
       const codePoint = Number.parseInt(normalized.slice(1), 10);
-      return Number.isValidCodePoint(codePoint) ? String.fromCodePoint(codePoint) : entity;
+      return isValidUnicodeCodePoint(codePoint) ? String.fromCodePoint(codePoint) : entity;
     }
 
     return HTML_NAMED_ENTITIES[normalized] ?? entity;
