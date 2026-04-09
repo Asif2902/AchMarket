@@ -1,5 +1,6 @@
 import dns from 'dns/promises';
 import { isIP } from 'net';
+import { Agent, buildConnector, fetch as undiciFetch } from 'undici';
 
 const REQUEST_TIMEOUT_MS = 8000; // Vercel serverless function timeout
 const MAX_HTML_BYTES = 300000;
@@ -12,6 +13,24 @@ class HttpError extends Error {
     super(message);
     this.status = status;
   }
+}
+
+type PublicHostResolution = {
+  host: string;
+  address: string;
+};
+
+type FetchResponse = Awaited<ReturnType<typeof undiciFetch>>;
+
+type FetchWithCleanupResult = {
+  response: FetchResponse;
+  cleanup: () => Promise<void>;
+};
+
+function normalizeBracketedHost(hostname: string): string {
+  const trimmed = hostname.trim();
+  if (trimmed.startsWith('[') && trimmed.endsWith(']')) return trimmed.slice(1, -1);
+  return trimmed;
 }
 
 function isPrivateIpv4(host: string): boolean {
@@ -124,7 +143,7 @@ function isPrivateHost(hostname: string): boolean {
   if (host.endsWith('.localhost')) return true;
   if (host.endsWith('.local')) return true;
 
-  const normalizedHost = host.startsWith('[') && host.endsWith(']') ? host.slice(1, -1) : host;
+  const normalizedHost = normalizeBracketedHost(host);
 
   const ipVersion = isIP(normalizedHost);
   if (ipVersion === 4) return isPrivateIpv4(normalizedHost);
@@ -153,11 +172,11 @@ function extractMetaByKey(html: string, key: string, attr: 'name' | 'property'):
 
   const escapedKey = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const patternA = new RegExp(
-    `<meta[^>]*${attr}=(['"])${escapedKey}\\1[^>]*content=(['"])([\\s\\S]*?)\\2[^>]*>`,
+    `<meta[^>]*${attr}\\s*=\\s*(['"])${escapedKey}\\1[^>]*content\\s*=\\s*(['"])([\\s\\S]*?)\\2[^>]*>`,
     'i',
   );
   const patternB = new RegExp(
-    `<meta[^>]*content=(['"])([\\s\\S]*?)\\1[^>]*${attr}=(['"])${escapedKey}\\3[^>]*>`,
+    `<meta[^>]*content\\s*=\\s*(['"])([\\s\\S]*?)\\1[^>]*${attr}\\s*=\\s*(['"])${escapedKey}\\3[^>]*>`,
     'i',
   );
 
@@ -329,8 +348,8 @@ function analyzeFrameEmbeddability(params: {
   return { embeddable: true, reason: '' };
 }
 
-async function ensureHostResolvesPublic(hostname: string): Promise<void> {
-  const host = hostname.trim();
+async function ensureHostResolvesPublic(hostname: string): Promise<PublicHostResolution> {
+  const host = normalizeBracketedHost(hostname);
   if (!host) {
     throw new HttpError(400, 'Invalid host.');
   }
@@ -344,7 +363,7 @@ async function ensureHostResolvesPublic(hostname: string): Promise<void> {
     if (isPrivateHost(host)) {
       throw new HttpError(400, 'Private/local URLs are not allowed.');
     }
-    return;
+    return { host, address: host };
   }
 
   let records: Array<{ address: string; family: number }>;
@@ -358,64 +377,131 @@ async function ensureHostResolvesPublic(hostname: string): Promise<void> {
     throw new HttpError(422, 'Failed to resolve target hostname.');
   }
 
+  let validatedAddress = '';
   for (const record of records) {
     if (isPrivateHost(record.address)) {
       throw new HttpError(400, 'Target resolves to a private address, which is not allowed.');
     }
+    if (!validatedAddress) {
+      validatedAddress = record.address;
+    }
   }
+
+  if (!validatedAddress) {
+    throw new HttpError(422, 'Failed to resolve target hostname.');
+  }
+
+  return { host, address: validatedAddress };
 }
 
-async function fetchWithValidatedRedirects(
-  startUrl: URL,
+async function fetchWithPinnedResolution(
+  currentUrl: URL,
   signal: AbortSignal,
-): Promise<Response> {
-  let currentUrl = startUrl;
+  resolution: PublicHostResolution,
+): Promise<FetchWithCleanupResult> {
+  const connector = buildConnector({
+    lookup(lookupHost: string, _options: unknown, callback: (err: Error | null, address: string, family: number) => void) {
+      const normalizedLookupHost = normalizeBracketedHost(lookupHost).toLowerCase();
+      if (normalizedLookupHost !== resolution.host.toLowerCase()) {
+        callback(new Error('Unexpected hostname during DNS lookup.'), '', 0);
+        return;
+      }
 
-  for (let redirectCount = 0; redirectCount <= MAX_REDIRECTS; redirectCount += 1) {
-    await ensureHostResolvesPublic(currentUrl.hostname);
+      const family = isIP(resolution.address);
+      if (family !== 4 && family !== 6) {
+        callback(new Error('Validated address is not an IP address.'), '', 0);
+        return;
+      }
 
-    const response = await fetch(currentUrl.toString(), {
+      callback(null, resolution.address, family);
+    },
+  });
+
+  const dispatcher = new Agent({
+    connect: connector,
+  });
+
+  let cleaned = false;
+  const cleanup = async () => {
+    if (cleaned) return;
+    cleaned = true;
+    try {
+      await dispatcher.close();
+    } catch {
+      dispatcher.destroy();
+    }
+  };
+
+  try {
+    const response = await undiciFetch(currentUrl.toString(), {
       method: 'GET',
       redirect: 'manual',
       signal,
+      dispatcher,
       headers: {
         'user-agent': 'AchMarketLinkPreviewBot/1.0 (+https://prediction.achswap.app)',
         accept: 'text/html,application/xhtml+xml;q=0.9,*/*;q=0.5',
       },
     });
 
+    return { response, cleanup };
+  } catch (error) {
+    await cleanup();
+    throw error;
+  }
+}
+
+async function fetchWithValidatedRedirects(
+  startUrl: URL,
+  signal: AbortSignal,
+): Promise<FetchWithCleanupResult> {
+  let currentUrl = startUrl;
+
+  for (let redirectCount = 0; redirectCount <= MAX_REDIRECTS; redirectCount += 1) {
+    const resolution = await ensureHostResolvesPublic(currentUrl.hostname);
+    const { response, cleanup } = await fetchWithPinnedResolution(currentUrl, signal, resolution);
+
     if (response.status >= 300 && response.status < 400) {
-      const location = response.headers.get('location');
-      if (!location) {
-        throw new HttpError(422, `Redirect response missing location header (status ${response.status}).`);
-      }
-
-      let nextUrl: URL;
       try {
-        nextUrl = new URL(location, currentUrl);
-      } catch {
-        throw new HttpError(422, 'Invalid redirect URL.');
-      }
+        const location = response.headers.get('location');
+        if (!location) {
+          throw new HttpError(422, `Redirect response missing location header (status ${response.status}).`);
+        }
 
-      if (nextUrl.protocol !== 'https:' && nextUrl.protocol !== 'http:') {
-        throw new HttpError(400, 'Redirected to an unsupported protocol.');
-      }
+        let nextUrl: URL;
+        try {
+          nextUrl = new URL(location, currentUrl);
+        } catch {
+          throw new HttpError(422, 'Invalid redirect URL.');
+        }
 
-      if (isPrivateHost(nextUrl.hostname)) {
-        throw new HttpError(400, 'Redirected to a private/local URL, which is not allowed.');
-      }
+        if (nextUrl.protocol !== 'https:' && nextUrl.protocol !== 'http:') {
+          throw new HttpError(400, 'Redirected to an unsupported protocol.');
+        }
 
-      currentUrl = nextUrl;
+        if (isPrivateHost(nextUrl.hostname)) {
+          throw new HttpError(400, 'Redirected to a private/local URL, which is not allowed.');
+        }
+
+        currentUrl = nextUrl;
+      } finally {
+        try {
+          await response.body?.cancel();
+        } catch {
+          // ignore
+        }
+        await cleanup();
+      }
       continue;
     }
 
-    return response;
+    return { response, cleanup };
   }
 
   throw new HttpError(422, `Too many redirects (max ${MAX_REDIRECTS}).`);
 }
 
-async function readHtmlWithLimit(response: Response, abortController: AbortController): Promise<string> {
+async function readHtmlWithLimit(response: FetchResponse, abortController: AbortController): Promise<string> {
   const stream = response.body;
   if (!stream) {
     throw new HttpError(422, 'Empty response body.');
@@ -466,65 +552,69 @@ export default async function handler(req: any, res: any) {
     const targetUrl = normalizeTargetUrl(req.query?.url);
     const embedOrigin = normalizeOrigin(req.query?.origin);
 
-    const response = await fetchWithValidatedRedirects(targetUrl, abortController.signal);
+    const { response, cleanup } = await fetchWithValidatedRedirects(targetUrl, abortController.signal);
 
-    if (!response.ok) {
-      throw new HttpError(422, `Target URL responded with ${response.status}.`);
+    try {
+      if (!response.ok) {
+        throw new HttpError(422, `Target URL responded with ${response.status}.`);
+      }
+
+      const contentType = (response.headers.get('content-type') || '').toLowerCase();
+      if (contentType && !contentType.includes('text/html')) {
+        throw new HttpError(422, 'Preview is available only for HTML pages.');
+      }
+
+      const finalUrl = response.url || targetUrl.toString();
+      const html = await readHtmlWithLimit(response, abortController);
+      const xFrameOptions = response.headers.get('x-frame-options') || '';
+      const contentSecurityPolicy = response.headers.get('content-security-policy') || '';
+      const framePolicy = analyzeFrameEmbeddability({
+        finalUrl,
+        xFrameOptions,
+        contentSecurityPolicy,
+        embedOrigin,
+      });
+
+      const title = pickFirstNonEmpty([
+        extractMetaByKey(html, 'og:title', 'property'),
+        extractMetaByKey(html, 'twitter:title', 'name'),
+        extractTitle(html),
+      ]);
+
+      const description = pickFirstNonEmpty([
+        extractMetaByKey(html, 'og:description', 'property'),
+        extractMetaByKey(html, 'twitter:description', 'name'),
+        extractMetaByKey(html, 'description', 'name'),
+      ]);
+
+      const image = pickFirstNonEmpty([
+        toAbsoluteUrl(extractMetaByKey(html, 'og:image', 'property'), finalUrl),
+        toAbsoluteUrl(extractMetaByKey(html, 'twitter:image', 'name'), finalUrl),
+      ]);
+
+      const siteName = pickFirstNonEmpty([
+        extractMetaByKey(html, 'og:site_name', 'property'),
+        new URL(finalUrl).hostname,
+      ]);
+
+      if (!title && !description && !image) {
+        throw new HttpError(422, 'No preview metadata found for this URL.');
+      }
+
+      return res.status(200).json({
+        preview: {
+          url: finalUrl,
+          title,
+          description,
+          image,
+          siteName,
+          embeddable: framePolicy.embeddable,
+          embedBlockReason: framePolicy.reason,
+        },
+      });
+    } finally {
+      await cleanup();
     }
-
-    const contentType = (response.headers.get('content-type') || '').toLowerCase();
-    if (contentType && !contentType.includes('text/html')) {
-      throw new HttpError(422, 'Preview is available only for HTML pages.');
-    }
-
-    const finalUrl = response.url || targetUrl.toString();
-    const html = await readHtmlWithLimit(response, abortController);
-    const xFrameOptions = response.headers.get('x-frame-options') || '';
-    const contentSecurityPolicy = response.headers.get('content-security-policy') || '';
-    const framePolicy = analyzeFrameEmbeddability({
-      finalUrl,
-      xFrameOptions,
-      contentSecurityPolicy,
-      embedOrigin,
-    });
-
-    const title = pickFirstNonEmpty([
-      extractMetaByKey(html, 'og:title', 'property'),
-      extractMetaByKey(html, 'twitter:title', 'name'),
-      extractTitle(html),
-    ]);
-
-    const description = pickFirstNonEmpty([
-      extractMetaByKey(html, 'og:description', 'property'),
-      extractMetaByKey(html, 'twitter:description', 'name'),
-      extractMetaByKey(html, 'description', 'name'),
-    ]);
-
-    const image = pickFirstNonEmpty([
-      toAbsoluteUrl(extractMetaByKey(html, 'og:image', 'property'), finalUrl),
-      toAbsoluteUrl(extractMetaByKey(html, 'twitter:image', 'name'), finalUrl),
-    ]);
-
-    const siteName = pickFirstNonEmpty([
-      extractMetaByKey(html, 'og:site_name', 'property'),
-      new URL(finalUrl).hostname,
-    ]);
-
-    if (!title && !description && !image) {
-      throw new HttpError(422, 'No preview metadata found for this URL.');
-    }
-
-    return res.status(200).json({
-      preview: {
-        url: finalUrl,
-        title,
-        description,
-        image,
-        siteName,
-        embeddable: framePolicy.embeddable,
-        embedBlockReason: framePolicy.reason,
-      },
-    });
   } catch (error: any) {
     if (error?.name === 'AbortError') {
       return res.status(504).json({ error: 'Preview request timed out.' });
