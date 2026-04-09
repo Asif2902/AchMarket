@@ -1,7 +1,7 @@
 import dns from 'dns/promises';
 import { isIP } from 'net';
 
-const REQUEST_TIMEOUT_MS = 8000;
+const REQUEST_TIMEOUT_MS = 8000; // Vercel serverless function timeout
 const MAX_HTML_BYTES = 300000;
 const MAX_REDIRECTS = 5;
 
