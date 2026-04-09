@@ -301,26 +301,9 @@ function normalizeOrigin(raw: unknown): string {
 }
 
 async function validateAndSuppressImageUrl(urlLike: string, baseUrl: string): Promise<string> {
-  const absoluteUrl = toAbsoluteUrl(urlLike, baseUrl);
-  if (!absoluteUrl) return '';
-
-  let parsed: URL;
-  try {
-    parsed = new URL(absoluteUrl);
-  } catch {
-    return '';
-  }
-
-  if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
-    return '';
-  }
-
-  try {
-    await ensureHostResolvesPublic(parsed.hostname);
-    return '';
-  } catch {
-    return '';
-  }
+  void urlLike;
+  void baseUrl;
+  return '';
 }
 
 async function pickFirstSuppressedImageUrl(values: Array<string | null | undefined>, baseUrl: string): Promise<string> {
@@ -623,21 +606,21 @@ async function ensureHostResolvesPublic(hostname: string): Promise<PublicHostRes
     throw new HttpError(422, 'Failed to resolve target hostname.');
   }
 
-  let validatedAddress = '';
+  const validatedAddresses: string[] = [];
   for (const record of records) {
     if (isPrivateHost(record.address)) {
       throw new HttpError(400, 'Target resolves to a private address, which is not allowed.');
     }
-    if (!validatedAddress) {
-      validatedAddress = record.address;
+    if (!validatedAddresses.includes(record.address)) {
+      validatedAddresses.push(record.address);
     }
   }
 
-  if (!validatedAddress) {
+  if (!validatedAddresses.length) {
     throw new HttpError(422, 'Failed to resolve target hostname.');
   }
 
-  return { host, address: validatedAddress };
+  return { host, address: validatedAddresses[0] };
 }
 
 async function fetchWithPinnedResolution(
@@ -702,13 +685,52 @@ async function fetchWithValidatedRedirects(
   signal: AbortSignal,
 ): Promise<FetchWithCleanupResult> {
   let currentUrl = startUrl;
+  let redirectsFollowed = 0;
 
-  for (let redirectCount = 0; redirectCount <= MAX_REDIRECTS; redirectCount += 1) {
-    const resolution = await ensureHostResolvesPublic(currentUrl.hostname);
-    const { response, cleanup } = await fetchWithPinnedResolution(currentUrl, signal, resolution);
+  while (true) {
+    const initialResolution = await ensureHostResolvesPublic(currentUrl.hostname);
+    const resolutions: PublicHostResolution[] = [initialResolution];
+    let records: Array<{ address: string; family: number }> = [];
+
+    if (isIP(initialResolution.host) !== 4 && isIP(initialResolution.host) !== 6) {
+      try {
+        records = await dns.lookup(initialResolution.host, { all: true });
+      } catch {
+        throw new HttpError(422, 'Failed to resolve target hostname.');
+      }
+
+      for (const record of records) {
+        if (isPrivateHost(record.address)) {
+          throw new HttpError(400, 'Target resolves to a private address, which is not allowed.');
+        }
+        if (!resolutions.some((resolution) => resolution.address === record.address)) {
+          resolutions.push({ host: initialResolution.host, address: record.address });
+        }
+      }
+    }
+
+    let fetchResult: FetchWithCleanupResult | null = null;
+    for (const resolution of resolutions) {
+      try {
+        fetchResult = await fetchWithPinnedResolution(currentUrl, signal, resolution);
+        break;
+      } catch {
+        // Try the next validated address before failing the request.
+      }
+    }
+
+    if (!fetchResult) {
+      throw new HttpError(422, 'Failed to resolve target hostname.');
+    }
+
+    const { response, cleanup } = fetchResult;
 
     if (response.status >= 300 && response.status < 400) {
       try {
+        if (redirectsFollowed >= MAX_REDIRECTS) {
+          throw new HttpError(422, `Too many redirects (max ${MAX_REDIRECTS}).`);
+        }
+
         const location = response.headers.get('location');
         if (!location) {
           throw new HttpError(422, `Redirect response missing location header (status ${response.status}).`);
@@ -730,6 +752,7 @@ async function fetchWithValidatedRedirects(
         }
 
         currentUrl = nextUrl;
+        redirectsFollowed += 1;
       } finally {
         try {
           await response.body?.cancel();
@@ -743,8 +766,6 @@ async function fetchWithValidatedRedirects(
 
     return { response, cleanup };
   }
-
-  throw new HttpError(422, `Too many redirects (max ${MAX_REDIRECTS}).`);
 }
 
 async function readHtmlWithLimit(response: FetchResponse, abortController: AbortController): Promise<string> {
@@ -799,6 +820,7 @@ export default async function handler(req: any, res: any) {
     const embedOrigin = normalizeOrigin(req.query?.origin);
 
     const { response, cleanup } = await fetchWithValidatedRedirects(targetUrl, abortController.signal);
+    let bodyConsumed = false;
 
     try {
       if (!response.ok) {
@@ -816,6 +838,7 @@ export default async function handler(req: any, res: any) {
 
       const finalUrl = response.url || targetUrl.toString();
       const html = await readHtmlWithLimit(response, abortController);
+      bodyConsumed = true;
       const xFrameOptions = response.headers.get('x-frame-options') || '';
       const contentSecurityPolicy = response.headers.get('content-security-policy') || '';
       const framePolicy = analyzeFrameEmbeddability({
@@ -867,6 +890,13 @@ export default async function handler(req: any, res: any) {
         },
       });
     } finally {
+      if (!bodyConsumed) {
+        try {
+          await response.body?.cancel();
+        } catch {
+          abortController.abort();
+        }
+      }
       await cleanup();
     }
   } catch (error: any) {
