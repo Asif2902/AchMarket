@@ -391,6 +391,20 @@ function parseHostSourcePattern(pattern: string): HostSourcePattern | null {
   };
 }
 
+function protocolMatchesSchemePart(patternScheme: string, candidateProtocol: string): boolean {
+  const normalizedPatternScheme = patternScheme.toLowerCase().replace(/:$/, '');
+  const normalizedCandidateProtocol = candidateProtocol.toLowerCase();
+
+  if (normalizedPatternScheme === 'http') {
+    return normalizedCandidateProtocol === 'http:' || normalizedCandidateProtocol === 'https:';
+  }
+  if (normalizedPatternScheme === 'https') {
+    return normalizedCandidateProtocol === 'https:';
+  }
+
+  return normalizedCandidateProtocol === `${normalizedPatternScheme}:`;
+}
+
 function matchesHostSourceOrigin(pattern: string, origin: string, targetOrigin: string): boolean {
   let parsedOrigin: URL;
   try {
@@ -410,20 +424,6 @@ function matchesHostSourceOrigin(pattern: string, origin: string, targetOrigin: 
 
   const parsedPattern = parseHostSourcePattern(pattern);
   if (!parsedPattern) return false;
-
-  const protocolMatchesSchemePart = (patternScheme: string, candidateProtocol: string): boolean => {
-    const normalizedPatternScheme = patternScheme.toLowerCase().replace(/:$/, '');
-    const normalizedCandidateProtocol = candidateProtocol.toLowerCase();
-
-    if (normalizedPatternScheme === 'http') {
-      return normalizedCandidateProtocol === 'http:' || normalizedCandidateProtocol === 'https:';
-    }
-    if (normalizedPatternScheme === 'https') {
-      return normalizedCandidateProtocol === 'https:';
-    }
-
-    return normalizedCandidateProtocol === `${normalizedPatternScheme}:`;
-  };
 
   if (parsedPattern.scheme) {
     if (!protocolMatchesSchemePart(parsedPattern.scheme, parsedOrigin.protocol)) {
@@ -465,20 +465,6 @@ function tokenAllowsOrigin(token: string, embedOrigin: string, targetOrigin: str
       parsedEmbedOrigin = null;
     }
   }
-
-  const protocolMatchesSchemePart = (patternScheme: string, candidateProtocol: string): boolean => {
-    const normalizedPatternScheme = patternScheme.toLowerCase().replace(/:$/, '');
-    const normalizedCandidateProtocol = candidateProtocol.toLowerCase();
-
-    if (normalizedPatternScheme === 'http') {
-      return normalizedCandidateProtocol === 'http:' || normalizedCandidateProtocol === 'https:';
-    }
-    if (normalizedPatternScheme === 'https') {
-      return normalizedCandidateProtocol === 'https:';
-    }
-
-    return normalizedCandidateProtocol === `${normalizedPatternScheme}:`;
-  };
 
   if (normalized === "'self'") {
     return embedOrigin !== '' && embedOrigin === targetOrigin;
@@ -714,13 +700,17 @@ async function fetchWithValidatedRedirects(
       try {
         fetchResult = await fetchWithPinnedResolution(currentUrl, signal, resolution);
         break;
-      } catch {
+      } catch (error: any) {
+        if (error?.name === 'AbortError') {
+          throw error;
+        }
+
         // Try the next validated address before failing the request.
       }
     }
 
     if (!fetchResult) {
-      throw new HttpError(422, 'Failed to resolve target hostname.');
+      throw new HttpError(504, 'Failed to fetch target URL.');
     }
 
     const { response, cleanup } = fetchResult;
