@@ -83,7 +83,7 @@ function parseIpv6(value: string): number[] | null {
 
 function isPrivateIpv6(host: string): boolean {
   const normalized = host.trim().toLowerCase();
-  if (normalized === '::1') return true;
+  if (normalized === '::1' || normalized === '::') return true;
 
   const isIpv4MappedPrefix = (parts: number[]): boolean => {
     return (
@@ -125,6 +125,20 @@ function isPrivateIpv6(host: string): boolean {
 
   const parts = parseIpv6(normalized);
   if (!parts) return true;
+
+  const isUnspecified = parts.every((part) => part === 0);
+  if (isUnspecified) return true;
+
+  const isLoopback =
+    parts[0] === 0 &&
+    parts[1] === 0 &&
+    parts[2] === 0 &&
+    parts[3] === 0 &&
+    parts[4] === 0 &&
+    parts[5] === 0 &&
+    parts[6] === 0 &&
+    parts[7] === 1;
+  if (isLoopback) return true;
 
   if (isIpv4MappedPrefix(parts)) {
     return isPrivateIpv4(ipv4FromMappedParts(parts));
