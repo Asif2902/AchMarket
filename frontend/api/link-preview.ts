@@ -105,7 +105,7 @@ function isPrivateIpv6(host: string): boolean {
   }
 
   const parts = parseIpv6(normalized);
-  if (!parts) return false;
+  if (!parts) return true;
 
   if (isIpv4MappedPrefix(parts)) {
     return isPrivateIpv4(ipv4FromMappedParts(parts));
