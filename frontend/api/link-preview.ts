@@ -327,7 +327,7 @@ function parseHostSourcePattern(pattern: string): HostSourcePattern | null {
   };
 }
 
-function matchesHostSourceOrigin(pattern: string, origin: string): boolean {
+function matchesHostSourceOrigin(pattern: string, origin: string, targetOrigin: string): boolean {
   let parsedOrigin: URL;
   try {
     parsedOrigin = new URL(origin);
@@ -335,11 +335,26 @@ function matchesHostSourceOrigin(pattern: string, origin: string): boolean {
     return false;
   }
 
+  let targetParsed: URL | null = null;
+  if (targetOrigin) {
+    try {
+      targetParsed = new URL(targetOrigin);
+    } catch {
+      return false;
+    }
+  }
+
   const parsedPattern = parseHostSourcePattern(pattern);
   if (!parsedPattern) return false;
 
-  if (parsedPattern.scheme && parsedOrigin.protocol !== `${parsedPattern.scheme}:`) {
-    return false;
+  if (parsedPattern.scheme) {
+    if (parsedOrigin.protocol !== `${parsedPattern.scheme}:`) {
+      return false;
+    }
+  } else if (targetParsed) {
+    if (parsedOrigin.protocol !== targetParsed.protocol) {
+      return false;
+    }
   }
 
   const originHost = normalizeBracketedHost(parsedOrigin.hostname.toLowerCase());
@@ -380,10 +395,10 @@ function tokenAllowsOrigin(token: string, embedOrigin: string, targetOrigin: str
   if (!embedOrigin) return false;
 
   if (!normalized.includes('://')) {
-    return matchesHostSourceOrigin(normalized, embedOrigin);
+    return matchesHostSourceOrigin(normalized, embedOrigin, targetOrigin);
   }
 
-  if (matchesHostSourceOrigin(normalized, embedOrigin)) {
+  if (matchesHostSourceOrigin(normalized, embedOrigin, targetOrigin)) {
     return true;
   }
 
@@ -410,21 +425,24 @@ function analyzeFrameEmbeddability(params: {
   }
 
   const xfo = xFrameOptions.trim().toLowerCase();
-  if (xfo.includes('deny')) {
+  const xfoToken = xfo.split(/\s+/)[0];
+  if (xfoToken === 'deny') {
     return { embeddable: false, reason: 'Blocked by X-Frame-Options: DENY.' };
   }
 
-  if (xfo.includes('sameorigin')) {
+  if (xfoToken === 'sameorigin') {
     if (!embedOrigin || !targetOrigin || embedOrigin !== targetOrigin) {
       return { embeddable: false, reason: 'Blocked by X-Frame-Options: SAMEORIGIN.' };
     }
   }
 
-  const allowFromMatch = xfo.match(/allow-from\s+([^\s]+)/i);
-  if (allowFromMatch) {
-    const allowedOrigin = normalizeOrigin(allowFromMatch[1]);
-    if (!embedOrigin || !allowedOrigin || allowedOrigin !== embedOrigin) {
-      return { embeddable: false, reason: 'Blocked by X-Frame-Options ALLOW-FROM policy.' };
+  if (xfoToken === 'allow-from') {
+    const allowFromMatch = xfo.match(/allow-from\s+([^\s]+)/i);
+    if (allowFromMatch) {
+      const allowedOrigin = normalizeOrigin(allowFromMatch[1]);
+      if (!embedOrigin || !allowedOrigin || allowedOrigin !== embedOrigin) {
+        return { embeddable: false, reason: 'Blocked by X-Frame-Options ALLOW-FROM policy.' };
+      }
     }
   }
 
