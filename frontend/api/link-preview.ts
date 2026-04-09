@@ -296,7 +296,7 @@ function normalizeOrigin(raw: unknown): string {
   }
 }
 
-async function validateAndProxyImageUrl(urlLike: string, baseUrl: string): Promise<string> {
+async function validateAndSuppressImageUrl(urlLike: string, baseUrl: string): Promise<string> {
   const absoluteUrl = toAbsoluteUrl(urlLike, baseUrl);
   if (!absoluteUrl) return '';
 
@@ -319,10 +319,10 @@ async function validateAndProxyImageUrl(urlLike: string, baseUrl: string): Promi
   }
 }
 
-async function pickFirstValidImageUrl(values: Array<string | null | undefined>, baseUrl: string): Promise<string> {
+async function pickFirstSuppressedImageUrl(values: Array<string | null | undefined>, baseUrl: string): Promise<string> {
   for (const value of values) {
     if (typeof value !== 'string' || !value.trim()) continue;
-    const validated = await validateAndProxyImageUrl(value.trim(), baseUrl);
+    const validated = await validateAndSuppressImageUrl(value.trim(), baseUrl);
     if (validated) return validated;
   }
 
@@ -833,7 +833,8 @@ export default async function handler(req: any, res: any) {
         extractMetaByKey(html, 'description', 'name'),
       ]);
 
-      const image = await pickFirstValidImageUrl(
+      // Remote preview images are intentionally omitted until they can be served via a server-controlled proxy.
+      const image = await pickFirstSuppressedImageUrl(
         [
           extractMetaByKey(html, 'og:image', 'property'),
           extractMetaByKey(html, 'twitter:image', 'name'),
