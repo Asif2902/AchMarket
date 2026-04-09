@@ -8,6 +8,7 @@ import { EMPTY_PROFILE_PAYLOAD, normalizeProfileSlug, type ProfilePayload } from
 import { fetchProfileByAddress, saveProfileBySignature, uploadProfileAvatar, deleteProfileAvatar } from '../../services/profile';
 import type { PublicProfile as PublicProfileType } from '../../types/profile';
 import { compressAvatarImage } from '../../utils/avatarImage';
+import { withImageVersion } from '../../utils/format';
 
 function toProfilePayload(profile: PublicProfileType | null): ProfilePayload {
   if (!profile) return { ...EMPTY_PROFILE_PAYLOAD };
@@ -34,6 +35,7 @@ export default function ProfileSettings() {
   const [localAvatarPreviewUrl, setLocalAvatarPreviewUrl] = useState<string | null>(null);
   const [form, setForm] = useState<ProfilePayload>({ ...EMPTY_PROFILE_PAYLOAD });
   const [profileSlug, setProfileSlug] = useState('');
+  const [profileUpdatedAt, setProfileUpdatedAt] = useState('');
   const [msg, setMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [linkCopied, setLinkCopied] = useState(false);
   const currentRequestIdRef = useRef(0);
@@ -58,6 +60,7 @@ export default function ProfileSettings() {
       setLoading(false);
       setForm({ ...EMPTY_PROFILE_PAYLOAD });
       setProfileSlug('');
+      setProfileUpdatedAt('');
       setAvatarUploadMeta(null);
       setLocalAvatarPreviewUrl((prev) => {
         if (prev) URL.revokeObjectURL(prev);
@@ -81,6 +84,7 @@ export default function ProfileSettings() {
         setMsg(null);
         setForm({ ...EMPTY_PROFILE_PAYLOAD });
         setProfileSlug('');
+        setProfileUpdatedAt('');
         setAvatarUploadMeta(null);
         setLocalAvatarPreviewUrl((prev) => {
           if (prev) URL.revokeObjectURL(prev);
@@ -97,11 +101,13 @@ export default function ProfileSettings() {
         if (!cancelled) {
           setForm(toProfilePayload(response.profile));
           setProfileSlug(toProfileSlug(response.profile));
+          setProfileUpdatedAt(response.profile?.updatedAt ?? '');
         }
       } catch (err) {
         if (!cancelled) {
           setForm({ ...EMPTY_PROFILE_PAYLOAD });
           setProfileSlug('');
+          setProfileUpdatedAt('');
           const message = err instanceof Error ? err.message : 'Failed to load profile';
           setMsg({ type: 'error', text: message });
         }
@@ -147,7 +153,7 @@ export default function ProfileSettings() {
 
   const displayName = form.displayName.trim() || (address ? `${address.slice(0, 6)}...${address.slice(-4)}` : 'Trader');
   const avatarUrl = form.avatarUrl.trim();
-  const avatarPreviewSrc = localAvatarPreviewUrl || avatarUrl;
+  const avatarPreviewSrc = localAvatarPreviewUrl || withImageVersion(avatarUrl, profileUpdatedAt);
   const shareLinkHref = publicProfileLink || '#';
 
   const updateField = (key: keyof ProfilePayload, value: string) => {
@@ -239,6 +245,7 @@ export default function ProfileSettings() {
 
       setForm(mergedPayload);
       setProfileSlug(toProfileSlug(saved.profile));
+      setProfileUpdatedAt(saved.profile?.updatedAt ?? '');
       setAvatarUploadMeta({ bytes: uploaded.byteLength, type: uploaded.contentType });
       setLocalAvatarPreviewUrl((prev) => {
         if (prev) URL.revokeObjectURL(prev);
@@ -290,6 +297,7 @@ export default function ProfileSettings() {
       if (requestIdCaptured === currentRequestIdRef.current && addressRef.current === address && signerRef.current === signer) {
         setForm(toProfilePayload(response.profile));
         setProfileSlug(toProfileSlug(response.profile));
+        setProfileUpdatedAt(response.profile?.updatedAt ?? '');
         setMsg({ type: 'success', text: 'Profile updated.' });
       }
     } catch (err) {

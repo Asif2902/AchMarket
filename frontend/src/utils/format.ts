@@ -237,6 +237,18 @@ export function resolveImageUri(uri: string): string {
   }
 }
 
+export function withImageVersion(uri: string, version: string): string {
+  if (!uri || !version) return uri;
+
+  try {
+    const url = new URL(uri);
+    url.searchParams.set('v', version);
+    return url.toString();
+  } catch {
+    return uri;
+  }
+}
+
 /**
  * Compute slippage-adjusted max cost for buying.
  */

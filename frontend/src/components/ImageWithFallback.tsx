@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { resolveImageUri } from '../utils/format';
 
 interface Props {
@@ -10,14 +10,31 @@ interface Props {
 export default function ImageWithFallback({ src, alt, className = '' }: Props) {
   const [error, setError] = useState(false);
   const [loading, setLoading] = useState(true);
+  const imgRef = useRef<HTMLImageElement | null>(null);
   const resolved = resolveImageUri(src);
 
   useEffect(() => {
     setError(false);
-    setLoading(Boolean(src));
-  }, [src]);
+    setLoading(Boolean(resolved));
+  }, [resolved]);
 
-  if (!src || error) {
+  useEffect(() => {
+    const image = imgRef.current;
+    if (!image || !resolved) return;
+
+    if (!image.complete) return;
+
+    if (image.naturalWidth > 0 && image.naturalHeight > 0) {
+      setError(false);
+      setLoading(false);
+      return;
+    }
+
+    setError(true);
+    setLoading(false);
+  }, [resolved]);
+
+  if (!resolved || error) {
     return (
       <div className={`flex items-center justify-center bg-gradient-to-br from-dark-800 to-dark-900 ${className}`}>
         <div className="text-center p-4">
@@ -36,6 +53,7 @@ export default function ImageWithFallback({ src, alt, className = '' }: Props) {
     <div className={`relative overflow-hidden bg-dark-850 ${className}`}>
       {loading && <div className="absolute inset-0 skeleton" />}
       <img
+        ref={imgRef}
         src={resolved}
         alt={alt}
         className={`w-full h-full object-cover transition-all duration-500 ${loading ? 'opacity-0 scale-105' : 'opacity-100 scale-100'} group-hover:scale-105`}
