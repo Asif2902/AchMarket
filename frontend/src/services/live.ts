@@ -11,6 +11,7 @@ import type {
 const LIVE_FEED_CONFIG_API_PATH = '/api/live-feed-config';
 const LIVE_MARKET_API_PATH = '/api/live-market';
 const LIVE_FEED_SUGGEST_API_PATH = '/api/live-feed-suggest';
+const LIVE_CONFIG_BATCH_SIZE = 50;
 
 function serializeLiveFeedPayload(payload: LiveFeedConfigInput): string {
   if (payload.kind === 'crypto-price') {
@@ -127,9 +128,21 @@ export async function fetchLiveFeedConfig(marketAddress: string): Promise<LiveFe
 export async function fetchLiveFeedConfigs(marketAddresses: string[]): Promise<LiveFeedConfig[]> {
   if (!marketAddresses.length) return [];
   const normalized = Array.from(new Set(marketAddresses.map(sanitizeMarketAddress)));
-  const response = await fetch(withCacheBust(`${LIVE_FEED_CONFIG_API_PATH}?marketAddresses=${encodeURIComponent(normalized.join(','))}`));
-  const body = await parseApiResponse<{ configs: LiveFeedConfig[] }>(response);
-  return Array.isArray(body.configs) ? body.configs : [];
+
+  const chunks: string[][] = [];
+  for (let i = 0; i < normalized.length; i += LIVE_CONFIG_BATCH_SIZE) {
+    chunks.push(normalized.slice(i, i + LIVE_CONFIG_BATCH_SIZE));
+  }
+
+  const responses = await Promise.all(
+    chunks.map(async (chunk) => {
+      const response = await fetch(withCacheBust(`${LIVE_FEED_CONFIG_API_PATH}?marketAddresses=${encodeURIComponent(chunk.join(','))}`));
+      const body = await parseApiResponse<{ configs: LiveFeedConfig[] }>(response);
+      return Array.isArray(body.configs) ? body.configs : [];
+    }),
+  );
+
+  return responses.flat();
 }
 
 export async function saveLiveFeedConfig(

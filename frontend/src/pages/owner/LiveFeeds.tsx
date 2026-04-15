@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
-import { STAGE_LABELS, STAGE_COLORS } from '../../config/network';
+import { STAGE, STAGE_LABELS, STAGE_COLORS } from '../../config/network';
 import { useWallet } from '../../context/WalletContext';
 import { PageLoader } from '../../components/LoadingSpinner';
 import EmptyState from '../../components/EmptyState';
@@ -15,6 +15,22 @@ import type {
   LiveFeedSuggestionsResponse,
 } from '../../types/live';
 import { parseContractError } from '../../utils/format';
+
+type StageFilter = 'all' | 'active' | 'resolved' | 'cancelled';
+
+function matchesStageFilter(stage: number, filter: StageFilter): boolean {
+  if (filter === 'all') return true;
+  if (filter === 'active') {
+    return stage === STAGE.Active || stage === STAGE.Suspended;
+  }
+  if (filter === 'resolved') {
+    return stage === STAGE.Resolved;
+  }
+  if (filter === 'cancelled') {
+    return stage === STAGE.Cancelled || stage === STAGE.Expired;
+  }
+  return true;
+}
 
 interface LiveFeedModalProps {
   isOpen: boolean;
@@ -415,6 +431,8 @@ export default function LiveFeeds() {
   const { markets, loading } = useOwnerMarkets();
   const [configs, setConfigs] = useState<Record<string, LiveFeedConfig>>({});
   const [configLoading, setConfigLoading] = useState(false);
+  const [stageFilter, setStageFilter] = useState<StageFilter>('active');
+  const [categoryFilter, setCategoryFilter] = useState<string>('all');
   const [selectedMarket, setSelectedMarket] = useState<{
     address: string;
     title: string;
@@ -428,22 +446,35 @@ export default function LiveFeeds() {
     return [...markets].sort((a, b) => b.marketId - a.marketId);
   }, [markets]);
 
+  const categoryOptions = useMemo(() => {
+    const unique = Array.from(new Set(sortedMarkets.map((m) => m.category?.trim()).filter(Boolean)));
+    unique.sort((a, b) => a.localeCompare(b));
+    return unique;
+  }, [sortedMarkets]);
+
+  const filteredMarkets = useMemo(() => {
+    return sortedMarkets.filter((market) => {
+      if (!matchesStageFilter(market.stage, stageFilter)) return false;
+      if (categoryFilter !== 'all' && market.category !== categoryFilter) return false;
+      return true;
+    });
+  }, [sortedMarkets, stageFilter, categoryFilter]);
+
   useEffect(() => {
     let cancelled = false;
     const run = async () => {
-      if (!sortedMarkets.length) {
-        setConfigs({});
+      if (!filteredMarkets.length) {
         return;
       }
       setConfigLoading(true);
       try {
-        const fetched = await fetchLiveFeedConfigs(sortedMarkets.map((m) => m.market));
+        const fetched = await fetchLiveFeedConfigs(filteredMarkets.map((m) => m.market));
         if (cancelled) return;
         const next: Record<string, LiveFeedConfig> = {};
         for (const item of fetched) {
           next[item.marketAddress.toLowerCase()] = item;
         }
-        setConfigs(next);
+        setConfigs((prev) => ({ ...prev, ...next }));
       } catch (err) {
         console.error('Failed to fetch live feed configs:', err);
       } finally {
@@ -454,7 +485,7 @@ export default function LiveFeeds() {
     return () => {
       cancelled = true;
     };
-  }, [sortedMarkets, refreshTick]);
+  }, [filteredMarkets, refreshTick]);
 
   const selectedConfig = selectedMarket
     ? (configs[selectedMarket.address.toLowerCase()] ?? null)
@@ -474,8 +505,54 @@ export default function LiveFeeds() {
           Live Feeds
         </h1>
         <span className="badge bg-dark-750/80 text-dark-300 border-white/[0.08]">
-          {Object.values(configs).filter((c) => c.enabled).length} enabled
+          {filteredMarkets.filter((m) => configs[m.market.toLowerCase()]?.enabled).length} enabled
         </span>
+      </div>
+
+      <div className="card p-4 space-y-4">
+        <div>
+          <p className="text-2xs uppercase tracking-[0.14em] text-white/45 font-semibold mb-2">Stage Filter</p>
+          <div className="flex flex-wrap gap-2">
+            {[
+              { key: 'all', label: 'All' },
+              { key: 'active', label: 'Active / Suspended' },
+              { key: 'resolved', label: 'Resolved' },
+              { key: 'cancelled', label: 'Cancelled / Expired' },
+            ].map((item) => (
+              <button
+                key={item.key}
+                type="button"
+                onClick={() => setStageFilter(item.key as StageFilter)}
+                className={`chip ${stageFilter === item.key ? 'chip-active' : ''}`}
+              >
+                {item.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div>
+          <p className="text-2xs uppercase tracking-[0.14em] text-white/45 font-semibold mb-2">Category Filter</p>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => setCategoryFilter('all')}
+              className={`chip ${categoryFilter === 'all' ? 'chip-active' : ''}`}
+            >
+              All
+            </button>
+            {categoryOptions.map((category) => (
+              <button
+                key={category}
+                type="button"
+                onClick={() => setCategoryFilter(category)}
+                className={`chip ${categoryFilter === category ? 'chip-active' : ''}`}
+              >
+                {category}
+              </button>
+            ))}
+          </div>
+        </div>
       </div>
 
       <div className="card p-4 border-primary-500/20 bg-primary-500/5">
@@ -487,9 +564,11 @@ export default function LiveFeeds() {
 
       {sortedMarkets.length === 0 ? (
         <EmptyState title="No markets yet" description="Create a market first, then attach a live feed." />
+      ) : filteredMarkets.length === 0 ? (
+        <EmptyState title="No markets in this filter" description="Try another stage/category combination." />
       ) : (
         <div className="space-y-3">
-          {sortedMarkets.map((market) => {
+          {filteredMarkets.map((market) => {
             const config = configs[market.market.toLowerCase()] || null;
             const isConfigured = Boolean(config);
             const isEnabled = Boolean(config?.enabled);

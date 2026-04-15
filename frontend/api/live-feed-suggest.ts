@@ -46,6 +46,36 @@ const CRYPTO_ASSETS: CryptoAsset[] = [
   { id: 'optimism', symbol: 'OP', aliases: ['op', 'optimism'] },
 ];
 
+const SPORTS_STOP_WORDS = new Set([
+  'will',
+  'be',
+  'is',
+  'the',
+  'a',
+  'an',
+  'to',
+  'of',
+  'in',
+  'on',
+  'at',
+  'by',
+  'for',
+  'and',
+  'or',
+  'market',
+  'match',
+  'game',
+  'final',
+  'playoff',
+  'season',
+  'today',
+  'tomorrow',
+  'week',
+  'this',
+  'that',
+  'team',
+]);
+
 function normalizeText(value: string): string {
   return value
     .toLowerCase()
@@ -183,11 +213,43 @@ function detectCrypto(input: SuggestRequest) {
 
 function cleanTeamName(value: string): string {
   return value
+    .replace(/\b(will|be|is|are|the|a|an|to|of|in|on|at|by|for|market|match|game|final|playoff|season|today|tomorrow)\b/gi, '')
     .replace(/\b(fc|afc|cf|sc|ac|club|team)\b/gi, '')
     .replace(/\b(win|wins|winner|to win|draw|yes|no|over|under)\b/gi, '')
+    .replace(/\b(\d{1,2}:\d{2}|\d{1,2}(st|nd|rd|th)|20\d{2})\b/gi, '')
     .replace(/[()\[\]{}]/g, ' ')
+    .replace(/[-_]/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
+}
+
+function splitTitleSegments(title: string): string[] {
+  return title
+    .split(/[|:;,]/)
+    .map((part) => part.trim())
+    .filter(Boolean);
+}
+
+function tokenizeCandidateWords(value: string): string[] {
+  return value
+    .toLowerCase()
+    .split(/\s+/)
+    .map((token) => token.replace(/[^a-z0-9]/g, '').trim())
+    .filter((token) => token.length >= 2 && !SPORTS_STOP_WORDS.has(token));
+}
+
+function pickBestTeamPhrase(segment: string): string {
+  const cleaned = cleanTeamName(segment);
+  if (!cleaned) return '';
+
+  const words = tokenizeCandidateWords(cleaned);
+  if (words.length === 0) return '';
+  if (words.length <= 4) {
+    return words.map((word) => word[0].toUpperCase() + word.slice(1)).join(' ');
+  }
+
+  const condensed = words.slice(0, 4);
+  return condensed.map((word) => word[0].toUpperCase() + word.slice(1)).join(' ');
 }
 
 function extractTeamsFromTitle(title: string): { home: string; away: string } | null {
@@ -211,7 +273,42 @@ function extractTeamsFromTitle(title: string): { home: string; away: string } | 
     }
   }
 
+  const segments = splitTitleSegments(compact);
+  if (segments.length >= 2) {
+    const first = pickBestTeamPhrase(segments[0]);
+    const second = pickBestTeamPhrase(segments[1]);
+    if (first && second && first.toLowerCase() !== second.toLowerCase()) {
+      return { home: first, away: second };
+    }
+  }
+
   return null;
+}
+
+function textSimilarityScore(a: string, b: string): number {
+  const aTokens = new Set(tokenizeCandidateWords(a));
+  const bTokens = new Set(tokenizeCandidateWords(b));
+  if (!aTokens.size || !bTokens.size) return 0;
+
+  let overlap = 0;
+  for (const token of aTokens) {
+    if (bTokens.has(token)) overlap += 1;
+  }
+
+  const denom = Math.max(aTokens.size, bTokens.size);
+  return denom > 0 ? overlap / denom : 0;
+}
+
+function enrichSportsCandidateScore(candidate: SportsCandidate, pair: { home: string; away: string }): number {
+  const base = scoreSportsCandidate(candidate);
+  const directOrder =
+    textSimilarityScore(candidate.homeTeam, pair.home) +
+    textSimilarityScore(candidate.awayTeam, pair.away);
+  const reverseOrder =
+    textSimilarityScore(candidate.homeTeam, pair.away) +
+    textSimilarityScore(candidate.awayTeam, pair.home);
+  const teamScore = Math.max(directOrder, reverseOrder) / 2;
+  return base * 0.45 + teamScore * 0.55;
 }
 
 function extractTeamsFromOutcomes(outcomeLabels: string[]): { home: string; away: string } | null {
@@ -276,16 +373,101 @@ function scoreSportsCandidate(candidate: SportsCandidate): number {
   return 0.5;
 }
 
+function mapEventToSportsCandidate(
+  event: any,
+  input: SuggestRequest,
+  fallbackPair: { home: string; away: string } | null,
+): SportsCandidate | null {
+  const eventId = typeof event?.idEvent === 'string' ? event.idEvent : '';
+  if (!eventId) return null;
+
+  const homeTeam =
+    typeof event?.strHomeTeam === 'string' && event.strHomeTeam.trim()
+      ? event.strHomeTeam.trim()
+      : (fallbackPair?.home || 'Home');
+  const awayTeam =
+    typeof event?.strAwayTeam === 'string' && event.strAwayTeam.trim()
+      ? event.strAwayTeam.trim()
+      : (fallbackPair?.away || 'Away');
+
+  const kickoffRaw = typeof event?.strTimestamp === 'string' ? event.strTimestamp : '';
+  const kickoffAt = kickoffRaw && Number.isFinite(Date.parse(kickoffRaw)) ? new Date(kickoffRaw).toISOString() : null;
+  const status = normalizeSportsStatus(typeof event?.strStatus === 'string' ? event.strStatus : '');
+
+  return {
+    eventId,
+    leagueName: typeof event?.strLeague === 'string' ? event.strLeague : input.category || 'Sports',
+    homeTeam,
+    awayTeam,
+    kickoffAt,
+    status: status.status,
+    statusLabel: status.statusLabel,
+  };
+}
+
+function dedupeSportsCandidates(candidates: SportsCandidate[]): SportsCandidate[] {
+  const seen = new Set<string>();
+  const out: SportsCandidate[] = [];
+  for (const candidate of candidates) {
+    const key = candidate.eventId.trim();
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    out.push(candidate);
+  }
+  return out;
+}
+
+async function fetchSportsCandidatesByQuery(
+  query: string,
+  input: SuggestRequest,
+  fallbackPair: { home: string; away: string } | null,
+): Promise<SportsCandidate[]> {
+  const normalizedQuery = query.replace(/\s+/g, ' ').trim();
+  if (!normalizedQuery) return [];
+
+  const endpoint = `https://www.thesportsdb.com/api/v1/json/3/searchevents.php?e=${encodeURIComponent(normalizedQuery.replace(/\s+/g, '_'))}`;
+  const json = await fetchJsonWithTimeout(endpoint);
+  const events = Array.isArray(json?.event) ? json.event : [];
+  return events
+    .map((event: any) => mapEventToSportsCandidate(event, input, fallbackPair))
+    .filter((candidate: SportsCandidate | null): candidate is SportsCandidate => Boolean(candidate));
+}
+
 async function detectSports(input: SuggestRequest) {
+  const categoryHint = /(sport|soccer|football|nba|nfl|mlb|tennis|match|game|league)/i.test(input.category);
   const titleTeams = extractTeamsFromTitle(input.title);
   const outcomeTeams = extractTeamsFromOutcomes(input.outcomeLabels);
   const teamPair = titleTeams || outcomeTeams;
 
-  if (!teamPair) {
+  let candidates: SportsCandidate[] = [];
+
+  if (teamPair) {
+    const pairQuery = `${teamPair.home} vs ${teamPair.away}`;
+    const reversePairQuery = `${teamPair.away} vs ${teamPair.home}`;
+    const titleQuery = input.title.trim();
+    const queries = [pairQuery, reversePairQuery, titleQuery].filter(Boolean);
+
+    const fetchedGroups = await Promise.all(
+      queries.map((query) => fetchSportsCandidatesByQuery(query, input, teamPair).catch(() => [])),
+    );
+
+    candidates = dedupeSportsCandidates(fetchedGroups.flat())
+      .sort((a, b) => enrichSportsCandidateScore(b, teamPair) - enrichSportsCandidateScore(a, teamPair))
+      .slice(0, 5);
+  } else if (categoryHint && input.title.trim()) {
+    const titleOnlyCandidates = await fetchSportsCandidatesByQuery(input.title.trim(), input, null).catch(() => []);
+    candidates = dedupeSportsCandidates(titleOnlyCandidates)
+      .sort((a, b) => scoreSportsCandidate(b) - scoreSportsCandidate(a))
+      .slice(0, 5);
+  }
+
+  if (!teamPair && candidates.length === 0) {
     return {
       detected: false,
       confidence: 0,
-      reason: 'No clear team-vs-team pattern detected from title/outcomes.',
+      reason: categoryHint
+        ? 'No sports events found from this title yet. You can still enter Event ID manually.'
+        : 'No clear team-vs-team pattern detected from title/outcomes.',
       homeTeam: null,
       awayTeam: null,
       selectedEventId: null,
@@ -294,47 +476,48 @@ async function detectSports(input: SuggestRequest) {
     };
   }
 
-  const searchQuery = `${teamPair.home}_vs_${teamPair.away}`.replace(/\s+/g, '_');
-  const endpoint = `https://www.thesportsdb.com/api/v1/json/3/searchevents.php?e=${encodeURIComponent(searchQuery)}`;
-
-  let candidates: SportsCandidate[] = [];
-  try {
-    const json = await fetchJsonWithTimeout(endpoint);
-    const events = Array.isArray(json?.event) ? json.event : [];
-
-    candidates = events
-      .map((event: any): SportsCandidate | null => {
-        const eventId = typeof event?.idEvent === 'string' ? event.idEvent : '';
-        if (!eventId) return null;
-
-        const homeTeam = typeof event?.strHomeTeam === 'string' ? event.strHomeTeam : teamPair.home;
-        const awayTeam = typeof event?.strAwayTeam === 'string' ? event.strAwayTeam : teamPair.away;
-        const kickoffRaw = typeof event?.strTimestamp === 'string' ? event.strTimestamp : '';
-        const kickoffAt = kickoffRaw && Number.isFinite(Date.parse(kickoffRaw)) ? new Date(kickoffRaw).toISOString() : null;
-        const status = normalizeSportsStatus(typeof event?.strStatus === 'string' ? event.strStatus : '');
-
-        return {
-          eventId,
-          leagueName: typeof event?.strLeague === 'string' ? event.strLeague : input.category || 'Sports',
-          homeTeam,
-          awayTeam,
-          kickoffAt,
-          status: status.status,
-          statusLabel: status.statusLabel,
-        };
-      })
-      .filter((item: SportsCandidate | null): item is SportsCandidate => Boolean(item))
-      .sort((a, b) => scoreSportsCandidate(b) - scoreSportsCandidate(a))
-      .slice(0, 5);
-  } catch {
-    candidates = [];
+  if (!teamPair && candidates.length > 0) {
+    const first = candidates[0];
+    return {
+      detected: true,
+      confidence: 0.58,
+      reason: 'Found sports event candidates from market title. Review and confirm before saving.',
+      homeTeam: first.homeTeam,
+      awayTeam: first.awayTeam,
+      selectedEventId: first.eventId,
+      selectedLeagueName: first.leagueName,
+      candidates,
+    };
   }
 
-  const categoryHint = /(sport|soccer|football|nba|nfl|mlb|tennis|match|game|league)/i.test(input.category);
+  if (!teamPair) {
+    return {
+      detected: false,
+      confidence: 0,
+      reason: 'Could not determine teams from this market text.',
+      homeTeam: null,
+      awayTeam: null,
+      selectedEventId: null,
+      selectedLeagueName: null,
+      candidates,
+    };
+  }
 
   let confidence = titleTeams ? 0.82 : 0.66;
   if (categoryHint) confidence += 0.06;
   if (candidates.length > 0) confidence += 0.08;
+
+  if (candidates.length > 0) {
+    const bestScore = enrichSportsCandidateScore(candidates[0], teamPair);
+    if (bestScore < 0.35) {
+      confidence = Math.min(confidence, 0.58);
+    } else if (bestScore < 0.5) {
+      confidence = Math.min(confidence, 0.68);
+    } else {
+      confidence = Math.min(0.98, confidence + 0.05);
+    }
+  }
+
   confidence = Math.min(0.98, confidence);
 
   return {
