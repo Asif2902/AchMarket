@@ -81,3 +81,46 @@ export interface LiveMarketDataUnconfiguredResponse {
 export type LiveMarketDataResponse =
   | LiveMarketDataConfiguredResponse
   | LiveMarketDataUnconfiguredResponse;
+
+export interface LiveFeedSuggestionInput {
+  title: string;
+  category?: string;
+  description?: string;
+  outcomeLabels?: string[];
+}
+
+export interface LiveCryptoSuggestion {
+  detected: boolean;
+  confidence: number;
+  reason: string;
+  coingeckoId: string | null;
+  baseSymbol: string | null;
+  quoteSymbol: string;
+  vsCurrency: string;
+}
+
+export interface LiveSportsSuggestionCandidate {
+  eventId: string;
+  leagueName: string;
+  homeTeam: string;
+  awayTeam: string;
+  kickoffAt: string | null;
+  status: string;
+  statusLabel: string;
+}
+
+export interface LiveSportsSuggestion {
+  detected: boolean;
+  confidence: number;
+  reason: string;
+  homeTeam: string | null;
+  awayTeam: string | null;
+  selectedEventId: string | null;
+  selectedLeagueName: string | null;
+  candidates: LiveSportsSuggestionCandidate[];
+}
+
+export interface LiveFeedSuggestionsResponse {
+  crypto: LiveCryptoSuggestion;
+  sports: LiveSportsSuggestion;
+}

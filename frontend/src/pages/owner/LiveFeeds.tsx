@@ -6,9 +6,14 @@ import EmptyState from '../../components/EmptyState';
 import { useOwnerMarkets } from './OwnerMarketUtils';
 import {
   fetchLiveFeedConfigs,
+  fetchLiveFeedSuggestions,
   saveLiveFeedConfig,
 } from '../../services/live';
-import type { LiveFeedConfig, LiveFeedConfigInput } from '../../types/live';
+import type {
+  LiveFeedConfig,
+  LiveFeedConfigInput,
+  LiveFeedSuggestionsResponse,
+} from '../../types/live';
 import { parseContractError } from '../../utils/format';
 
 interface LiveFeedModalProps {
@@ -16,6 +21,9 @@ interface LiveFeedModalProps {
   market: {
     address: string;
     title: string;
+    category: string;
+    description: string;
+    outcomeLabels: string[];
   } | null;
   existing: LiveFeedConfig | null;
   onClose: () => void;
@@ -32,6 +40,9 @@ function LiveFeedModal({ isOpen, market, existing, onClose, onSaved }: LiveFeedM
   const [vsCurrency, setVsCurrency] = useState('usd');
   const [eventId, setEventId] = useState('');
   const [leagueName, setLeagueName] = useState('');
+  const [suggestions, setSuggestions] = useState<LiveFeedSuggestionsResponse | null>(null);
+  const [suggesting, setSuggesting] = useState(false);
+  const [suggestionsError, setSuggestionsError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -63,6 +74,65 @@ function LiveFeedModal({ isOpen, market, existing, onClose, onSaved }: LiveFeedM
     setEventId('');
     setLeagueName('');
     setError(null);
+  }, [isOpen, market, existing]);
+
+  const applyCryptoSuggestion = (suggestion: LiveFeedSuggestionsResponse['crypto']) => {
+    if (!suggestion.detected || !suggestion.coingeckoId || !suggestion.baseSymbol) return;
+    setKind('crypto-price');
+    setCoingeckoId(suggestion.coingeckoId);
+    setBaseSymbol(suggestion.baseSymbol);
+    setQuoteSymbol(suggestion.quoteSymbol || 'USD');
+    setVsCurrency(suggestion.vsCurrency || 'usd');
+  };
+
+  const applySportsSuggestion = (suggestion: LiveFeedSuggestionsResponse['sports']) => {
+    if (!suggestion.detected) return;
+    setKind('sports-score');
+    setEventId(suggestion.selectedEventId || '');
+    setLeagueName(suggestion.selectedLeagueName || '');
+  };
+
+  useEffect(() => {
+    if (!isOpen || !market) return;
+
+    let cancelled = false;
+    setSuggesting(true);
+    setSuggestions(null);
+    setSuggestionsError(null);
+
+    fetchLiveFeedSuggestions({
+      title: market.title,
+      category: market.category,
+      description: market.description,
+      outcomeLabels: market.outcomeLabels,
+    })
+      .then((result) => {
+        if (cancelled) return;
+        setSuggestions(result);
+
+        if (existing) return;
+
+        const cryptoScore = result.crypto.detected ? result.crypto.confidence : 0;
+        const sportsScore = result.sports.detected ? result.sports.confidence : 0;
+
+        if (sportsScore > cryptoScore && result.sports.detected) {
+          applySportsSuggestion(result.sports);
+        } else if (result.crypto.detected) {
+          applyCryptoSuggestion(result.crypto);
+        }
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        const message = err instanceof Error ? err.message : 'Could not auto-detect feed suggestions.';
+        setSuggestionsError(message);
+      })
+      .finally(() => {
+        if (!cancelled) setSuggesting(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
   }, [isOpen, market, existing]);
 
   const canSave = useMemo(() => {
@@ -133,6 +203,17 @@ function LiveFeedModal({ isOpen, market, existing, onClose, onSaved }: LiveFeedM
 
         <div className="space-y-4">
           <label className="label">Feed Type</label>
+
+          <label className="flex items-center gap-2 text-sm text-dark-300">
+            <input
+              type="checkbox"
+              checked={enabled}
+              onChange={(e) => setEnabled(e.target.checked)}
+              className="rounded border-white/[0.15] bg-dark-900"
+            />
+            Enable live feed for this market
+          </label>
+
           <div className="flex rounded-xl bg-dark-900/60 p-0.5 border border-white/[0.06]">
             <button
               type="button"
@@ -154,15 +235,62 @@ function LiveFeedModal({ isOpen, market, existing, onClose, onSaved }: LiveFeedM
             </button>
           </div>
 
-          <label className="flex items-center gap-2 text-sm text-dark-300">
-            <input
-              type="checkbox"
-              checked={enabled}
-              onChange={(e) => setEnabled(e.target.checked)}
-              className="rounded border-white/[0.15] bg-dark-900"
-            />
-            Enable live feed for this market
-          </label>
+          <div className="rounded-xl border border-white/[0.08] bg-dark-900/40 p-3 space-y-2">
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-xs font-semibold text-white/90">Auto-detect from market text</p>
+              {suggesting && <span className="text-2xs text-dark-500">Detecting...</span>}
+            </div>
+
+            {!suggesting && suggestions && (
+              <div className="space-y-2">
+                <div className="flex flex-wrap items-center gap-2 text-2xs">
+                  <span className="text-dark-500">Crypto:</span>
+                  <span className={`badge ${suggestions.crypto.detected ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/25' : 'bg-dark-750/80 text-dark-400 border-white/[0.08]'}`}>
+                    {suggestions.crypto.detected
+                      ? `${suggestions.crypto.baseSymbol ?? ''}/${suggestions.crypto.quoteSymbol}`
+                      : 'Not detected'}
+                  </span>
+                  {suggestions.crypto.detected && (
+                    <button
+                      type="button"
+                      onClick={() => applyCryptoSuggestion(suggestions.crypto)}
+                      className="btn-secondary text-2xs"
+                    >
+                      Use Crypto Suggestion
+                    </button>
+                  )}
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2 text-2xs">
+                  <span className="text-dark-500">Sports:</span>
+                  <span className={`badge ${suggestions.sports.detected ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/25' : 'bg-dark-750/80 text-dark-400 border-white/[0.08]'}`}>
+                    {suggestions.sports.detected
+                      ? `${suggestions.sports.homeTeam ?? ''} vs ${suggestions.sports.awayTeam ?? ''}`
+                      : 'Not detected'}
+                  </span>
+                  {suggestions.sports.detected && (
+                    <button
+                      type="button"
+                      onClick={() => applySportsSuggestion(suggestions.sports)}
+                      className="btn-secondary text-2xs"
+                    >
+                      Use Sports Suggestion
+                    </button>
+                  )}
+                </div>
+
+                <p className="text-2xs text-dark-500">
+                  {kind === 'crypto-price'
+                    ? suggestions.crypto.reason
+                    : suggestions.sports.reason}
+                </p>
+              </div>
+            )}
+
+            {!suggesting && suggestionsError && (
+              <p className="text-2xs text-amber-400">{suggestionsError}</p>
+            )}
+          </div>
 
           {kind === 'crypto-price' ? (
             <>
@@ -212,6 +340,31 @@ function LiveFeedModal({ isOpen, market, existing, onClose, onSaved }: LiveFeedM
             </>
           ) : (
             <>
+              {suggestions?.sports.candidates && suggestions.sports.candidates.length > 0 && (
+                <div>
+                  <label className="label">Detected Events</label>
+                  <select
+                    value={eventId}
+                    onChange={(e) => {
+                      const nextId = e.target.value;
+                      setEventId(nextId);
+                      const chosen = suggestions.sports.candidates.find((item) => item.eventId === nextId);
+                      if (chosen) {
+                        setLeagueName(chosen.leagueName);
+                      }
+                    }}
+                    className="input-field"
+                  >
+                    <option value="">Select detected event</option>
+                    {suggestions.sports.candidates.map((candidate) => (
+                      <option key={candidate.eventId} value={candidate.eventId}>
+                        {candidate.homeTeam} vs {candidate.awayTeam} · {candidate.leagueName} · {candidate.statusLabel}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
               <div>
                 <label className="label">TheSportsDB Event ID</label>
                 <input
@@ -262,7 +415,13 @@ export default function LiveFeeds() {
   const { markets, loading } = useOwnerMarkets();
   const [configs, setConfigs] = useState<Record<string, LiveFeedConfig>>({});
   const [configLoading, setConfigLoading] = useState(false);
-  const [selectedMarket, setSelectedMarket] = useState<{ address: string; title: string } | null>(null);
+  const [selectedMarket, setSelectedMarket] = useState<{
+    address: string;
+    title: string;
+    category: string;
+    description: string;
+    outcomeLabels: string[];
+  } | null>(null);
   const [refreshTick, setRefreshTick] = useState(0);
 
   const sortedMarkets = useMemo(() => {
@@ -372,7 +531,13 @@ export default function LiveFeeds() {
 
                   <div className="flex items-center gap-2 shrink-0">
                     <button
-                      onClick={() => setSelectedMarket({ address: market.market, title: market.title })}
+                      onClick={() => setSelectedMarket({
+                        address: market.market,
+                        title: market.title,
+                        category: market.category,
+                        description: market.description,
+                        outcomeLabels: market.outcomeLabels,
+                      })}
                       className="btn-secondary text-xs"
                     >
                       {isConfigured ? 'Edit Feed' : 'Add Feed'}

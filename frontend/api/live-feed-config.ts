@@ -1,10 +1,11 @@
 import { recoverAddress, hashMessage, getAddress, Contract, JsonRpcProvider } from 'ethers';
-import type { Collection } from 'mongodb';
-import { getMongoClient, MONGO_DB_NAME } from './_mongo';
+import { MongoClient, type Collection } from 'mongodb';
 
 const LIVE_FEEDS_COLLECTION = 'live_feeds';
+const MONGO_URI = process.env.MONGO_URI;
+const MONGO_DB_NAME = process.env.MONGO_DB_NAME ?? 'achmarket';
 const FACTORY_ADDRESS = process.env.FACTORY_ADDRESS || '0xd7b122B12caCB299249f89be7F241a47f762f283';
-const RPC_URL = process.env.RPC_URL;
+const RPC_URL = process.env.RPC_URL || 'https://arc-testnet.drpc.org/';
 const CORS_ALLOWED_ORIGINS = (process.env.CORS_ALLOWED_ORIGINS ?? '')
   .split(',')
   .map((value) => value.trim())
@@ -60,6 +61,7 @@ interface LiveFeedPayload {
 }
 
 let indexesReady = false;
+let cachedClient: MongoClient | null = null;
 let cachedReadProvider: JsonRpcProvider | null = null;
 let cachedFactoryContract: Contract | null = null;
 
@@ -184,10 +186,37 @@ async function getCollection(): Promise<Collection<LiveFeedDoc>> {
   return collection;
 }
 
-function getRequiredRpcUrl(): string {
-  if (!RPC_URL || !RPC_URL.trim()) {
-    throw new Error('RPC_URL is required for live feed ownership checks. Configure RPC_URL env var.');
+async function getMongoClient(): Promise<MongoClient> {
+  if (!MONGO_URI) {
+    throw new Error('MONGO_URI is not configured');
   }
+
+  if (cachedClient) {
+    try {
+      await cachedClient.db(MONGO_DB_NAME).command({ ping: 1 });
+      return cachedClient;
+    } catch {
+      try {
+        await cachedClient.close();
+      } catch {
+        // ignore close errors
+      }
+      cachedClient = null;
+      indexesReady = false;
+    }
+  }
+
+  cachedClient = new MongoClient(MONGO_URI, {
+    maxPoolSize: 4,
+    serverSelectionTimeoutMS: 10000,
+    connectTimeoutMS: 10000,
+  });
+
+  await cachedClient.connect();
+  return cachedClient;
+}
+
+function getRequiredRpcUrl(): string {
   try {
     new URL(RPC_URL);
   } catch {

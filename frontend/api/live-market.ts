@@ -1,8 +1,9 @@
 import { getAddress } from 'ethers';
-import type { Collection } from 'mongodb';
-import { getMongoClient, MONGO_DB_NAME } from './_mongo';
+import { MongoClient, type Collection } from 'mongodb';
 
 const LIVE_FEEDS_COLLECTION = 'live_feeds';
+const MONGO_URI = process.env.MONGO_URI;
+const MONGO_DB_NAME = process.env.MONGO_DB_NAME ?? 'achmarket';
 const CORS_ALLOWED_ORIGINS = (process.env.CORS_ALLOWED_ORIGINS ?? '')
   .split(',')
   .map((value) => value.trim())
@@ -89,6 +90,7 @@ interface LiveUnconfiguredResponse {
 }
 
 let indexesReady = false;
+let cachedClient: MongoClient | null = null;
 
 function normalizeAddress(address: string): string {
   return getAddress(address).toLowerCase();
@@ -109,6 +111,36 @@ async function getCollection(): Promise<Collection<LiveFeedDoc>> {
     indexesReady = true;
   }
   return collection;
+}
+
+async function getMongoClient(): Promise<MongoClient> {
+  if (!MONGO_URI) {
+    throw new Error('MONGO_URI is not configured');
+  }
+
+  if (cachedClient) {
+    try {
+      await cachedClient.db(MONGO_DB_NAME).command({ ping: 1 });
+      return cachedClient;
+    } catch {
+      try {
+        await cachedClient.close();
+      } catch {
+        // ignore close errors
+      }
+      cachedClient = null;
+      indexesReady = false;
+    }
+  }
+
+  cachedClient = new MongoClient(MONGO_URI, {
+    maxPoolSize: 4,
+    serverSelectionTimeoutMS: 10000,
+    connectTimeoutMS: 10000,
+  });
+
+  await cachedClient.connect();
+  return cachedClient;
 }
 
 async function getFeedConfig(marketAddress: string): Promise<LiveFeedDoc | null> {

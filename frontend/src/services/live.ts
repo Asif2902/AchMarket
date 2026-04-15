@@ -4,10 +4,13 @@ import type {
   LiveFeedConfig,
   LiveFeedConfigInput,
   LiveMarketDataResponse,
+  LiveFeedSuggestionInput,
+  LiveFeedSuggestionsResponse,
 } from '../types/live';
 
 const LIVE_FEED_CONFIG_API_PATH = '/api/live-feed-config';
 const LIVE_MARKET_API_PATH = '/api/live-market';
+const LIVE_FEED_SUGGEST_API_PATH = '/api/live-feed-suggest';
 
 function serializeLiveFeedPayload(payload: LiveFeedConfigInput): string {
   if (payload.kind === 'crypto-price') {
@@ -53,11 +56,25 @@ function withCacheBust(url: string): string {
 }
 
 async function parseApiResponse<T>(response: Response): Promise<T> {
-  const body = await response.json().catch(() => ({}));
+  const raw = await response.text();
+  let body: any = {};
+  if (raw) {
+    try {
+      body = JSON.parse(raw);
+    } catch {
+      body = { raw };
+    }
+  }
+
   if (!response.ok) {
-    const errorMessage = typeof body?.error === 'string' ? body.error : 'Request failed';
+    const fallback =
+      typeof body?.raw === 'string' && body.raw.trim()
+        ? body.raw.trim().slice(0, 240)
+        : `Request failed (${response.status})`;
+    const errorMessage = typeof body?.error === 'string' ? body.error : fallback;
     throw new Error(errorMessage);
   }
+
   return body as T;
 }
 
@@ -147,4 +164,21 @@ export async function fetchLiveMarketData(marketAddress: string): Promise<LiveMa
   const normalized = sanitizeMarketAddress(marketAddress);
   const response = await fetch(withCacheBust(`${LIVE_MARKET_API_PATH}?marketAddress=${encodeURIComponent(normalized)}`));
   return parseApiResponse<LiveMarketDataResponse>(response);
+}
+
+export async function fetchLiveFeedSuggestions(input: LiveFeedSuggestionInput): Promise<LiveFeedSuggestionsResponse> {
+  const response = await fetch(LIVE_FEED_SUGGEST_API_PATH, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      title: input.title ?? '',
+      category: input.category ?? '',
+      description: input.description ?? '',
+      outcomeLabels: Array.isArray(input.outcomeLabels) ? input.outcomeLabels : [],
+    }),
+  });
+
+  return parseApiResponse<LiveFeedSuggestionsResponse>(response);
 }
