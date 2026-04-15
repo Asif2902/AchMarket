@@ -21,6 +21,8 @@ import { NETWORK } from '../../config/network';
 import ChatThread from '../../components/chat/ChatThread';
 import { fetchProfileByAddress } from '../../services/profile';
 import { fetchLinkPreview, type LinkPreviewData } from '../../services/linkPreview';
+import { fetchLiveMarketData } from '../../services/live';
+import type { LiveMarketDataResponse } from '../../types/live';
 
 const DEFAULT_META_TITLE = 'AchMarket - Prediction Markets';
 const DEFAULT_META_DESCRIPTION = 'Trade prediction markets on ARC Testnet with USDC.';
@@ -89,6 +91,32 @@ function setCanonicalUrl(url: string): void {
   document.head.appendChild(link);
 }
 
+function formatLivePrice(price: number): string {
+  if (!Number.isFinite(price)) return '--';
+  const abs = Math.abs(price);
+  if (abs >= 1000) {
+    return price.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  }
+  if (abs >= 1) {
+    return price.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 4 });
+  }
+  return price.toLocaleString(undefined, { minimumFractionDigits: 4, maximumFractionDigits: 8 });
+}
+
+function formatLiveAge(iso: string): string {
+  const ts = Date.parse(iso);
+  if (!Number.isFinite(ts)) return 'unknown';
+  const seconds = Math.max(0, Math.floor((Date.now() - ts) / 1000));
+  if (seconds < 5) return 'just now';
+  if (seconds < 60) return `${seconds}s ago`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  return `${days}d ago`;
+}
+
 export default function MarketDetail() {
   const { slug } = useParams<{ slug: string }>();
   const marketId = slug ? parseMarketSlug(slug) : null;
@@ -124,6 +152,9 @@ export default function MarketDetail() {
   const [refreshTrigger, setRefreshTrigger] = useState(0);
   const [userBalance, setUserBalance] = useState<bigint | null>(null);
   const [hasProfile, setHasProfile] = useState(false);
+  const [liveData, setLiveData] = useState<LiveMarketDataResponse | null>(null);
+  const [liveLoading, setLiveLoading] = useState(false);
+  const [liveError, setLiveError] = useState<string | null>(null);
   const hasLoadedOnce = useRef(false);
   const requestSeqRef = useRef(0);
   const prevMarketIdRef = useRef<number | null>(null);
@@ -176,6 +207,9 @@ export default function MarketDetail() {
       setEstimatedShares(null);
       setPreviewCost(null);
       setPreviewKey('');
+      setLiveData(null);
+      setLiveLoading(false);
+      setLiveError(null);
     }
   }, [marketId]);
 
@@ -442,6 +476,55 @@ export default function MarketDetail() {
   }, [marketAddress, detail?.market, detail?.outcomeLabels, detail?.totalSharesWad, detail?.bWad, detail?.createdAt]);
 
   useEffect(() => { fetchAll(); }, [fetchAll]);
+
+  useEffect(() => {
+    if (!marketAddress) {
+      setLiveData(null);
+      setLiveLoading(false);
+      setLiveError(null);
+      return;
+    }
+
+    let cancelled = false;
+    let inFlight = false;
+    let timeoutId: ReturnType<typeof setTimeout>;
+
+    const schedule = (seconds: number) => {
+      if (cancelled) return;
+      timeoutId = setTimeout(() => {
+        void poll(false);
+      }, Math.max(5, seconds) * 1000);
+    };
+
+    const poll = async (initial: boolean) => {
+      if (cancelled || inFlight) return;
+      inFlight = true;
+      if (initial) setLiveLoading(true);
+      try {
+        const data = await fetchLiveMarketData(marketAddress);
+        if (cancelled) return;
+        setLiveData(data);
+        setLiveError(null);
+        const next = data.configured ? Math.max(5, data.nextSuggestedPollSeconds || 15) : 30;
+        schedule(next);
+      } catch (err) {
+        if (cancelled) return;
+        const message = err instanceof Error ? err.message : 'Failed to load live reference data.';
+        setLiveError(message);
+        schedule(30);
+      } finally {
+        inFlight = false;
+        if (!cancelled) setLiveLoading(false);
+      }
+    };
+
+    void poll(true);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timeoutId);
+    };
+  }, [marketAddress]);
 
   useEffect(() => {
     if (!userAddress || !isConnected) { setUserBalance(null); setHasProfile(false); return; }
@@ -766,6 +849,7 @@ export default function MarketDetail() {
   const selectedOutcomeLabel = detail.outcomeLabels[selectedOutcome] ?? `Outcome ${selectedOutcome + 1}`;
   const selectedOutcomePrice = probToPercent(detail.impliedProbabilitiesWad[selectedOutcome] ?? 0n) / 100;
   const selectedOwnedShares = userInfo?.shares[selectedOutcome] ?? 0n;
+  const liveConfigured = liveData && liveData.configured ? liveData : null;
 
   return (
     <div className="min-h-screen animate-fade-in">
@@ -827,6 +911,94 @@ export default function MarketDetail() {
               <MiniStat label="Traders" value={detail.participants.toString()} />
               <MiniStat label="Created" value={formatDate(detail.createdAt)} small />
               <MiniStat label={isActive ? 'Ends' : 'Ended'} value={formatDate(detail.marketDeadline)} small />
+            </div>
+
+            <div className="card p-4 border-primary-500/20 bg-gradient-to-br from-primary-500/[0.08] via-transparent to-emerald-500/[0.05]">
+              <div className="flex items-center justify-between gap-3 mb-3">
+                <div>
+                  <p className="text-2xs uppercase tracking-[0.14em] text-white/45 font-semibold">Live Reference</p>
+                  <p className="text-xs text-white/70 mt-1">
+                    {liveConfigured
+                      ? liveConfigured.data.kind === 'crypto-price'
+                        ? `${liveConfigured.data.baseSymbol}/${liveConfigured.data.quoteSymbol} external spot feed`
+                        : `${liveConfigured.data.leagueName || 'Sports'} live score feed`
+                      : 'No external feed configured for this market'}
+                  </p>
+                </div>
+                {liveConfigured?.stale ? (
+                  <span className="badge bg-amber-500/15 text-amber-400 border-amber-500/25">Delayed</span>
+                ) : (
+                  <span className="badge bg-emerald-500/15 text-emerald-400 border-emerald-500/25">Live</span>
+                )}
+              </div>
+
+              {!liveConfigured && liveLoading && (
+                <p className="text-xs text-dark-400">Loading live data...</p>
+              )}
+
+              {!liveConfigured && !liveLoading && (
+                <p className="text-xs text-dark-400">
+                  {liveData && !liveData.configured
+                    ? (liveData.reason || 'No live feed is attached yet.')
+                    : (liveError || 'No live feed is attached yet.')}
+                </p>
+              )}
+
+              {liveConfigured && liveConfigured.data.kind === 'crypto-price' && (
+                <div className="space-y-2">
+                  <div className="flex items-end justify-between gap-2">
+                    <p className="text-xl sm:text-2xl font-bold text-white tabular-nums leading-none">
+                      {formatLivePrice(liveConfigured.data.price)}
+                      <span className="text-sm text-white/60 ml-1">{liveConfigured.data.quoteSymbol}</span>
+                    </p>
+                    <div className="text-right">
+                      <p className={`text-sm font-semibold tabular-nums ${
+                        liveConfigured.data.change24h === null
+                          ? 'text-dark-400'
+                          : liveConfigured.data.change24h >= 0
+                            ? 'text-emerald-400'
+                            : 'text-red-400'
+                      }`}>
+                        {liveConfigured.data.change24h === null
+                          ? '--'
+                          : `${liveConfigured.data.change24h >= 0 ? '+' : ''}${liveConfigured.data.change24h.toFixed(2)}%`}
+                      </p>
+                      <p className="text-2xs text-dark-500">24h change</p>
+                    </div>
+                  </div>
+                  <div className="flex items-center justify-between text-2xs text-dark-500 pt-2 border-t border-white/[0.08]">
+                    <span>Source: {liveConfigured.data.provider}</span>
+                    <span>Updated {formatLiveAge(liveConfigured.fetchedAt)}</span>
+                  </div>
+                </div>
+              )}
+
+              {liveConfigured && liveConfigured.data.kind === 'sports-score' && (
+                <div className="space-y-2.5">
+                  <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2">
+                    <div className="min-w-0 text-left">
+                      <p className="text-xs text-dark-400 uppercase tracking-wider">Home</p>
+                      <p className="text-sm sm:text-base font-semibold text-white truncate">{liveConfigured.data.homeTeam}</p>
+                    </div>
+                    <div className="text-center px-2">
+                      <p className="text-2xl sm:text-3xl font-bold text-white tabular-nums leading-none">
+                        {liveConfigured.data.homeScore ?? '-'}
+                        <span className="text-white/35 mx-1">-</span>
+                        {liveConfigured.data.awayScore ?? '-'}
+                      </p>
+                      <p className="text-2xs text-dark-500 mt-1">{liveConfigured.data.statusLabel}</p>
+                    </div>
+                    <div className="min-w-0 text-right">
+                      <p className="text-xs text-dark-400 uppercase tracking-wider">Away</p>
+                      <p className="text-sm sm:text-base font-semibold text-white truncate">{liveConfigured.data.awayTeam}</p>
+                    </div>
+                  </div>
+                  <div className="flex items-center justify-between text-2xs text-dark-500 pt-2 border-t border-white/[0.08]">
+                    <span>Source: {liveConfigured.data.provider}</span>
+                    <span>Updated {formatLiveAge(liveConfigured.fetchedAt)}</span>
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Countdown (active) */}
