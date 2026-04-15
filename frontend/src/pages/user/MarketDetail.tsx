@@ -122,6 +122,29 @@ function formatLiveMetric(value: number | null): string {
   return formatCompact(value);
 }
 
+function formatCryptoPrimaryMetric(data: {
+  metric: 'price' | 'market-cap' | 'volume-24h';
+  price: number;
+  marketCap: number | null;
+  volume24h: number | null;
+}): string {
+  if (data.metric === 'market-cap') return formatLiveMetric(data.marketCap);
+  if (data.metric === 'volume-24h') return formatLiveMetric(data.volume24h);
+  return formatLivePrice(data.price);
+}
+
+function formatCryptoPrimaryLabel(metric: 'price' | 'market-cap' | 'volume-24h'): string {
+  if (metric === 'market-cap') return 'Market Cap';
+  if (metric === 'volume-24h') return '24h Volume';
+  return 'Price';
+}
+
+function formatCryptoPrimaryChangeLabel(metric: 'price' | 'market-cap' | 'volume-24h'): string {
+  if (metric === 'market-cap') return '24h price change';
+  if (metric === 'volume-24h') return '24h price change';
+  return '24h change';
+}
+
 export default function MarketDetail() {
   const { slug } = useParams<{ slug: string }>();
   const marketId = slug ? parseMarketSlug(slug) : null;
@@ -934,7 +957,7 @@ export default function MarketDetail() {
                   <p className="text-xs text-white/70 mt-1">
                     {liveConfigured
                       ? liveConfigured.data.kind === 'crypto-price'
-                        ? `${liveConfigured.data.baseSymbol}/${liveConfigured.data.quoteSymbol} external spot feed`
+                        ? `${liveConfigured.data.baseSymbol}/${liveConfigured.data.quoteSymbol} ${formatCryptoPrimaryLabel(liveConfigured.data.metric).toLowerCase()} feed`
                         : `${liveConfigured.data.leagueName || 'Sports'} live score feed`
                       : 'No external feed configured for this market'}
                   </p>
@@ -966,7 +989,7 @@ export default function MarketDetail() {
                 <div className="space-y-2">
                   <div className="flex items-end justify-between gap-2">
                     <p className="text-xl sm:text-2xl font-bold text-white tabular-nums leading-none">
-                      {formatLivePrice(liveConfigured.data.price)}
+                      {formatCryptoPrimaryMetric(liveConfigured.data)}
                       <span className="text-sm text-white/60 ml-1">{liveConfigured.data.quoteSymbol}</span>
                     </p>
                     <div className="text-right">
@@ -981,7 +1004,7 @@ export default function MarketDetail() {
                           ? '--'
                           : `${liveConfigured.data.change24h >= 0 ? '+' : ''}${liveConfigured.data.change24h.toFixed(2)}%`}
                       </p>
-                      <p className="text-2xs text-dark-500">24h change</p>
+                      <p className="text-2xs text-dark-500">{formatCryptoPrimaryChangeLabel(liveConfigured.data.metric)}</p>
                     </div>
                   </div>
                   <div className="grid grid-cols-2 gap-2 pt-1">

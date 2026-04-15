@@ -15,6 +15,57 @@ interface SportsCandidate {
   statusLabel: string;
 }
 
+function normalizeQuery(value: string): string {
+  return value
+    .replace(/[–—-]/g, ' ')
+    .replace(/[|:,;()\[\]{}]/g, ' ')
+    .replace(/\b(friendly|qualifier|qualifying|prediction|market|odds|line)\b/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function splitPairQuery(query: string): { left: string; right: string } | null {
+  const compact = query.replace(/\s+/g, ' ').trim();
+  if (!compact) return null;
+  const patterns = [
+    /(.+?)\s+vs\.?\s+(.+)/i,
+    /(.+?)\s+v\s+(.+)/i,
+    /(.+?)\s+versus\s+(.+)/i,
+    /(.+?)\s*@\s*(.+)/i,
+  ];
+  for (const pattern of patterns) {
+    const match = compact.match(pattern);
+    if (!match) continue;
+    const left = normalizeQuery(match[1]);
+    const right = normalizeQuery(match[2]);
+    if (left && right) return { left, right };
+  }
+  return null;
+}
+
+function buildQueryVariants(query: string): string[] {
+  const cleaned = normalizeQuery(query);
+  if (!cleaned) return [];
+  const out: string[] = [cleaned];
+  const pair = splitPairQuery(cleaned);
+  if (pair) {
+    out.push(`${pair.left} vs ${pair.right}`);
+    out.push(`${pair.right} vs ${pair.left}`);
+    out.push(`${pair.left} ${pair.right}`);
+    out.push(pair.left);
+    out.push(pair.right);
+  }
+  const deduped: string[] = [];
+  const seen = new Set<string>();
+  for (const value of out) {
+    const key = value.toLowerCase();
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    deduped.push(value);
+  }
+  return deduped.slice(0, 8);
+}
+
 function resolveCorsOrigin(originHeader: unknown): string | null {
   if (process.env.NODE_ENV !== 'production') return '*';
   if (typeof originHeader !== 'string' || !originHeader) return null;
@@ -96,6 +147,39 @@ function mapEventToCandidate(event: any): SportsCandidate | null {
   };
 }
 
+async function resolveTeamId(teamName: string): Promise<string | null> {
+  const q = normalizeQuery(teamName);
+  if (!q) return null;
+  const endpoint = `https://www.thesportsdb.com/api/v1/json/3/searchteams.php?t=${encodeURIComponent(q.replace(/\s+/g, '_'))}`;
+  const json = await fetchJsonWithTimeout(endpoint);
+  const teams = Array.isArray(json?.teams) ? json.teams : [];
+  const first = teams.find((t: any) => typeof t?.idTeam === 'string' && t.idTeam.trim());
+  return first ? String(first.idTeam).trim() : null;
+}
+
+async function fetchTeamEvents(teamId: string): Promise<SportsCandidate[]> {
+  const endpoints = [
+    `https://www.thesportsdb.com/api/v1/json/3/eventsnext.php?id=${encodeURIComponent(teamId)}`,
+    `https://www.thesportsdb.com/api/v1/json/3/eventslast.php?id=${encodeURIComponent(teamId)}`,
+  ];
+
+  const responses = await Promise.all(
+    endpoints.map(async (endpoint) => {
+      const json = await fetchJsonWithTimeout(endpoint);
+      const events = Array.isArray(json?.events)
+        ? json.events
+        : Array.isArray(json?.results)
+          ? json.results
+          : [];
+      return events
+        .map(mapEventToCandidate)
+        .filter((item: SportsCandidate | null): item is SportsCandidate => Boolean(item));
+    }),
+  );
+
+  return responses.flat();
+}
+
 function scoreCandidate(candidate: SportsCandidate): number {
   const kickoff = candidate.kickoffAt ? Date.parse(candidate.kickoffAt) : NaN;
   if (!Number.isFinite(kickoff)) return 0.4;
@@ -108,6 +192,43 @@ function scoreCandidate(candidate: SportsCandidate): number {
   if (hours < 14 * 24) return 0.7;
   if (hours < 45 * 24) return 0.58;
   return 0.45;
+}
+
+function tokenize(value: string): string[] {
+  return value
+    .toLowerCase()
+    .split(/\s+/)
+    .map((token) => token.replace(/[^a-z0-9]/g, ''))
+    .filter((token) => token.length >= 2);
+}
+
+function textOverlap(a: string, b: string): number {
+  const aSet = new Set(tokenize(a));
+  const bSet = new Set(tokenize(b));
+  if (!aSet.size || !bSet.size) return 0;
+  let common = 0;
+  for (const token of aSet) {
+    if (bSet.has(token)) common += 1;
+  }
+  return common / Math.max(aSet.size, bSet.size);
+}
+
+function scoreCandidateForQuery(candidate: SportsCandidate, query: string): number {
+  const timeScore = scoreCandidate(candidate);
+  const pair = splitPairQuery(query);
+  if (!pair) {
+    const queryScore = Math.max(
+      textOverlap(candidate.homeTeam, query),
+      textOverlap(candidate.awayTeam, query),
+      textOverlap(`${candidate.homeTeam} ${candidate.awayTeam}`, query),
+    );
+    return timeScore * 0.6 + queryScore * 0.4;
+  }
+
+  const direct = (textOverlap(candidate.homeTeam, pair.left) + textOverlap(candidate.awayTeam, pair.right)) / 2;
+  const reverse = (textOverlap(candidate.homeTeam, pair.right) + textOverlap(candidate.awayTeam, pair.left)) / 2;
+  const pairScore = Math.max(direct, reverse);
+  return timeScore * 0.45 + pairScore * 0.55;
 }
 
 function dedupeCandidates(candidates: SportsCandidate[]): SportsCandidate[] {
@@ -137,22 +258,47 @@ export default async function handler(req: any, res: any) {
 
   try {
     const queryRaw = typeof req.query?.query === 'string' ? req.query.query : '';
-    const query = queryRaw.trim();
+    const query = normalizeQuery(queryRaw);
     if (!query) {
       return res.status(200).json({ query: '', candidates: [] });
     }
 
-    const endpoint = `https://www.thesportsdb.com/api/v1/json/3/searchevents.php?e=${encodeURIComponent(query.replace(/\s+/g, '_'))}`;
-    const json = await fetchJsonWithTimeout(endpoint);
-    const events = Array.isArray(json?.event) ? json.event : [];
-
-    const candidates = dedupeCandidates(
-      events
-        .map(mapEventToCandidate)
-        .filter((item: SportsCandidate | null): item is SportsCandidate => Boolean(item))
-        .sort((a, b) => scoreCandidate(b) - scoreCandidate(a))
-        .slice(0, 12),
+    const variants = buildQueryVariants(query);
+    const searchGroupPromise = Promise.all(
+      variants.map(async (variant) => {
+        const endpoint = `https://www.thesportsdb.com/api/v1/json/3/searchevents.php?e=${encodeURIComponent(variant.replace(/\s+/g, '_'))}`;
+        const json = await fetchJsonWithTimeout(endpoint);
+        const events = Array.isArray(json?.event) ? json.event : [];
+        return events
+          .map(mapEventToCandidate)
+          .filter((item: SportsCandidate | null): item is SportsCandidate => Boolean(item));
+      }),
     );
+
+    const pair = splitPairQuery(query);
+    let teamGroupsPromise: Promise<SportsCandidate[]> | null = null;
+    if (pair) {
+      teamGroupsPromise = (async () => {
+        const [leftId, rightId] = await Promise.all([
+          resolveTeamId(pair.left).catch(() => null),
+          resolveTeamId(pair.right).catch(() => null),
+        ]);
+
+        const teamEvents = await Promise.all([
+          leftId ? fetchTeamEvents(leftId).catch(() => []) : Promise.resolve([]),
+          rightId ? fetchTeamEvents(rightId).catch(() => []) : Promise.resolve([]),
+        ]);
+
+        return teamEvents.flat();
+      })();
+    }
+
+    const fetchedGroups = await searchGroupPromise;
+    const teamEvents = teamGroupsPromise ? await teamGroupsPromise : [];
+
+    const candidates = dedupeCandidates([...fetchedGroups.flat(), ...teamEvents])
+      .sort((a, b) => scoreCandidateForQuery(b, query) - scoreCandidateForQuery(a, query))
+      .slice(0, 16);
 
     return res.status(200).json({ query, candidates });
   } catch (err: any) {

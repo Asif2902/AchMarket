@@ -50,6 +50,7 @@ interface LiveFeedModalProps {
 function LiveFeedModal({ isOpen, market, existing, onClose, onSaved }: LiveFeedModalProps) {
   const { signer, address } = useWallet();
   const [kind, setKind] = useState<'crypto-price' | 'sports-score'>('crypto-price');
+  const [cryptoMetric, setCryptoMetric] = useState<'price' | 'market-cap' | 'volume-24h'>('price');
   const [enabled, setEnabled] = useState(true);
   const [coingeckoId, setCoingeckoId] = useState('bitcoin');
   const [baseSymbol, setBaseSymbol] = useState('BTC');
@@ -76,11 +77,16 @@ function LiveFeedModal({ isOpen, market, existing, onClose, onSaved }: LiveFeedM
         setBaseSymbol(existing.crypto.baseSymbol || 'BTC');
         setQuoteSymbol(existing.crypto.quoteSymbol || 'USD');
         setVsCurrency(existing.crypto.vsCurrency || 'usd');
+        setCryptoMetric(existing.crypto.metric || 'price');
       }
       if (existing.kind === 'sports-score' && existing.sports) {
         setEventId(existing.sports.eventId || '');
         setLeagueName(existing.sports.leagueName || '');
       }
+      setSuggestions(null);
+      setSuggestionsError(null);
+      setSportsSearchError(null);
+      setSportsSearchLoading(false);
       setError(null);
       return;
     }
@@ -91,6 +97,7 @@ function LiveFeedModal({ isOpen, market, existing, onClose, onSaved }: LiveFeedM
     setBaseSymbol('BTC');
     setQuoteSymbol('USD');
     setVsCurrency('usd');
+    setCryptoMetric('price');
     setEventId('');
     setLeagueName('');
     setError(null);
@@ -104,6 +111,7 @@ function LiveFeedModal({ isOpen, market, existing, onClose, onSaved }: LiveFeedM
 
   useEffect(() => {
     if (!isOpen || kind !== 'sports-score') return;
+    if (existing?.kind === 'sports-score') return;
     const query = sportsSearchQuery.trim();
     if (!query || query.length < 3) {
       setSportsSearchError(null);
@@ -118,7 +126,32 @@ function LiveFeedModal({ isOpen, market, existing, onClose, onSaved }: LiveFeedM
       .then((result) => {
         if (cancelled) return;
         setSuggestions((prev) => {
-          if (!prev) return prev;
+          if (!prev) {
+            return {
+              crypto: {
+                detected: false,
+                confidence: 0,
+                reason: 'No crypto suggestion yet.',
+                coingeckoId: null,
+                baseSymbol: null,
+                quoteSymbol: 'USD',
+                vsCurrency: 'usd',
+                metric: 'price',
+              },
+              sports: {
+                detected: result.candidates.length > 0,
+                confidence: result.candidates.length > 0 ? 0.55 : 0,
+                reason: result.candidates.length > 0
+                  ? 'Found sports matches from search query. Pick the correct one.'
+                  : 'No sports matches found from search query.',
+                homeTeam: result.candidates[0]?.homeTeam || null,
+                awayTeam: result.candidates[0]?.awayTeam || null,
+                selectedEventId: result.candidates[0]?.eventId || null,
+                selectedLeagueName: result.candidates[0]?.leagueName || null,
+                candidates: result.candidates,
+              },
+            };
+          }
           return {
             ...prev,
             sports: {
@@ -129,6 +162,11 @@ function LiveFeedModal({ isOpen, market, existing, onClose, onSaved }: LiveFeedM
             },
           };
         });
+
+        if (!eventId && result.candidates[0]) {
+          setEventId(result.candidates[0].eventId);
+          setLeagueName(result.candidates[0].leagueName);
+        }
       })
       .catch((err) => {
         if (cancelled) return;
@@ -142,7 +180,7 @@ function LiveFeedModal({ isOpen, market, existing, onClose, onSaved }: LiveFeedM
     return () => {
       cancelled = true;
     };
-  }, [sportsSearchQuery, kind, isOpen]);
+  }, [sportsSearchQuery, kind, isOpen, existing?.kind, eventId]);
 
   const applyCryptoSuggestion = (suggestion: LiveFeedSuggestionsResponse['crypto']) => {
     if (!suggestion.detected || !suggestion.coingeckoId || !suggestion.baseSymbol) return;
@@ -151,6 +189,7 @@ function LiveFeedModal({ isOpen, market, existing, onClose, onSaved }: LiveFeedM
     setBaseSymbol(suggestion.baseSymbol);
     setQuoteSymbol(suggestion.quoteSymbol || 'USD');
     setVsCurrency(suggestion.vsCurrency || 'usd');
+    setCryptoMetric(suggestion.metric || 'price');
   };
 
   const applySportsSuggestion = (suggestion: LiveFeedSuggestionsResponse['sports']) => {
@@ -158,6 +197,7 @@ function LiveFeedModal({ isOpen, market, existing, onClose, onSaved }: LiveFeedM
     setKind('sports-score');
     setEventId(suggestion.selectedEventId || '');
     setLeagueName(suggestion.selectedLeagueName || '');
+    setSportsSearchQuery(`${suggestion.homeTeam || ''} vs ${suggestion.awayTeam || ''}`.trim());
   };
 
   useEffect(() => {
@@ -222,13 +262,14 @@ function LiveFeedModal({ isOpen, market, existing, onClose, onSaved }: LiveFeedM
         marketAddress: market.address,
         enabled,
         kind: 'crypto-price',
-        crypto: {
-          coingeckoId: coingeckoId.trim().toLowerCase(),
-          baseSymbol: baseSymbol.trim().toUpperCase(),
-          quoteSymbol: quoteSymbol.trim().toUpperCase(),
-          vsCurrency: vsCurrency.trim().toLowerCase(),
-        },
-      };
+          crypto: {
+            coingeckoId: coingeckoId.trim().toLowerCase(),
+            baseSymbol: baseSymbol.trim().toUpperCase(),
+            quoteSymbol: quoteSymbol.trim().toUpperCase(),
+            vsCurrency: vsCurrency.trim().toLowerCase(),
+            metric: cryptoMetric,
+          },
+        };
     } else {
       payload = {
         marketAddress: market.address,
@@ -363,6 +404,18 @@ function LiveFeedModal({ isOpen, market, existing, onClose, onSaved }: LiveFeedM
           {kind === 'crypto-price' ? (
             <>
               <div>
+                <label className="label">Metric</label>
+                <select
+                  value={cryptoMetric}
+                  onChange={(e) => setCryptoMetric(e.target.value as 'price' | 'market-cap' | 'volume-24h')}
+                  className="input-field"
+                >
+                  <option value="price">Price</option>
+                  <option value="market-cap">Market Cap</option>
+                  <option value="volume-24h">24h Volume</option>
+                </select>
+              </div>
+              <div>
                 <label className="label">CoinGecko Asset ID</label>
                 <input
                   type="text"
@@ -373,6 +426,7 @@ function LiveFeedModal({ isOpen, market, existing, onClose, onSaved }: LiveFeedM
                 />
                 <p className="text-2xs text-dark-500 mt-1">Example: `bitcoin`, `ethereum`, `solana`</p>
               </div>
+
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="label">Base Symbol</label>
@@ -408,6 +462,10 @@ function LiveFeedModal({ isOpen, market, existing, onClose, onSaved }: LiveFeedM
             </>
           ) : (
             <>
+              {suggestions?.sports.candidates && suggestions.sports.candidates.length === 0 && !sportsSearchLoading && sportsSearchQuery.trim().length >= 3 && (
+                <p className="text-2xs text-dark-500">No matches found yet. Try team names only, like "Brazil vs France".</p>
+              )}
+
               {suggestions?.sports.candidates && suggestions.sports.candidates.length > 0 && (
                 <div>
                   <label className="label">Detected Events</label>
@@ -423,14 +481,14 @@ function LiveFeedModal({ isOpen, market, existing, onClose, onSaved }: LiveFeedM
                     }}
                     className="input-field"
                   >
-                    <option value="">Select detected event</option>
-                    {suggestions.sports.candidates.map((candidate) => (
-                      <option key={candidate.eventId} value={candidate.eventId}>
-                        {candidate.homeTeam} vs {candidate.awayTeam} · {candidate.leagueName} · {candidate.statusLabel}
-                      </option>
-                    ))}
-                  </select>
-                </div>
+                      <option value="">Select detected event</option>
+                      {suggestions.sports.candidates.map((candidate) => (
+                        <option key={candidate.eventId} value={candidate.eventId}>
+                          {candidate.homeTeam} vs {candidate.awayTeam} · {candidate.leagueName} · {candidate.kickoffAt ? new Date(candidate.kickoffAt).toLocaleString() : 'Date N/A'} · {candidate.statusLabel}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
               )}
 
               <div>
@@ -445,7 +503,7 @@ function LiveFeedModal({ isOpen, market, existing, onClose, onSaved }: LiveFeedM
                 <p className="text-2xs text-dark-500 mt-1">Search similar matches; pick the right date/status from detected events.</p>
                 {sportsSearchLoading && (
                   <p className="text-2xs text-dark-500 mt-1">Searching matches...</p>
-                )}
+              )}
                 {sportsSearchError && (
                   <p className="text-2xs text-amber-400 mt-1">{sportsSearchError}</p>
                 )}
@@ -658,9 +716,9 @@ export default function LiveFeeds() {
                       )}
                       {config?.kind && (
                         <span className="badge bg-primary-500/15 text-primary-300 border-primary-500/25">
-                          {config.kind === 'crypto-price' ? 'Crypto Price' : 'Sports Score'}
-                        </span>
-                      )}
+                      {config.kind === 'crypto-price' ? 'Crypto Price' : 'Sports Score'}
+                    </span>
+                  )}
                     </div>
 
                     <h3 className="text-sm sm:text-base font-semibold text-white leading-tight">{market.title}</h3>
@@ -668,7 +726,7 @@ export default function LiveFeeds() {
 
                     {config?.kind === 'crypto-price' && config.crypto && (
                       <p className="text-xs text-dark-400 mt-2">
-                        Source: CoinGecko `{config.crypto.coingeckoId}` ({config.crypto.baseSymbol}/{config.crypto.quoteSymbol})
+                        Source: CoinGecko `{config.crypto.coingeckoId}` ({config.crypto.baseSymbol}/{config.crypto.quoteSymbol}) · metric: {config.crypto.metric || 'price'}
                       </p>
                     )}
                     {config?.kind === 'sports-score' && config.sports && (

@@ -18,6 +18,8 @@ interface CryptoAsset {
   aliases: string[];
 }
 
+type LiveCryptoMetric = 'price' | 'market-cap' | 'volume-24h';
+
 interface SportsCandidate {
   eventId: string;
   leagueName: string;
@@ -188,6 +190,15 @@ function detectCrypto(input: SuggestRequest) {
     }
   }
 
+  const combinedText = `${title} ${category} ${description} ${outcomes}`;
+
+  const metric: LiveCryptoMetric =
+    /(market\s*cap|mcap|capitalization)/i.test(combinedText)
+      ? 'market-cap'
+      : /(24h\s*vol|volume|trading\s*volume)/i.test(combinedText)
+        ? 'volume-24h'
+        : 'price';
+
   if (!best || best.confidence < 0.55) {
     return {
       detected: false,
@@ -197,6 +208,7 @@ function detectCrypto(input: SuggestRequest) {
       baseSymbol: null,
       quoteSymbol: 'USD',
       vsCurrency: 'usd',
+      metric,
     };
   }
 
@@ -208,6 +220,7 @@ function detectCrypto(input: SuggestRequest) {
     baseSymbol: best.asset.symbol,
     quoteSymbol: 'USD',
     vsCurrency: 'usd',
+    metric,
   };
 }
 
@@ -423,7 +436,7 @@ async function fetchSportsCandidatesByQuery(
   fallbackPair: { home: string; away: string } | null,
 ): Promise<SportsCandidate[]> {
   const normalizedQuery = query.replace(/\s+/g, ' ').trim();
-  if (!normalizedQuery) return [];
+  if (!normalizedQuery || normalizedQuery.length < 2) return [];
 
   const endpoint = `https://www.thesportsdb.com/api/v1/json/3/searchevents.php?e=${encodeURIComponent(normalizedQuery.replace(/\s+/g, '_'))}`;
   const json = await fetchJsonWithTimeout(endpoint);
@@ -431,6 +444,45 @@ async function fetchSportsCandidatesByQuery(
   return events
     .map((event: any) => mapEventToSportsCandidate(event, input, fallbackPair))
     .filter((candidate: SportsCandidate | null): candidate is SportsCandidate => Boolean(candidate));
+}
+
+function normalizeSportsSearchText(value: string): string {
+  return value
+    .replace(/[–—-]/g, ' ')
+    .replace(/[|:,;()\[\]{}]/g, ' ')
+    .replace(/\b(friendly|qualifier|qualifying|prediction|market|odds|line)\b/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function buildSportsQueryVariants(title: string, teamPair: { home: string; away: string } | null): string[] {
+  const list: string[] = [];
+  const push = (value: string) => {
+    const clean = normalizeSportsSearchText(value);
+    if (!clean) return;
+    if (clean.length < 2) return;
+    list.push(clean);
+  };
+
+  if (teamPair) {
+    push(`${teamPair.home} vs ${teamPair.away}`);
+    push(`${teamPair.away} vs ${teamPair.home}`);
+    push(`${teamPair.home} ${teamPair.away}`);
+    push(`${teamPair.home}`);
+    push(`${teamPair.away}`);
+  }
+
+  push(title);
+
+  const deduped: string[] = [];
+  const seen = new Set<string>();
+  for (const item of list) {
+    const key = item.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    deduped.push(item);
+  }
+  return deduped.slice(0, 7);
 }
 
 async function detectSports(input: SuggestRequest) {
@@ -442,10 +494,7 @@ async function detectSports(input: SuggestRequest) {
   let candidates: SportsCandidate[] = [];
 
   if (teamPair) {
-    const pairQuery = `${teamPair.home} vs ${teamPair.away}`;
-    const reversePairQuery = `${teamPair.away} vs ${teamPair.home}`;
-    const titleQuery = input.title.trim();
-    const queries = [pairQuery, reversePairQuery, titleQuery].filter(Boolean);
+    const queries = buildSportsQueryVariants(input.title.trim(), teamPair);
 
     const fetchedGroups = await Promise.all(
       queries.map((query) => fetchSportsCandidatesByQuery(query, input, teamPair).catch(() => [])),
@@ -455,7 +504,11 @@ async function detectSports(input: SuggestRequest) {
       .sort((a, b) => enrichSportsCandidateScore(b, teamPair) - enrichSportsCandidateScore(a, teamPair))
       .slice(0, 5);
   } else if (categoryHint && input.title.trim()) {
-    const titleOnlyCandidates = await fetchSportsCandidatesByQuery(input.title.trim(), input, null).catch(() => []);
+    const queries = buildSportsQueryVariants(input.title.trim(), null);
+    const fetchedGroups = await Promise.all(
+      queries.map((query) => fetchSportsCandidatesByQuery(query, input, null).catch(() => [])),
+    );
+    const titleOnlyCandidates = fetchedGroups.flat();
     candidates = dedupeSportsCandidates(titleOnlyCandidates)
       .sort((a, b) => scoreSportsCandidate(b) - scoreSportsCandidate(a))
       .slice(0, 5);

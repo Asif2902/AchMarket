@@ -1,10 +1,12 @@
 export type LiveFeedKind = 'crypto-price' | 'sports-score';
+export type LiveCryptoMetric = 'price' | 'market-cap' | 'volume-24h';
 
 export interface LiveCryptoFeedConfig {
   coingeckoId: string;
   baseSymbol: string;
   quoteSymbol: string;
   vsCurrency: string;
+  metric: LiveCryptoMetric;
 }
 
 export interface LiveSportsFeedConfig {
@@ -44,6 +46,7 @@ export interface LiveCryptoMarketData {
   providerRef: string;
   baseSymbol: string;
   quoteSymbol: string;
+  metric: LiveCryptoMetric;
   price: number;
   change24h: number | null;
   marketCap: number | null;
@@ -99,6 +102,7 @@ export interface LiveCryptoSuggestion {
   baseSymbol: string | null;
   quoteSymbol: string;
   vsCurrency: string;
+  metric: LiveCryptoMetric;
 }
 
 export interface LiveSportsSuggestionCandidate {

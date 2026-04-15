@@ -26,6 +26,7 @@ function serializeLiveFeedPayload(payload: LiveFeedConfigInput): string {
         baseSymbol: payload.crypto.baseSymbol,
         quoteSymbol: payload.crypto.quoteSymbol,
         vsCurrency: payload.crypto.vsCurrency,
+        metric: payload.crypto.metric,
       },
       sports: null,
     });
@@ -103,6 +104,7 @@ function sanitizeLiveFeedInput(input: LiveFeedConfigInput): LiveFeedConfigInput 
         baseSymbol: sanitizeSymbol(input.crypto.baseSymbol),
         quoteSymbol: sanitizeSymbol(input.crypto.quoteSymbol),
         vsCurrency: input.crypto.vsCurrency.trim().toLowerCase(),
+        metric: input.crypto.metric || 'price',
       },
       sports: null,
     };

@@ -75,6 +75,7 @@ export default function CreateMarket() {
   const [showBTooltip, setShowBTooltip] = useState(false);
   const [feedEnabled, setFeedEnabled] = useState(true);
   const [feedKind, setFeedKind] = useState<'crypto-price' | 'sports-score'>('crypto-price');
+  const [feedCryptoMetric, setFeedCryptoMetric] = useState<'price' | 'market-cap' | 'volume-24h'>('price');
   const [feedCoingeckoId, setFeedCoingeckoId] = useState('bitcoin');
   const [feedBaseSymbol, setFeedBaseSymbol] = useState('BTC');
   const [feedQuoteSymbol, setFeedQuoteSymbol] = useState('USD');
@@ -281,6 +282,7 @@ export default function CreateMarket() {
         setFeedBaseSymbol(suggestions.crypto.baseSymbol || 'BTC');
         setFeedQuoteSymbol(suggestions.crypto.quoteSymbol || 'USD');
         setFeedVsCurrency(suggestions.crypto.vsCurrency || 'usd');
+        setFeedCryptoMetric(suggestions.crypto.metric || 'price');
         setFeedDetectionHint(suggestions.crypto.reason || 'Detected crypto feed suggestion.');
       } else if (suggestions.sports.detected) {
         setFeedKind('sports-score');
@@ -324,6 +326,10 @@ export default function CreateMarket() {
       .then((result) => {
         if (cancelled) return;
         setFeedCandidates(result.candidates);
+        if (!feedEventId && result.candidates[0]) {
+          setFeedEventId(result.candidates[0].eventId);
+          setFeedLeagueName(result.candidates[0].leagueName);
+        }
       })
       .catch((err) => {
         if (cancelled) return;
@@ -337,7 +343,7 @@ export default function CreateMarket() {
     return () => {
       cancelled = true;
     };
-  }, [feedSportsSearchQuery, feedKind]);
+  }, [feedSportsSearchQuery, feedKind, feedEventId]);
 
   const handleSubmit = async () => {
     if (!signer || !isValid || imageUploading) return;
@@ -399,6 +405,7 @@ export default function CreateMarket() {
                 baseSymbol: feedBaseSymbol.trim().toUpperCase(),
                 quoteSymbol: feedQuoteSymbol.trim().toUpperCase(),
                 vsCurrency: feedVsCurrency.trim().toLowerCase(),
+                metric: feedCryptoMetric,
               },
             };
           } else {
@@ -921,6 +928,15 @@ export default function CreateMarket() {
 
             {feedKind === 'crypto-price' ? (
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <select
+                  value={feedCryptoMetric}
+                  onChange={(e) => setFeedCryptoMetric(e.target.value as 'price' | 'market-cap' | 'volume-24h')}
+                  className="input-field"
+                >
+                  <option value="price">Metric: Price</option>
+                  <option value="market-cap">Metric: Market Cap</option>
+                  <option value="volume-24h">Metric: 24h Volume</option>
+                </select>
                 <input
                   type="text"
                   value={feedCoingeckoId}
@@ -949,6 +965,9 @@ export default function CreateMarket() {
                   placeholder="Quote key (usd)"
                   className="input-field"
                 />
+                <p className="text-xs text-dark-500 sm:col-span-2">
+                  For cap/volume markets, choose metric above and keep pair as base/quote for display.
+                </p>
               </div>
             ) : (
               <div className="space-y-3">
@@ -965,6 +984,9 @@ export default function CreateMarket() {
                 {feedSportsSearchError && (
                   <p className="text-xs text-amber-400">{feedSportsSearchError}</p>
                 )}
+                {feedCandidates.length === 0 && !feedSportsSearchLoading && feedSportsSearchQuery.trim().length >= 3 && (
+                  <p className="text-xs text-dark-500">No matches found yet. Try only teams like "Brazil vs France".</p>
+                )}
                 {feedCandidates.length > 0 && (
                   <select
                     value={feedEventId}
@@ -979,7 +1001,7 @@ export default function CreateMarket() {
                     <option value="">Select detected event</option>
                     {feedCandidates.map((c) => (
                       <option key={c.eventId} value={c.eventId}>
-                        {c.homeTeam} vs {c.awayTeam} · {c.leagueName} · {c.statusLabel}
+                        {c.homeTeam} vs {c.awayTeam} · {c.leagueName} · {c.kickoffAt ? new Date(c.kickoffAt).toLocaleString() : 'Date N/A'} · {c.statusLabel}
                       </option>
                     ))}
                   </select>

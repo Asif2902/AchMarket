@@ -26,12 +26,14 @@ const STAGE_EXPIRED = 4;
 const MARKET_STAGE_CACHE_MS = 15_000;
 
 type LiveFeedKind = 'crypto-price' | 'sports-score';
+type LiveCryptoMetric = 'price' | 'market-cap' | 'volume-24h';
 
 interface LiveCryptoDoc {
   coingeckoId: string;
   baseSymbol: string;
   quoteSymbol: string;
   vsCurrency: string;
+  metric?: LiveCryptoMetric;
 }
 
 interface LiveSportsDoc {
@@ -58,6 +60,7 @@ interface LiveCryptoData {
   providerRef: string;
   baseSymbol: string;
   quoteSymbol: string;
+  metric: LiveCryptoMetric;
   price: number;
   change24h: number | null;
   marketCap: number | null;
@@ -318,6 +321,7 @@ async function fetchCryptoSnapshot(config: LiveFeedDoc): Promise<CachedLiveSnaps
 
   const id = config.crypto.coingeckoId.trim().toLowerCase();
   const vs = config.crypto.vsCurrency.trim().toLowerCase();
+  const metric: LiveCryptoMetric = config.crypto.metric || 'price';
   const endpoint = `https://api.coingecko.com/api/v3/simple/price?ids=${encodeURIComponent(id)}&vs_currencies=${encodeURIComponent(vs)}&include_24hr_change=true&include_market_cap=true&include_24hr_vol=true`;
   const json = await fetchJsonWithTimeout(endpoint);
 
@@ -341,6 +345,7 @@ async function fetchCryptoSnapshot(config: LiveFeedDoc): Promise<CachedLiveSnaps
       providerRef: id,
       baseSymbol: config.crypto.baseSymbol,
       quoteSymbol: config.crypto.quoteSymbol,
+      metric,
       price,
       change24h,
       marketCap,

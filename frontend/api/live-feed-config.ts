@@ -18,12 +18,14 @@ const FACTORY_OWNER_ABI = [
 ];
 
 type LiveFeedKind = 'crypto-price' | 'sports-score';
+type LiveCryptoMetric = 'price' | 'market-cap' | 'volume-24h';
 
 interface LiveCryptoDoc {
   coingeckoId: string;
   baseSymbol: string;
   quoteSymbol: string;
   vsCurrency: string;
+  metric: LiveCryptoMetric;
 }
 
 interface LiveSportsDoc {
@@ -53,6 +55,7 @@ interface LiveFeedPayload {
     baseSymbol?: unknown;
     quoteSymbol?: unknown;
     vsCurrency?: unknown;
+    metric?: unknown;
   } | null;
   sports?: {
     eventId?: unknown;
@@ -83,6 +86,7 @@ function serializeLiveFeedPayload(payload: LiveFeedPayload): string {
         baseSymbol: typeof payload.crypto?.baseSymbol === 'string' ? payload.crypto.baseSymbol : '',
         quoteSymbol: typeof payload.crypto?.quoteSymbol === 'string' ? payload.crypto.quoteSymbol : '',
         vsCurrency: typeof payload.crypto?.vsCurrency === 'string' ? payload.crypto.vsCurrency : '',
+        metric: typeof payload.crypto?.metric === 'string' ? payload.crypto.metric : 'price',
       },
       sports: null,
     });
@@ -145,6 +149,13 @@ function sanitizePayload(input: LiveFeedPayload): LiveFeedPayload {
     const baseSymbol = sanitizeSymbol(parseTrimmedString(input.crypto?.baseSymbol));
     const quoteSymbol = sanitizeSymbol(parseTrimmedString(input.crypto?.quoteSymbol));
     const vsCurrency = parseTrimmedString(input.crypto?.vsCurrency).toLowerCase();
+    const metricRaw = parseTrimmedString(input.crypto?.metric).toLowerCase();
+    const metric: LiveCryptoMetric =
+      metricRaw === 'market-cap'
+        ? 'market-cap'
+        : metricRaw === 'volume-24h'
+          ? 'volume-24h'
+          : 'price';
 
     if (!coingeckoId) throw new Error('coingeckoId is required for crypto feeds.');
     if (!baseSymbol) throw new Error('baseSymbol is required for crypto feeds.');
@@ -155,7 +166,7 @@ function sanitizePayload(input: LiveFeedPayload): LiveFeedPayload {
       marketAddress,
       enabled,
       kind,
-      crypto: { coingeckoId, baseSymbol, quoteSymbol, vsCurrency },
+      crypto: { coingeckoId, baseSymbol, quoteSymbol, vsCurrency, metric },
       sports: null,
     };
   }
