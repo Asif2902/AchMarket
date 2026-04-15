@@ -1,9 +1,10 @@
-import { getAddress } from 'ethers';
+import { getAddress, Contract, JsonRpcProvider } from 'ethers';
 import { MongoClient, type Collection } from 'mongodb';
 
 const LIVE_FEEDS_COLLECTION = 'live_feeds';
 const MONGO_URI = process.env.MONGO_URI;
 const MONGO_DB_NAME = process.env.MONGO_DB_NAME ?? 'achmarket';
+const RPC_URL = process.env.RPC_URL || 'https://arc-testnet.drpc.org/';
 const CORS_ALLOWED_ORIGINS = (process.env.CORS_ALLOWED_ORIGINS ?? '')
   .split(',')
   .map((value) => value.trim())
@@ -14,6 +15,15 @@ const CRYPTO_STALE_SECONDS = 60;
 const SPORTS_STALE_SECONDS = 120;
 const CRYPTO_MIN_REFRESH_SECONDS = 10;
 const SPORTS_MIN_REFRESH_SECONDS = 15;
+const CLOSED_MARKET_POLL_SECONDS = 3600;
+
+const MARKET_STAGE_ABI = ['function stage() view returns (uint8)'];
+const STAGE_ACTIVE = 0;
+const STAGE_SUSPENDED = 1;
+const STAGE_RESOLVED = 2;
+const STAGE_CANCELLED = 3;
+const STAGE_EXPIRED = 4;
+const MARKET_STAGE_CACHE_MS = 15_000;
 
 type LiveFeedKind = 'crypto-price' | 'sports-score';
 
@@ -91,6 +101,8 @@ interface LiveUnconfiguredResponse {
 
 let indexesReady = false;
 let cachedClient: MongoClient | null = null;
+let cachedReadProvider: JsonRpcProvider | null = null;
+const marketStageCache = new Map<string, { stage: number; expiresAt: number }>();
 
 function normalizeAddress(address: string): string {
   return getAddress(address).toLowerCase();
@@ -101,6 +113,62 @@ function resolveCorsOrigin(originHeader: unknown): string | null {
   if (typeof originHeader !== 'string' || !originHeader) return null;
   if (CORS_ALLOWED_ORIGINS.includes('*')) return originHeader;
   return CORS_ALLOWED_ORIGINS.includes(originHeader) ? originHeader : null;
+}
+
+function getRequiredRpcUrl(): string {
+  try {
+    new URL(RPC_URL);
+  } catch {
+    throw new Error('RPC_URL is invalid. Configure RPC_URL with a valid URL.');
+  }
+  return RPC_URL;
+}
+
+function getReadProvider(): JsonRpcProvider {
+  if (!cachedReadProvider) {
+    cachedReadProvider = new JsonRpcProvider(getRequiredRpcUrl(), undefined, { staticNetwork: true, batchMaxCount: 1 });
+  }
+  return cachedReadProvider;
+}
+
+function isClosedStage(stage: number): boolean {
+  return stage === STAGE_RESOLVED || stage === STAGE_CANCELLED || stage === STAGE_EXPIRED;
+}
+
+function isLiveStage(stage: number): boolean {
+  return stage === STAGE_ACTIVE || stage === STAGE_SUSPENDED;
+}
+
+function cleanupStageCache(): void {
+  if (marketStageCache.size < 300) return;
+  const now = Date.now();
+  for (const [address, entry] of marketStageCache.entries()) {
+    if (entry.expiresAt <= now) {
+      marketStageCache.delete(address);
+    }
+  }
+}
+
+async function getMarketStage(marketAddress: string): Promise<number | null> {
+  const now = Date.now();
+  const cached = marketStageCache.get(marketAddress);
+  if (cached && cached.expiresAt > now) {
+    return cached.stage;
+  }
+
+  try {
+    const market = new Contract(marketAddress, MARKET_STAGE_ABI, getReadProvider());
+    const stageValue = Number(await market.stage());
+    if (!Number.isFinite(stageValue)) return null;
+    marketStageCache.set(marketAddress, {
+      stage: stageValue,
+      expiresAt: now + MARKET_STAGE_CACHE_MS,
+    });
+    cleanupStageCache();
+    return stageValue;
+  } catch {
+    return null;
+  }
 }
 
 async function getCollection(): Promise<Collection<LiveFeedDoc>> {
@@ -335,13 +403,42 @@ async function resolveLiveData(marketAddress: string): Promise<LiveConfiguredRes
     return { configured: false, reason: 'Live feed is disabled for this market.' };
   }
 
+  const marketStage = await getMarketStage(marketAddress);
+  const marketIsClosed = typeof marketStage === 'number' ? isClosedStage(marketStage) : false;
+  const marketIsLiveOrUnknown = typeof marketStage === 'number' ? isLiveStage(marketStage) : true;
+
   const cachedSnapshot = config.lastSnapshot || null;
   const cachedAt = config.lastSnapshotAt instanceof Date ? config.lastSnapshotAt : null;
+
+  if (marketIsClosed) {
+    if (cachedSnapshot) {
+      const frozenSnapshot: CachedLiveSnapshot = {
+        ...cachedSnapshot,
+        nextSuggestedPollSeconds: CLOSED_MARKET_POLL_SECONDS,
+      };
+      return buildConfiguredResponse(frozenSnapshot, true);
+    }
+    return {
+      configured: false,
+      reason: 'Market is resolved/cancelled, so live updates are locked.',
+    };
+  }
+
   if (cachedSnapshot && cachedAt) {
     const ageSeconds = (Date.now() - cachedAt.getTime()) / 1000;
     if (ageSeconds < getMinRefreshSeconds(config.kind) && !isSnapshotStale(cachedSnapshot)) {
       return buildConfiguredResponse(cachedSnapshot, false);
     }
+  }
+
+  if (!marketIsLiveOrUnknown) {
+    if (cachedSnapshot) {
+      return buildConfiguredResponse(cachedSnapshot, true);
+    }
+    return {
+      configured: false,
+      reason: 'Live updates are unavailable in current market stage.',
+    };
   }
 
   try {

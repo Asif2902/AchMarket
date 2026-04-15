@@ -124,3 +124,8 @@ export interface LiveFeedSuggestionsResponse {
   crypto: LiveCryptoSuggestion;
   sports: LiveSportsSuggestion;
 }
+
+export interface LiveSportsSearchResponse {
+  query: string;
+  candidates: LiveSportsSuggestionCandidate[];
+}

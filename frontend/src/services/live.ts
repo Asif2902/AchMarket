@@ -6,11 +6,13 @@ import type {
   LiveMarketDataResponse,
   LiveFeedSuggestionInput,
   LiveFeedSuggestionsResponse,
+  LiveSportsSearchResponse,
 } from '../types/live';
 
 const LIVE_FEED_CONFIG_API_PATH = '/api/live-feed-config';
 const LIVE_MARKET_API_PATH = '/api/live-market';
 const LIVE_FEED_SUGGEST_API_PATH = '/api/live-feed-suggest';
+const LIVE_FEED_SEARCH_API_PATH = '/api/live-feed-search';
 const LIVE_CONFIG_BATCH_SIZE = 50;
 
 function serializeLiveFeedPayload(payload: LiveFeedConfigInput): string {
@@ -194,4 +196,14 @@ export async function fetchLiveFeedSuggestions(input: LiveFeedSuggestionInput): 
   });
 
   return parseApiResponse<LiveFeedSuggestionsResponse>(response);
+}
+
+export async function searchSportsEvents(query: string): Promise<LiveSportsSearchResponse> {
+  const trimmed = query.trim();
+  if (!trimmed) {
+    return { query: '', candidates: [] };
+  }
+
+  const response = await fetch(withCacheBust(`${LIVE_FEED_SEARCH_API_PATH}?query=${encodeURIComponent(trimmed)}`));
+  return parseApiResponse<LiveSportsSearchResponse>(response);
 }

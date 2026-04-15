@@ -7,6 +7,7 @@ import { useOwnerMarkets } from './OwnerMarketUtils';
 import {
   fetchLiveFeedConfigs,
   fetchLiveFeedSuggestions,
+  searchSportsEvents,
   saveLiveFeedConfig,
 } from '../../services/live';
 import type {
@@ -59,6 +60,9 @@ function LiveFeedModal({ isOpen, market, existing, onClose, onSaved }: LiveFeedM
   const [suggestions, setSuggestions] = useState<LiveFeedSuggestionsResponse | null>(null);
   const [suggesting, setSuggesting] = useState(false);
   const [suggestionsError, setSuggestionsError] = useState<string | null>(null);
+  const [sportsSearchQuery, setSportsSearchQuery] = useState('');
+  const [sportsSearchLoading, setSportsSearchLoading] = useState(false);
+  const [sportsSearchError, setSportsSearchError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -91,6 +95,54 @@ function LiveFeedModal({ isOpen, market, existing, onClose, onSaved }: LiveFeedM
     setLeagueName('');
     setError(null);
   }, [isOpen, market, existing]);
+
+  useEffect(() => {
+    if (!isOpen || !market) return;
+    setSportsSearchQuery(`${market.title}`.trim());
+    setSportsSearchError(null);
+  }, [isOpen, market]);
+
+  useEffect(() => {
+    if (!isOpen || kind !== 'sports-score') return;
+    const query = sportsSearchQuery.trim();
+    if (!query || query.length < 3) {
+      setSportsSearchError(null);
+      return;
+    }
+
+    let cancelled = false;
+    setSportsSearchLoading(true);
+    setSportsSearchError(null);
+
+    searchSportsEvents(query)
+      .then((result) => {
+        if (cancelled) return;
+        setSuggestions((prev) => {
+          if (!prev) return prev;
+          return {
+            ...prev,
+            sports: {
+              ...prev.sports,
+              candidates: result.candidates,
+              selectedEventId: prev.sports.selectedEventId || result.candidates[0]?.eventId || null,
+              selectedLeagueName: prev.sports.selectedLeagueName || result.candidates[0]?.leagueName || null,
+            },
+          };
+        });
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        const message = err instanceof Error ? err.message : 'Failed to search sports matches.';
+        setSportsSearchError(message);
+      })
+      .finally(() => {
+        if (!cancelled) setSportsSearchLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [sportsSearchQuery, kind, isOpen]);
 
   const applyCryptoSuggestion = (suggestion: LiveFeedSuggestionsResponse['crypto']) => {
     if (!suggestion.detected || !suggestion.coingeckoId || !suggestion.baseSymbol) return;
@@ -380,6 +432,24 @@ function LiveFeedModal({ isOpen, market, existing, onClose, onSaved }: LiveFeedM
                   </select>
                 </div>
               )}
+
+              <div>
+                <label className="label">Search Matches</label>
+                <input
+                  type="text"
+                  value={sportsSearchQuery}
+                  onChange={(e) => setSportsSearchQuery(e.target.value)}
+                  placeholder="Brazil vs France"
+                  className="input-field"
+                />
+                <p className="text-2xs text-dark-500 mt-1">Search similar matches; pick the right date/status from detected events.</p>
+                {sportsSearchLoading && (
+                  <p className="text-2xs text-dark-500 mt-1">Searching matches...</p>
+                )}
+                {sportsSearchError && (
+                  <p className="text-2xs text-amber-400 mt-1">{sportsSearchError}</p>
+                )}
+              </div>
 
               <div>
                 <label className="label">TheSportsDB Event ID</label>

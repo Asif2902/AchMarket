@@ -11,6 +11,7 @@ import { compressMarketImage } from '../../utils/marketImage';
 import { uploadMarketMedia, deleteMarketMedia } from '../../services/marketMedia';
 import {
   fetchLiveFeedSuggestions,
+  searchSportsEvents,
   saveLiveFeedConfig,
 } from '../../services/live';
 import type {
@@ -81,6 +82,9 @@ export default function CreateMarket() {
   const [feedEventId, setFeedEventId] = useState('');
   const [feedLeagueName, setFeedLeagueName] = useState('');
   const [feedCandidates, setFeedCandidates] = useState<LiveFeedSuggestionsResponse['sports']['candidates']>([]);
+  const [feedSportsSearchQuery, setFeedSportsSearchQuery] = useState('');
+  const [feedSportsSearchLoading, setFeedSportsSearchLoading] = useState(false);
+  const [feedSportsSearchError, setFeedSportsSearchError] = useState('');
   const [feedDetecting, setFeedDetecting] = useState(false);
   const [feedDetectionHint, setFeedDetectionHint] = useState('');
   const [feedDetectionError, setFeedDetectionError] = useState('');
@@ -269,6 +273,7 @@ export default function CreateMarket() {
         setFeedKind('sports-score');
         setFeedEventId(suggestions.sports.selectedEventId || '');
         setFeedLeagueName(suggestions.sports.selectedLeagueName || '');
+        setFeedSportsSearchQuery(`${suggestions.sports.homeTeam || ''} vs ${suggestions.sports.awayTeam || ''}`.trim());
         setFeedDetectionHint(suggestions.sports.reason || 'Detected sports feed suggestion.');
       } else if (suggestions.crypto.detected) {
         setFeedKind('crypto-price');
@@ -281,6 +286,7 @@ export default function CreateMarket() {
         setFeedKind('sports-score');
         setFeedEventId(suggestions.sports.selectedEventId || '');
         setFeedLeagueName(suggestions.sports.selectedLeagueName || '');
+        setFeedSportsSearchQuery(`${suggestions.sports.homeTeam || ''} vs ${suggestions.sports.awayTeam || ''}`.trim());
         setFeedDetectionHint(suggestions.sports.reason || 'Detected sports feed suggestion.');
       } else {
         setFeedDetectionHint('No strong feed suggestion found. Fill manually or continue without feed.');
@@ -301,6 +307,37 @@ export default function CreateMarket() {
     }, 500);
     return () => clearTimeout(timer);
   }, [title, actualCategory, description, outcomes]);
+
+  useEffect(() => {
+    if (feedKind !== 'sports-score') return;
+    const query = feedSportsSearchQuery.trim();
+    if (!query || query.length < 3) {
+      setFeedSportsSearchError('');
+      return;
+    }
+
+    let cancelled = false;
+    setFeedSportsSearchLoading(true);
+    setFeedSportsSearchError('');
+
+    searchSportsEvents(query)
+      .then((result) => {
+        if (cancelled) return;
+        setFeedCandidates(result.candidates);
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        const msg = err instanceof Error ? err.message : 'Failed to search sports events.';
+        setFeedSportsSearchError(msg);
+      })
+      .finally(() => {
+        if (!cancelled) setFeedSportsSearchLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [feedSportsSearchQuery, feedKind]);
 
   const handleSubmit = async () => {
     if (!signer || !isValid || imageUploading) return;
@@ -408,6 +445,8 @@ export default function CreateMarket() {
       });
       setOutcomes(['Yes', 'No']);
       setFeedCandidates([]);
+      setFeedSportsSearchQuery('');
+      setFeedSportsSearchError('');
       setFeedDetectionHint('');
       setFeedDetectionError('');
     } catch (err) {
@@ -913,6 +952,19 @@ export default function CreateMarket() {
               </div>
             ) : (
               <div className="space-y-3">
+                <input
+                  type="text"
+                  value={feedSportsSearchQuery}
+                  onChange={(e) => setFeedSportsSearchQuery(e.target.value)}
+                  placeholder="Search matches, e.g. Brazil vs France"
+                  className="input-field"
+                />
+                {feedSportsSearchLoading && (
+                  <p className="text-xs text-dark-500">Searching matches...</p>
+                )}
+                {feedSportsSearchError && (
+                  <p className="text-xs text-amber-400">{feedSportsSearchError}</p>
+                )}
                 {feedCandidates.length > 0 && (
                   <select
                     value={feedEventId}

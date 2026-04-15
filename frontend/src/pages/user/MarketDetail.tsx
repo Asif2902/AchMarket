@@ -489,6 +489,15 @@ export default function MarketDetail() {
     let inFlight = false;
     let timeoutId: ReturnType<typeof setTimeout>;
 
+    const isClosedStage = detail
+      ? detail.stage === STAGE.Resolved || detail.stage === STAGE.Cancelled || detail.stage === STAGE.Expired
+      : false;
+
+    if (isClosedStage) {
+      setLiveLoading(false);
+      return;
+    }
+
     const schedule = (seconds: number) => {
       if (cancelled) return;
       timeoutId = setTimeout(() => {
@@ -524,7 +533,7 @@ export default function MarketDetail() {
       cancelled = true;
       clearTimeout(timeoutId);
     };
-  }, [marketAddress]);
+  }, [marketAddress, detail?.stage]);
 
   useEffect(() => {
     if (!userAddress || !isConnected) { setUserBalance(null); setHasProfile(false); return; }
@@ -925,7 +934,9 @@ export default function MarketDetail() {
                       : 'No external feed configured for this market'}
                   </p>
                 </div>
-                {liveConfigured?.stale ? (
+                {(detail.stage === STAGE.Resolved || detail.stage === STAGE.Cancelled || detail.stage === STAGE.Expired) ? (
+                  <span className="badge bg-dark-750/80 text-dark-300 border-white/[0.08]">Frozen</span>
+                ) : liveConfigured?.stale ? (
                   <span className="badge bg-amber-500/15 text-amber-400 border-amber-500/25">Delayed</span>
                 ) : (
                   <span className="badge bg-emerald-500/15 text-emerald-400 border-emerald-500/25">Live</span>
