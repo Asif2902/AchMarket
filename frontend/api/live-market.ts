@@ -60,6 +60,8 @@ interface LiveCryptoData {
   quoteSymbol: string;
   price: number;
   change24h: number | null;
+  marketCap: number | null;
+  volume24h: number | null;
 }
 
 interface LiveSportsData {
@@ -316,12 +318,14 @@ async function fetchCryptoSnapshot(config: LiveFeedDoc): Promise<CachedLiveSnaps
 
   const id = config.crypto.coingeckoId.trim().toLowerCase();
   const vs = config.crypto.vsCurrency.trim().toLowerCase();
-  const endpoint = `https://api.coingecko.com/api/v3/simple/price?ids=${encodeURIComponent(id)}&vs_currencies=${encodeURIComponent(vs)}&include_24hr_change=true`;
+  const endpoint = `https://api.coingecko.com/api/v3/simple/price?ids=${encodeURIComponent(id)}&vs_currencies=${encodeURIComponent(vs)}&include_24hr_change=true&include_market_cap=true&include_24hr_vol=true`;
   const json = await fetchJsonWithTimeout(endpoint);
 
   const coin = json?.[id];
   const price = toFiniteNumber(coin?.[vs]);
   const change24h = toFiniteNumber(coin?.[`${vs}_24h_change`]);
+  const marketCap = toFiniteNumber(coin?.[`${vs}_market_cap`]);
+  const volume24h = toFiniteNumber(coin?.[`${vs}_24h_vol`]);
   if (price === null) {
     throw new Error('CoinGecko returned no price for this pair.');
   }
@@ -339,6 +343,8 @@ async function fetchCryptoSnapshot(config: LiveFeedDoc): Promise<CachedLiveSnaps
       quoteSymbol: config.crypto.quoteSymbol,
       price,
       change24h,
+      marketCap,
+      volume24h,
     },
   };
 }

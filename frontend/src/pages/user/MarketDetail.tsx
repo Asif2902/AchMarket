@@ -12,7 +12,7 @@ import { PageLoader } from '../../components/LoadingSpinner';
 import UsdcIcon from '../../components/UsdcIcon';
 import { fetchTradeEvents, computeVolumeFromEvents } from '../../services/blockscout';
 import {
-  formatUSDC, formatCompactUSDC, formatWad, formatProbability, probToPercent, formatDate,
+  formatUSDC, formatCompactUSDC, formatCompact, formatWad, formatProbability, probToPercent, formatDate,
   applyBuySlippage, applySellSlippage, parseContractError, resolveImageUri,
   parseMarketSlug, parseProofLinks, parseDescription
 } from '../../utils/format';
@@ -115,6 +115,11 @@ function formatLiveAge(iso: string): string {
   if (hours < 24) return `${hours}h ago`;
   const days = Math.floor(hours / 24);
   return `${days}d ago`;
+}
+
+function formatLiveMetric(value: number | null): string {
+  if (value === null || !Number.isFinite(value)) return '--';
+  return formatCompact(value);
 }
 
 export default function MarketDetail() {
@@ -934,7 +939,9 @@ export default function MarketDetail() {
                       : 'No external feed configured for this market'}
                   </p>
                 </div>
-                {(detail.stage === STAGE.Resolved || detail.stage === STAGE.Cancelled || detail.stage === STAGE.Expired) ? (
+                {!liveConfigured ? (
+                  <span className="badge bg-dark-750/80 text-dark-300 border-white/[0.08]">Not Configured</span>
+                ) : (detail.stage === STAGE.Resolved || detail.stage === STAGE.Cancelled || detail.stage === STAGE.Expired) ? (
                   <span className="badge bg-dark-750/80 text-dark-300 border-white/[0.08]">Frozen</span>
                 ) : liveConfigured?.stale ? (
                   <span className="badge bg-amber-500/15 text-amber-400 border-amber-500/25">Delayed</span>
@@ -975,6 +982,20 @@ export default function MarketDetail() {
                           : `${liveConfigured.data.change24h >= 0 ? '+' : ''}${liveConfigured.data.change24h.toFixed(2)}%`}
                       </p>
                       <p className="text-2xs text-dark-500">24h change</p>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2 pt-1">
+                    <div className="rounded-lg bg-dark-900/40 border border-white/[0.08] px-2.5 py-2">
+                      <p className="text-2xs text-dark-500">Market Cap</p>
+                      <p className="text-xs font-semibold text-white tabular-nums mt-0.5">
+                        {formatLiveMetric(liveConfigured.data.marketCap)} {liveConfigured.data.quoteSymbol}
+                      </p>
+                    </div>
+                    <div className="rounded-lg bg-dark-900/40 border border-white/[0.08] px-2.5 py-2">
+                      <p className="text-2xs text-dark-500">24h Volume</p>
+                      <p className="text-xs font-semibold text-white tabular-nums mt-0.5">
+                        {formatLiveMetric(liveConfigured.data.volume24h)} {liveConfigured.data.quoteSymbol}
+                      </p>
                     </div>
                   </div>
                   <div className="flex items-center justify-between text-2xs text-dark-500 pt-2 border-t border-white/[0.08]">

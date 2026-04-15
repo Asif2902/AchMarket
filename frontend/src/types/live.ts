@@ -46,6 +46,8 @@ export interface LiveCryptoMarketData {
   quoteSymbol: string;
   price: number;
   change24h: number | null;
+  marketCap: number | null;
+  volume24h: number | null;
 }
 
 export interface LiveSportsMarketData {
