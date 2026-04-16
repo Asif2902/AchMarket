@@ -521,13 +521,8 @@ export default function MarketDetail() {
       ? detail.stage === STAGE.Resolved || detail.stage === STAGE.Cancelled || detail.stage === STAGE.Expired
       : false;
 
-    if (isClosedStage) {
-      setLiveLoading(false);
-      return;
-    }
-
     const schedule = (seconds: number) => {
-      if (cancelled) return;
+      if (cancelled || isClosedStage) return;
       timeoutId = setTimeout(() => {
         void poll(false);
       }, Math.max(5, seconds) * 1000);
@@ -542,13 +537,17 @@ export default function MarketDetail() {
         if (cancelled) return;
         setLiveData(data);
         setLiveError(null);
-        const next = data.configured ? Math.max(5, data.nextSuggestedPollSeconds || 15) : 30;
-        schedule(next);
+        if (!isClosedStage) {
+          const next = data.configured ? Math.max(5, data.nextSuggestedPollSeconds || 15) : 30;
+          schedule(next);
+        }
       } catch (err) {
         if (cancelled) return;
         const message = err instanceof Error ? err.message : 'Failed to load live reference data.';
         setLiveError(message);
-        schedule(30);
+        if (!isClosedStage) {
+          schedule(30);
+        }
       } finally {
         inFlight = false;
         if (!cancelled) setLiveLoading(false);
@@ -965,7 +964,7 @@ export default function MarketDetail() {
                 {!liveConfigured ? (
                   <span className="badge bg-dark-750/80 text-dark-300 border-white/[0.08]">Not Configured</span>
                 ) : (detail.stage === STAGE.Resolved || detail.stage === STAGE.Cancelled || detail.stage === STAGE.Expired) ? (
-                  <span className="badge bg-dark-750/80 text-dark-300 border-white/[0.08]">Frozen</span>
+                  <span className="badge bg-cyan-500/15 text-cyan-300 border-cyan-500/25">Final Snapshot</span>
                 ) : liveConfigured?.stale ? (
                   <span className="badge bg-amber-500/15 text-amber-400 border-amber-500/25">Delayed</span>
                 ) : (
