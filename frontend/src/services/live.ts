@@ -177,9 +177,9 @@ export async function saveLiveFeedConfig(
   return body.config;
 }
 
-export async function fetchLiveMarketData(marketAddress: string): Promise<LiveMarketDataResponse> {
+export async function fetchLiveMarketData(marketAddress: string, signal?: AbortSignal): Promise<LiveMarketDataResponse> {
   const normalized = sanitizeMarketAddress(marketAddress);
-  const response = await fetch(withCacheBust(`${LIVE_MARKET_API_PATH}?marketAddress=${encodeURIComponent(normalized)}`));
+  const response = await fetch(withCacheBust(`${LIVE_MARKET_API_PATH}?marketAddress=${encodeURIComponent(normalized)}`), { signal });
   return parseApiResponse<LiveMarketDataResponse>(response);
 }
 

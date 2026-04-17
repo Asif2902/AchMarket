@@ -108,6 +108,7 @@ let indexesReady = false;
 let cachedClient: MongoClient | null = null;
 let cachedReadProvider: JsonRpcProvider | null = null;
 const marketStageCache = new Map<string, { stage: number; expiresAt: number }>();
+const inFlight = new Map<string, Promise<CachedLiveSnapshot>>();
 
 function normalizeAddress(address: string): string {
   return getAddress(address).toLowerCase();
@@ -398,6 +399,21 @@ async function fetchFreshSnapshot(config: LiveFeedDoc): Promise<CachedLiveSnapsh
   return fetchSportsSnapshot(config);
 }
 
+async function fetchSharedFreshSnapshot(config: LiveFeedDoc): Promise<CachedLiveSnapshot> {
+  const key = config.marketAddress;
+  const existing = inFlight.get(key);
+  if (existing) {
+    return existing;
+  }
+
+  const promise = fetchFreshSnapshot(config).finally(() => {
+    inFlight.delete(key);
+  });
+
+  inFlight.set(key, promise);
+  return promise;
+}
+
 function normalizeMarketAddressInput(raw: unknown): string {
   if (typeof raw !== 'string' || !raw.trim()) {
     throw new Error('marketAddress query parameter is required.');
@@ -453,7 +469,7 @@ async function resolveLiveData(marketAddress: string): Promise<LiveConfiguredRes
   }
 
   try {
-    const fresh = await fetchFreshSnapshot(config);
+    const fresh = await fetchSharedFreshSnapshot(config);
 
     const collection = await getCollection();
     await collection.updateOne(
@@ -497,7 +513,7 @@ export default async function handler(req: any, res: any) {
     const lower = msg.toLowerCase();
     let code = 500;
     if (lower.includes('required') || lower.includes('invalid')) code = 400;
-    else if (lower.includes('not found')) code = 404;
+    else if (lower.includes('not found') || lower.includes('no price') || lower.includes('returned no price')) code = 404;
     else if (lower.includes('timed out')) code = 504;
     else if (lower.includes('mongo_uri') || lower.includes('enotfound')) code = 503;
     return res.status(code).json({ error: msg });

@@ -347,6 +347,12 @@ export default function CreateMarket() {
 
   const handleSubmit = async () => {
     if (!signer || !isValid || imageUploading) return;
+
+    if (!address || !ethers.isAddress(address)) {
+      setTxResult({ type: 'error', text: 'Invalid wallet address. Please reconnect your wallet.' });
+      return;
+    }
+
     setSubmitting(true);
     setTxResult(null);
     setFeedSaving(false);

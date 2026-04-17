@@ -71,24 +71,36 @@ interface MarketInfo {
 }
 
 const OWNER_MARKETS_CACHE_TTL_MS = 15_000;
-let ownerMarketsCache: OwnerMarketData[] | null = null;
-let ownerMarketsCacheAt = 0;
+const ownerMarketsCache = new Map<string, OwnerMarketData[]>();
+const ownerMarketsCacheAt = new Map<string, number>();
 
 export function useOwnerMarkets() {
   const { readProvider } = useWallet();
-  const [markets, setMarkets] = useState<OwnerMarketData[]>(() => ownerMarketsCache ?? []);
-  const [loading, setLoading] = useState(() => ownerMarketsCache === null);
+
+  const getCacheKey = useCallback(async () => {
+    const network = await readProvider.getNetwork();
+    const chainId = network.chainId.toString();
+    const rpcUrl = readProvider._getConnection().url;
+    return `${chainId}:${rpcUrl}`;
+  }, [readProvider]);
+
+  const [markets, setMarkets] = useState<OwnerMarketData[]>([]);
+  const [loading, setLoading] = useState(true);
 
   const fetchAll = useCallback(async (force = false) => {
     try {
+      const cacheKey = await getCacheKey();
       const now = Date.now();
-      if (!force && ownerMarketsCache && now - ownerMarketsCacheAt < OWNER_MARKETS_CACHE_TTL_MS) {
-        setMarkets(ownerMarketsCache);
+      const cached = ownerMarketsCache.get(cacheKey);
+      const cachedAt = ownerMarketsCacheAt.get(cacheKey) ?? 0;
+
+      if (!force && cached && now - cachedAt < OWNER_MARKETS_CACHE_TTL_MS) {
+        setMarkets(cached);
         setLoading(false);
         return;
       }
 
-      if (!ownerMarketsCache) {
+      if (!cached) {
         setLoading(true);
       }
 
@@ -96,8 +108,8 @@ export function useOwnerMarkets() {
       const lens = new ethers.Contract(LENS_ADDRESS, LENS_ABI, readProvider);
       const total = Number(await factory.totalMarkets());
       if (total === 0) {
-        ownerMarketsCache = [];
-        ownerMarketsCacheAt = Date.now();
+        ownerMarketsCache.set(cacheKey, []);
+        ownerMarketsCacheAt.set(cacheKey, Date.now());
         setMarkets([]);
         return;
       }
@@ -261,8 +273,8 @@ export function useOwnerMarkets() {
         };
       }
 
-      ownerMarketsCache = result;
-      ownerMarketsCacheAt = Date.now();
+      ownerMarketsCache.set(cacheKey, result);
+      ownerMarketsCacheAt.set(cacheKey, Date.now());
       setMarkets(result);
 
       // Fetch accurate volumes from BlockScout events (buys + sells)
@@ -275,8 +287,8 @@ export function useOwnerMarkets() {
             return vol !== undefined ? { ...m, totalVolumeWei: vol } : m;
           });
 
-          ownerMarketsCache = next;
-          ownerMarketsCacheAt = Date.now();
+          ownerMarketsCache.set(cacheKey, next);
+          ownerMarketsCacheAt.set(cacheKey, Date.now());
           return next;
         });
       }).catch((err) => {
@@ -287,7 +299,7 @@ export function useOwnerMarkets() {
     } finally {
       setLoading(false);
     }
-  }, [readProvider]);
+  }, [readProvider, getCacheKey]);
 
   const refetch = useCallback(() => {
     void fetchAll(true);

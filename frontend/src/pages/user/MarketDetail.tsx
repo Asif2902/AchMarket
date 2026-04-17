@@ -515,7 +515,9 @@ export default function MarketDetail() {
 
     let cancelled = false;
     let inFlight = false;
-    let timeoutId: ReturnType<typeof setTimeout>;
+    let scheduleTimeoutId: ReturnType<typeof setTimeout> | undefined;
+    let abortTimeoutId: ReturnType<typeof setTimeout> | undefined;
+    let controller: AbortController | undefined;
 
     const isClosedStage = detail
       ? detail.stage === STAGE.Resolved || detail.stage === STAGE.Cancelled || detail.stage === STAGE.Expired
@@ -523,7 +525,7 @@ export default function MarketDetail() {
 
     const schedule = (seconds: number) => {
       if (cancelled || isClosedStage) return;
-      timeoutId = setTimeout(() => {
+      scheduleTimeoutId = setTimeout(() => {
         void poll(false);
       }, Math.max(5, seconds) * 1000);
     };
@@ -532,8 +534,18 @@ export default function MarketDetail() {
       if (cancelled || inFlight) return;
       inFlight = true;
       if (initial) setLiveLoading(true);
+
+      controller = new AbortController();
+      const FETCH_TIMEOUT_MS = 12000;
+
+      abortTimeoutId = setTimeout(() => {
+        if (controller) {
+          controller.abort();
+        }
+      }, FETCH_TIMEOUT_MS);
+
       try {
-        const data = await fetchLiveMarketData(marketAddress);
+        const data = await fetchLiveMarketData(marketAddress, controller.signal);
         if (cancelled) return;
         setLiveData(data);
         setLiveError(null);
@@ -549,6 +561,11 @@ export default function MarketDetail() {
           schedule(30);
         }
       } finally {
+        if (abortTimeoutId !== undefined) {
+          clearTimeout(abortTimeoutId);
+          abortTimeoutId = undefined;
+        }
+        controller = undefined;
         inFlight = false;
         if (!cancelled) setLiveLoading(false);
       }
@@ -558,7 +575,15 @@ export default function MarketDetail() {
 
     return () => {
       cancelled = true;
-      clearTimeout(timeoutId);
+      if (scheduleTimeoutId !== undefined) {
+        clearTimeout(scheduleTimeoutId);
+      }
+      if (abortTimeoutId !== undefined) {
+        clearTimeout(abortTimeoutId);
+      }
+      if (controller) {
+        controller.abort();
+      }
     };
   }, [marketAddress, detail?.stage]);
 

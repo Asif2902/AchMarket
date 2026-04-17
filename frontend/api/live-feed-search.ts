@@ -264,7 +264,7 @@ export default async function handler(req: any, res: any) {
     }
 
     const variants = buildQueryVariants(query);
-    const searchGroupPromise = Promise.all(
+    const searchGroupPromise = Promise.allSettled(
       variants.map(async (variant) => {
         const endpoint = `https://www.thesportsdb.com/api/v1/json/3/searchevents.php?e=${encodeURIComponent(variant.replace(/\s+/g, '_'))}`;
         const json = await fetchJsonWithTimeout(endpoint);
@@ -273,6 +273,10 @@ export default async function handler(req: any, res: any) {
           .map(mapEventToCandidate)
           .filter((item: SportsCandidate | null): item is SportsCandidate => Boolean(item));
       }),
+    ).then(results =>
+      results
+        .filter((r): r is PromiseFulfilledResult<SportsCandidate[]> => r.status === 'fulfilled')
+        .map(r => r.value)
     );
 
     const pair = splitPairQuery(query);
