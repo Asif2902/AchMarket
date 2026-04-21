@@ -89,6 +89,7 @@ export default function CreateMarket() {
   const [feedDetecting, setFeedDetecting] = useState(false);
   const [feedDetectionHint, setFeedDetectionHint] = useState('');
   const [feedDetectionError, setFeedDetectionError] = useState('');
+  const [feedUserEdited, setFeedUserEdited] = useState(false);
   const [feedSaving, setFeedSaving] = useState(false);
 
   const [submitting, setSubmitting] = useState(false);
@@ -248,9 +249,9 @@ export default function CreateMarket() {
     parseFloat(bValue) >= 1000,
   ].filter(Boolean).length;
 
-  const feedCanSave = feedKind === 'crypto-price'
+  const feedCanSave = feedUserEdited && (feedKind === 'crypto-price'
     ? Boolean(feedCoingeckoId.trim() && feedBaseSymbol.trim() && feedQuoteSymbol.trim() && feedVsCurrency.trim())
-    : Boolean(feedEventId.trim() && feedLeagueName.trim());
+    : Boolean(feedEventId.trim() && feedLeagueName.trim()));
 
   const detectFeedFromDraft = async () => {
     if (!title.trim() || !actualCategory.trim()) return;
@@ -283,6 +284,7 @@ export default function CreateMarket() {
         setFeedLeagueName(suggestions.sports.selectedLeagueName || '');
         setFeedSportsSearchQuery(`${suggestions.sports.homeTeam || ''} vs ${suggestions.sports.awayTeam || ''}`.trim());
         setFeedDetectionHint(suggestions.sports.reason || 'Detected sports feed suggestion.');
+        setFeedUserEdited(true);
       } else if (suggestions.crypto.detected) {
         setFeedKind('crypto-price');
         setFeedCoingeckoId(suggestions.crypto.coingeckoId || 'bitcoin');
@@ -291,12 +293,14 @@ export default function CreateMarket() {
         setFeedVsCurrency(suggestions.crypto.vsCurrency || 'usd');
         setFeedCryptoMetric(suggestions.crypto.metric || 'price');
         setFeedDetectionHint(suggestions.crypto.reason || 'Detected crypto feed suggestion.');
+        setFeedUserEdited(true);
       } else if (suggestions.sports.detected) {
         setFeedKind('sports-score');
         setFeedEventId(suggestions.sports.selectedEventId || '');
         setFeedLeagueName(suggestions.sports.selectedLeagueName || '');
         setFeedSportsSearchQuery(`${suggestions.sports.homeTeam || ''} vs ${suggestions.sports.awayTeam || ''}`.trim());
         setFeedDetectionHint(suggestions.sports.reason || 'Detected sports feed suggestion.');
+        setFeedUserEdited(true);
       } else {
         setFeedDetectionHint('No strong feed suggestion found. Fill manually or continue without feed.');
       }
@@ -324,10 +328,21 @@ export default function CreateMarket() {
   }, [title, actualCategory, description, outcomes]);
 
   useEffect(() => {
-    if (feedKind !== 'sports-score') return;
+    if (feedKind !== 'sports-score') {
+      setFeedSportsSearchLoading(false);
+      setFeedSportsSearchError('');
+      setFeedCandidates([]);
+      setFeedEventId('');
+      setFeedLeagueName('');
+      return;
+    }
     const query = feedSportsSearchQuery.trim();
     if (!query || query.length < 3) {
+      setFeedSportsSearchLoading(false);
       setFeedSportsSearchError('');
+      setFeedCandidates([]);
+      setFeedEventId('');
+      setFeedLeagueName('');
       return;
     }
 
@@ -409,6 +424,7 @@ export default function CreateMarket() {
         market: marketAddr,
         marketId,
       });
+      setSubmitting(false);
 
       if (marketAddr && feedEnabled && feedCanSave) {
         setFeedSaving(true);
@@ -478,7 +494,6 @@ export default function CreateMarket() {
     } catch (err) {
       keepUploadedImageOnCloseRef.current = false;
       setTxResult({ type: 'error', text: parseContractError(err) });
-    } finally {
       setSubmitting(false);
     }
   };
@@ -949,7 +964,7 @@ export default function CreateMarket() {
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <select
                   value={feedCryptoMetric}
-                  onChange={(e) => setFeedCryptoMetric(e.target.value as 'price' | 'market-cap' | 'volume-24h')}
+                  onChange={(e) => { setFeedCryptoMetric(e.target.value as 'price' | 'market-cap' | 'volume-24h'); setFeedUserEdited(true); }}
                   className="input-field"
                 >
                   <option value="price">Metric: Price</option>
@@ -959,28 +974,28 @@ export default function CreateMarket() {
                 <input
                   type="text"
                   value={feedCoingeckoId}
-                  onChange={(e) => setFeedCoingeckoId(e.target.value)}
+                  onChange={(e) => { setFeedCoingeckoId(e.target.value); setFeedUserEdited(true); }}
                   placeholder="CoinGecko id (bitcoin)"
                   className="input-field"
                 />
                 <input
                   type="text"
                   value={feedBaseSymbol}
-                  onChange={(e) => setFeedBaseSymbol(e.target.value)}
+                  onChange={(e) => { setFeedBaseSymbol(e.target.value); setFeedUserEdited(true); }}
                   placeholder="Base symbol (BTC)"
                   className="input-field"
                 />
                 <input
                   type="text"
                   value={feedQuoteSymbol}
-                  onChange={(e) => setFeedQuoteSymbol(e.target.value)}
+                  onChange={(e) => { setFeedQuoteSymbol(e.target.value); setFeedUserEdited(true); }}
                   placeholder="Quote symbol (USD)"
                   className="input-field"
                 />
                 <input
                   type="text"
                   value={feedVsCurrency}
-                  onChange={(e) => setFeedVsCurrency(e.target.value)}
+                  onChange={(e) => { setFeedVsCurrency(e.target.value); setFeedUserEdited(true); }}
                   placeholder="Quote key (usd)"
                   className="input-field"
                 />
@@ -1014,6 +1029,7 @@ export default function CreateMarket() {
                       setFeedEventId(id);
                       const found = feedCandidates.find((c) => c.eventId === id);
                       if (found) setFeedLeagueName(found.leagueName);
+                      setFeedUserEdited(true);
                     }}
                     className="input-field"
                   >
@@ -1028,14 +1044,14 @@ export default function CreateMarket() {
                 <input
                   type="text"
                   value={feedEventId}
-                  onChange={(e) => setFeedEventId(e.target.value)}
+                  onChange={(e) => { setFeedEventId(e.target.value); setFeedUserEdited(true); }}
                   placeholder="TheSportsDB event id"
                   className="input-field"
                 />
                 <input
                   type="text"
                   value={feedLeagueName}
-                  onChange={(e) => setFeedLeagueName(e.target.value)}
+                  onChange={(e) => { setFeedLeagueName(e.target.value); setFeedUserEdited(true); }}
                   placeholder="League name"
                   className="input-field"
                 />

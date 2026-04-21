@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef, type ChangeEvent } from 'react';
 import { ethers } from 'ethers';
 import { useWallet } from '../../context/WalletContext';
-import { FACTORY_ADDRESS, LENS_ADDRESS, STAGE, STAGE_LABELS, STAGE_COLORS } from '../../config/network';
+import { FACTORY_ADDRESS, LENS_ADDRESS, STAGE, STAGE_LABELS, STAGE_COLORS, NETWORK } from '../../config/network';
 import { FACTORY_ABI, LENS_ABI, MARKET_ABI } from '../../config/abis';
 import ImageWithFallback from '../../components/ImageWithFallback';
 import ProbabilityBar from '../../components/ProbabilityBar';
@@ -35,6 +35,7 @@ export interface OwnerMarketData {
 
 const MARKET_INFO_ABI = [
   'function getMarketInfo() view returns (string _title, string _description, string _category, string _imageUri, string _proofUri, string[] _outcomeLabels, uint8 _stage, uint256 _winningOutcome, uint256 _createdAt, uint256 _marketDeadline, uint256 _totalVolumeWei, uint256 _participantCount, string _cancelReason, string _cancelProofUri)',
+  'function admin() view returns (address)',
 ] as const;
 
 interface LensSummary {
@@ -75,14 +76,15 @@ const ownerMarketsCache = new Map<string, OwnerMarketData[]>();
 const ownerMarketsCacheAt = new Map<string, number>();
 
 export function useOwnerMarkets() {
-  const { readProvider } = useWallet();
+  const { readProvider, address } = useWallet();
 
   const getCacheKey = useCallback(async () => {
     const network = await readProvider.getNetwork();
     const chainId = network.chainId.toString();
-    const rpcUrl = readProvider._getConnection().url;
-    return `${chainId}:${rpcUrl}`;
-  }, [readProvider]);
+    const rpcUrl = NETWORK.rpcUrl;
+    const normalizedOwner = address ? ethers.getAddress(address) : 'no-owner';
+    return `${chainId}:${rpcUrl}:${normalizedOwner}`;
+  }, [readProvider, address]);
 
   const [markets, setMarkets] = useState<OwnerMarketData[]>([]);
   const [loading, setLoading] = useState(true);
@@ -118,7 +120,31 @@ export function useOwnerMarkets() {
         return;
       }
 
-      const summaries = (await lens.getMarketSummaries(0, total)) as LensSummary[];
+      const allSummaries = (await lens.getMarketSummaries(0, total)) as LensSummary[];
+      const normalizedOwner = address ? ethers.getAddress(address).toLowerCase() : '';
+
+      const infoInterface = new ethers.Interface(MARKET_INFO_ABI);
+      const adminCalls = allSummaries.map((s) => ({
+        to: s.market,
+        data: infoInterface.encodeFunctionData('admin', []),
+      }));
+
+      const adminResults = await Promise.all(
+        adminCalls.map(async (call) => {
+          try {
+            const result = await readProvider.call({ to: call.to, data: call.data });
+            const decoded = infoInterface.decodeFunctionResult('admin', result);
+            const adminAddr = decoded[0] as string;
+            return adminAddr.toLowerCase();
+          } catch {
+            return '';
+          }
+        })
+      );
+
+      const summaries = normalizedOwner
+        ? allSummaries.filter((s, i) => adminResults[i] === normalizedOwner)
+        : allSummaries;
 
       const result: OwnerMarketData[] = summaries.map((s) => ({
         market: s.market,
@@ -140,7 +166,6 @@ export function useOwnerMarkets() {
         cancelProofUri: '',
       }));
 
-      const infoInterface = new ethers.Interface(MARKET_INFO_ABI);
       const calls = summaries.map((s) => ({
         to: s.market,
         data: infoInterface.encodeFunctionData('getMarketInfo', []),
