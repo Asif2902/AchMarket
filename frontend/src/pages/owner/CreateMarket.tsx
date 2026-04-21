@@ -374,7 +374,7 @@ export default function CreateMarket() {
   }, [feedSportsSearchQuery, feedKind, feedEventId]);
 
   const handleSubmit = async () => {
-    if (!signer || !isValid || imageUploading) return;
+    if (!signer || !isValid || imageUploading || feedSaving) return;
 
     if (!address || !ethers.isAddress(address)) {
       setTxResult({ type: 'error', text: 'Invalid wallet address. Please reconnect your wallet.' });
@@ -424,7 +424,6 @@ export default function CreateMarket() {
         market: marketAddr,
         marketId,
       });
-      setSubmitting(false);
 
       if (marketAddr && feedEnabled && feedCanSave) {
         setFeedSaving(true);
@@ -472,7 +471,10 @@ export default function CreateMarket() {
           });
         } finally {
           setFeedSaving(false);
+          setSubmitting(false);
         }
+      } else {
+        setSubmitting(false);
       }
 
       setTitle('');
@@ -630,15 +632,15 @@ export default function CreateMarket() {
               accept="image/*"
               className="sr-only"
               onChange={handleImageFileChange}
-              disabled={imageUploading || submitting}
+              disabled={imageUploading || submitting || feedSaving}
             />
             <button
               type="button"
               onClick={() => imageFileInputRef.current?.click()}
-              disabled={imageUploading || submitting}
+              disabled={imageUploading || submitting || feedSaving}
               aria-label="Upload market header image"
               className={`w-full text-left rounded-2xl border border-dashed border-white/[0.2] bg-dark-900/60 p-4 transition-colors ${
-                imageUploading || submitting
+                imageUploading || submitting || feedSaving
                   ? 'opacity-60 cursor-not-allowed'
                   : 'hover:border-primary-400/40 hover:bg-dark-850/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400/40'
               }`}
@@ -699,7 +701,7 @@ export default function CreateMarket() {
                   <button
                     type="button"
                     onClick={handleClearImage}
-                    disabled={imageUploading || submitting}
+                    disabled={imageUploading || submitting || feedSaving}
                     className="text-2xs text-red-300 hover:text-red-200"
                   >
                     Remove image
@@ -1063,7 +1065,7 @@ export default function CreateMarket() {
           <div className="card p-5">
             <button
               onClick={handleSubmit}
-              disabled={!isValid || submitting}
+              disabled={!isValid || submitting || imageUploading || feedSaving}
               className="btn-primary w-full py-3.5 text-base font-semibold"
             >
               {submitting ? (
