@@ -86,15 +86,18 @@ export function useOwnerMarkets() {
 
   const [markets, setMarkets] = useState<OwnerMarketData[]>([]);
   const [loading, setLoading] = useState(true);
+  const latestFetchKeyRef = useRef('');
 
   const fetchAll = useCallback(async (force = false) => {
     try {
       const cacheKey = await getCacheKey();
+      latestFetchKeyRef.current = cacheKey;
       const now = Date.now();
       const cached = ownerMarketsCache.get(cacheKey);
       const cachedAt = ownerMarketsCacheAt.get(cacheKey) ?? 0;
 
       if (!force && cached && now - cachedAt < OWNER_MARKETS_CACHE_TTL_MS) {
+        if (latestFetchKeyRef.current !== cacheKey) return;
         setMarkets(cached);
         setLoading(false);
         return;
@@ -108,6 +111,7 @@ export function useOwnerMarkets() {
       const lens = new ethers.Contract(LENS_ADDRESS, LENS_ABI, readProvider);
       const total = Number(await factory.totalMarkets());
       if (total === 0) {
+        if (latestFetchKeyRef.current !== cacheKey) return;
         ownerMarketsCache.set(cacheKey, []);
         ownerMarketsCacheAt.set(cacheKey, Date.now());
         setMarkets([]);
@@ -157,7 +161,7 @@ export function useOwnerMarkets() {
                 blockNumber: 'latest',
               },
             ])
-            .then((response: unknown) => {
+            .then(async (response: unknown) => {
               let decodedCount = 0;
               const rawResults = Array.isArray(response)
                 ? response
@@ -171,6 +175,50 @@ export function useOwnerMarkets() {
                 if (!rawEntry?.success || !returnData || returnData === '0x') continue;
                 try {
                   const decoded = infoInterface.decodeFunctionResult('getMarketInfo', returnData) as unknown as [
+                    string,
+                    string,
+                    string,
+                    string,
+                    string,
+                    string[],
+                    number,
+                    bigint,
+                    bigint,
+                    bigint,
+                    bigint,
+                    bigint,
+                    string,
+                    string,
+                  ];
+
+                  slots[start + i] = {
+                    _title: decoded[0],
+                    _description: decoded[1],
+                    _category: decoded[2],
+                    _imageUri: decoded[3],
+                    _proofUri: decoded[4],
+                    _outcomeLabels: decoded[5],
+                    _stage: Number(decoded[6]),
+                    _winningOutcome: decoded[7],
+                    _createdAt: decoded[8],
+                    _marketDeadline: decoded[9],
+                    _totalVolumeWei: decoded[10],
+                    _participantCount: decoded[11],
+                    _cancelReason: decoded[12],
+                    _cancelProofUri: decoded[13],
+                  };
+                  decodedCount += 1;
+                } catch {
+                  slots[start + i] = null;
+                }
+              }
+
+              // Retry individual failed entries
+              for (let i = 0; i < chunk.length; i += 1) {
+                if (slots[start + i] !== null) continue;
+                try {
+                  const raw = await readProvider.call({ to: chunk[i].to, data: chunk[i].data });
+                  const decoded = infoInterface.decodeFunctionResult('getMarketInfo', raw) as unknown as [
                     string,
                     string,
                     string,
@@ -273,6 +321,8 @@ export function useOwnerMarkets() {
         };
       }
 
+      if (latestFetchKeyRef.current !== cacheKey) return;
+
       ownerMarketsCache.set(cacheKey, result);
       ownerMarketsCacheAt.set(cacheKey, Date.now());
       setMarkets(result);
@@ -280,8 +330,10 @@ export function useOwnerMarkets() {
       // Fetch accurate volumes from BlockScout events (buys + sells)
       const addresses = result.map((m) => m.market);
       fetchAllMarketVolumes(addresses).then((volumes) => {
+        if (latestFetchKeyRef.current !== cacheKey) return;
         if (volumes.size === 0) return;
         setMarkets((prev) => {
+          if (latestFetchKeyRef.current !== cacheKey) return prev;
           const next = prev.map((m) => {
             const vol = volumes.get(m.market.toLowerCase());
             return vol !== undefined ? { ...m, totalVolumeWei: vol } : m;

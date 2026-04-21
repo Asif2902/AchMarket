@@ -99,6 +99,7 @@ export default function CreateMarket() {
   const addressRef = useRef(address);
   const signerRef = useRef(signer);
   const keepUploadedImageOnCloseRef = useRef(false);
+  const feedDetectRequestIdRef = useRef(0);
 
   latestImageUploadKeyRef.current = imageUploadKey;
   addressRef.current = address;
@@ -253,6 +254,10 @@ export default function CreateMarket() {
 
   const detectFeedFromDraft = async () => {
     if (!title.trim() || !actualCategory.trim()) return;
+
+    feedDetectRequestIdRef.current += 1;
+    const requestId = feedDetectRequestIdRef.current;
+
     setFeedDetecting(true);
     setFeedDetectionError('');
     setFeedDetectionHint('Detecting feed suggestions from your draft...');
@@ -264,6 +269,8 @@ export default function CreateMarket() {
         description: description.trim(),
         outcomeLabels: outcomes.map((o) => o.trim()).filter(Boolean),
       });
+
+      if (requestId !== feedDetectRequestIdRef.current) return;
 
       const cryptoScore = suggestions.crypto.detected ? suggestions.crypto.confidence : 0;
       const sportsScore = suggestions.sports.detected ? suggestions.sports.confidence : 0;
@@ -294,11 +301,14 @@ export default function CreateMarket() {
         setFeedDetectionHint('No strong feed suggestion found. Fill manually or continue without feed.');
       }
     } catch (err) {
+      if (requestId !== feedDetectRequestIdRef.current) return;
       const msg = err instanceof Error ? err.message : 'Could not detect feed suggestion.';
       setFeedDetectionError(msg);
       setFeedDetectionHint('');
     } finally {
-      setFeedDetecting(false);
+      if (requestId === feedDetectRequestIdRef.current) {
+        setFeedDetecting(false);
+      }
     }
   };
 
@@ -307,7 +317,10 @@ export default function CreateMarket() {
       if (!title.trim() || !actualCategory.trim()) return;
       void detectFeedFromDraft();
     }, 500);
-    return () => clearTimeout(timer);
+    return () => {
+      clearTimeout(timer);
+      feedDetectRequestIdRef.current += 1;
+    };
   }, [title, actualCategory, description, outcomes]);
 
   useEffect(() => {
