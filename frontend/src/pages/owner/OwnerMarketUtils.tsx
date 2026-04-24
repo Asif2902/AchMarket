@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef, type ChangeEvent } from 'react';
 import { ethers } from 'ethers';
 import { useWallet } from '../../context/WalletContext';
-import { FACTORY_ADDRESS, LENS_ADDRESS, STAGE, STAGE_LABELS, STAGE_COLORS } from '../../config/network';
+import { FACTORY_ADDRESS, LENS_ADDRESS, STAGE, STAGE_LABELS, STAGE_COLORS, NETWORK } from '../../config/network';
 import { FACTORY_ABI, LENS_ABI, MARKET_ABI } from '../../config/abis';
 import ImageWithFallback from '../../components/ImageWithFallback';
 import ProbabilityBar from '../../components/ProbabilityBar';
@@ -35,6 +35,7 @@ export interface OwnerMarketData {
 
 const MARKET_INFO_ABI = [
   'function getMarketInfo() view returns (string _title, string _description, string _category, string _imageUri, string _proofUri, string[] _outcomeLabels, uint8 _stage, uint256 _winningOutcome, uint256 _createdAt, uint256 _marketDeadline, uint256 _totalVolumeWei, uint256 _participantCount, string _cancelReason, string _cancelProofUri)',
+  'function admin() view returns (address)',
 ] as const;
 
 interface LensSummary {
@@ -71,24 +72,40 @@ interface MarketInfo {
 }
 
 const OWNER_MARKETS_CACHE_TTL_MS = 15_000;
-let ownerMarketsCache: OwnerMarketData[] | null = null;
-let ownerMarketsCacheAt = 0;
+const ownerMarketsCache = new Map<string, OwnerMarketData[]>();
+const ownerMarketsCacheAt = new Map<string, number>();
 
 export function useOwnerMarkets() {
-  const { readProvider } = useWallet();
-  const [markets, setMarkets] = useState<OwnerMarketData[]>(() => ownerMarketsCache ?? []);
-  const [loading, setLoading] = useState(() => ownerMarketsCache === null);
+  const { readProvider, address } = useWallet();
+
+  const getCacheKey = useCallback(async () => {
+    const network = await readProvider.getNetwork();
+    const chainId = network.chainId.toString();
+    const rpcUrl = NETWORK.rpcUrl;
+    const normalizedOwner = address ? ethers.getAddress(address) : 'no-owner';
+    return `${chainId}:${rpcUrl}:${normalizedOwner}`;
+  }, [readProvider, address]);
+
+  const [markets, setMarkets] = useState<OwnerMarketData[]>([]);
+  const [loading, setLoading] = useState(true);
+  const latestFetchKeyRef = useRef('');
 
   const fetchAll = useCallback(async (force = false) => {
     try {
+      const cacheKey = await getCacheKey();
+      latestFetchKeyRef.current = cacheKey;
       const now = Date.now();
-      if (!force && ownerMarketsCache && now - ownerMarketsCacheAt < OWNER_MARKETS_CACHE_TTL_MS) {
-        setMarkets(ownerMarketsCache);
+      const cached = ownerMarketsCache.get(cacheKey);
+      const cachedAt = ownerMarketsCacheAt.get(cacheKey) ?? 0;
+
+      if (!force && cached && now - cachedAt < OWNER_MARKETS_CACHE_TTL_MS) {
+        if (latestFetchKeyRef.current !== cacheKey) return;
+        setMarkets(cached);
         setLoading(false);
         return;
       }
 
-      if (!ownerMarketsCache) {
+      if (!cached) {
         setLoading(true);
       }
 
@@ -96,13 +113,38 @@ export function useOwnerMarkets() {
       const lens = new ethers.Contract(LENS_ADDRESS, LENS_ABI, readProvider);
       const total = Number(await factory.totalMarkets());
       if (total === 0) {
-        ownerMarketsCache = [];
-        ownerMarketsCacheAt = Date.now();
+        if (latestFetchKeyRef.current !== cacheKey) return;
+        ownerMarketsCache.set(cacheKey, []);
+        ownerMarketsCacheAt.set(cacheKey, Date.now());
         setMarkets([]);
         return;
       }
 
-      const summaries = (await lens.getMarketSummaries(0, total)) as LensSummary[];
+      const allSummaries = (await lens.getMarketSummaries(0, total)) as LensSummary[];
+      const normalizedOwner = address ? ethers.getAddress(address).toLowerCase() : '';
+
+      const infoInterface = new ethers.Interface(MARKET_INFO_ABI);
+      const adminCalls = allSummaries.map((s) => ({
+        to: s.market,
+        data: infoInterface.encodeFunctionData('admin', []),
+      }));
+
+      const adminResults = await Promise.all(
+        adminCalls.map(async (call) => {
+          try {
+            const result = await readProvider.call({ to: call.to, data: call.data });
+            const decoded = infoInterface.decodeFunctionResult('admin', result);
+            const adminAddr = decoded[0] as string;
+            return adminAddr.toLowerCase();
+          } catch {
+            return '';
+          }
+        })
+      );
+
+      const summaries = normalizedOwner
+        ? allSummaries.filter((s, i) => adminResults[i] === normalizedOwner)
+        : allSummaries;
 
       const result: OwnerMarketData[] = summaries.map((s) => ({
         market: s.market,
@@ -124,7 +166,6 @@ export function useOwnerMarkets() {
         cancelProofUri: '',
       }));
 
-      const infoInterface = new ethers.Interface(MARKET_INFO_ABI);
       const calls = summaries.map((s) => ({
         to: s.market,
         data: infoInterface.encodeFunctionData('getMarketInfo', []),
@@ -145,7 +186,7 @@ export function useOwnerMarkets() {
                 blockNumber: 'latest',
               },
             ])
-            .then((response: unknown) => {
+            .then(async (response: unknown) => {
               let decodedCount = 0;
               const rawResults = Array.isArray(response)
                 ? response
@@ -159,6 +200,50 @@ export function useOwnerMarkets() {
                 if (!rawEntry?.success || !returnData || returnData === '0x') continue;
                 try {
                   const decoded = infoInterface.decodeFunctionResult('getMarketInfo', returnData) as unknown as [
+                    string,
+                    string,
+                    string,
+                    string,
+                    string,
+                    string[],
+                    number,
+                    bigint,
+                    bigint,
+                    bigint,
+                    bigint,
+                    bigint,
+                    string,
+                    string,
+                  ];
+
+                  slots[start + i] = {
+                    _title: decoded[0],
+                    _description: decoded[1],
+                    _category: decoded[2],
+                    _imageUri: decoded[3],
+                    _proofUri: decoded[4],
+                    _outcomeLabels: decoded[5],
+                    _stage: Number(decoded[6]),
+                    _winningOutcome: decoded[7],
+                    _createdAt: decoded[8],
+                    _marketDeadline: decoded[9],
+                    _totalVolumeWei: decoded[10],
+                    _participantCount: decoded[11],
+                    _cancelReason: decoded[12],
+                    _cancelProofUri: decoded[13],
+                  };
+                  decodedCount += 1;
+                } catch {
+                  slots[start + i] = null;
+                }
+              }
+
+              // Retry individual failed entries
+              for (let i = 0; i < chunk.length; i += 1) {
+                if (slots[start + i] !== null) continue;
+                try {
+                  const raw = await readProvider.call({ to: chunk[i].to, data: chunk[i].data });
+                  const decoded = infoInterface.decodeFunctionResult('getMarketInfo', raw) as unknown as [
                     string,
                     string,
                     string,
@@ -261,22 +346,26 @@ export function useOwnerMarkets() {
         };
       }
 
-      ownerMarketsCache = result;
-      ownerMarketsCacheAt = Date.now();
+      if (latestFetchKeyRef.current !== cacheKey) return;
+
+      ownerMarketsCache.set(cacheKey, result);
+      ownerMarketsCacheAt.set(cacheKey, Date.now());
       setMarkets(result);
 
       // Fetch accurate volumes from BlockScout events (buys + sells)
       const addresses = result.map((m) => m.market);
       fetchAllMarketVolumes(addresses).then((volumes) => {
+        if (latestFetchKeyRef.current !== cacheKey) return;
         if (volumes.size === 0) return;
         setMarkets((prev) => {
+          if (latestFetchKeyRef.current !== cacheKey) return prev;
           const next = prev.map((m) => {
             const vol = volumes.get(m.market.toLowerCase());
             return vol !== undefined ? { ...m, totalVolumeWei: vol } : m;
           });
 
-          ownerMarketsCache = next;
-          ownerMarketsCacheAt = Date.now();
+          ownerMarketsCache.set(cacheKey, next);
+          ownerMarketsCacheAt.set(cacheKey, Date.now());
           return next;
         });
       }).catch((err) => {
@@ -287,7 +376,7 @@ export function useOwnerMarkets() {
     } finally {
       setLoading(false);
     }
-  }, [readProvider]);
+  }, [readProvider, getCacheKey]);
 
   const refetch = useCallback(() => {
     void fetchAll(true);

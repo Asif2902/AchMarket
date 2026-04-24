@@ -11,6 +11,7 @@ import UsdcIcon from '../../components/UsdcIcon';
 import Countdown from '../../components/Countdown';
 import ImageWithFallback from '../../components/ImageWithFallback';
 import { formatCompactUSDC, STABILITY_FILTERS, parseDescription, makeMarketSlug, titleCase } from '../../utils/format';
+import { EffectiveStatus, LiveMarketDataResponse } from '../../types/live';
 
 const DEFAULT_CATEGORIES = ['All', 'Crypto', 'Sports', 'Politics', 'Entertainment', 'Science', 'Other'];
 
@@ -58,7 +59,7 @@ export default function Home() {
   const [categoryFilter, setCategoryFilter] = useState('All');
   const [subcategoryFilter, setSubcategoryFilter] = useState<string>('All');
   const [descriptionByMarket, setDescriptionByMarket] = useState<Record<string, string>>({});
-  const fetchedMarketsRef = useRef<Set<string>>(new Set());
+  fetchedMarketsRef.current = new Set();
   const [stageFilter, setStageFilter] = useState(0);
   const [stabilityFilter, setStabilityFilter] = useState('all');
   const [sortBy, setSortBy] = useState('trending');
@@ -66,6 +67,7 @@ export default function Home() {
   const [page, setPage] = useState(0);
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
   const [filtersOpen, setFiltersOpen] = useState(false);
+  const [liveStatuses, setLiveStatuses] = useState<Record<string, EffectiveStatus>>({});
 
   const fetchMarkets = useCallback(async () => {
     try {
@@ -213,6 +215,33 @@ export default function Home() {
     };
     run();
   }, [categoryFilter, markets, readProvider]);
+
+  useEffect(() => {
+    const fetchLiveStatuses = async () => {
+      const statuses: Record<string, EffectiveStatus> = {};
+      const batchSize = 5;
+      for (let i = 0; i < markets.length; i += batchSize) {
+        const batch = markets.slice(i, i + batchSize);
+        const promises = batch.map(async (market) => {
+          try {
+            const res = await fetch(`/api/live-market?marketAddress=${market.market}`);
+            const data: LiveMarketDataResponse = await res.json();
+            if (data.configured && data.effectiveStatus) {
+              statuses[market.market] = data.effectiveStatus;
+            }
+          } catch (err) {
+            console.error(`Failed to fetch live status for ${market.market}:`, err);
+          }
+        });
+        await Promise.all(promises);
+      }
+      setLiveStatuses(statuses);
+    };
+
+    if (markets.length > 0 && !loading) {
+      fetchLiveStatuses();
+    }
+  }, [markets, loading]);
 
   const categories = getCategories(markets);
   const categoryCounts = useMemo(() => categories.map((cat) => ({
@@ -402,7 +431,7 @@ export default function Home() {
                         className="animate-fade-in-up"
                         style={{ animationDelay: `${i * 60}ms`, animationFillMode: 'both' }}
                       >
-                        <MarketCard data={market} />
+                        <MarketCard data={market} effectiveStatus={liveStatuses[market.market]} />
                       </div>
                     ))}
                   </div>
@@ -414,7 +443,7 @@ export default function Home() {
                         className="animate-fade-in-up"
                         style={{ animationDelay: `${i * 60}ms`, animationFillMode: 'both' }}
                       >
-                        <MarketListItem data={market} />
+                        <MarketListItem data={market} effectiveStatus={liveStatuses[market.market]} />
                       </div>
                     ))}
                   </div>
@@ -567,7 +596,7 @@ export default function Home() {
   );
 }
 
-function MarketListItem({ data }: { data: MarketSummaryData }) {
+function MarketListItem({ data, effectiveStatus }: { data: MarketSummaryData; effectiveStatus?: EffectiveStatus }) {
   const isActive = data.stage === STAGE.Active;
   const isSuspended = data.stage === STAGE.Suspended;
   const isTradingAllowed = isActive || isSuspended;
@@ -593,7 +622,13 @@ function MarketListItem({ data }: { data: MarketSummaryData }) {
             }`}
           />
           <div className="absolute top-1.5 left-1.5">
-            <span className={`badge-sm ${STAGE_COLORS[data.stage]}`}>{STAGE_LABELS[data.stage]}</span>
+            <span className={`badge-sm ${
+              effectiveStatus === 'upcoming'
+                ? 'bg-purple-500/20 text-purple-400 border-purple-500/30'
+                : STAGE_COLORS[data.stage]
+            }`}>
+              {effectiveStatus === 'upcoming' ? 'Upcoming' : STAGE_LABELS[data.stage]}
+            </span>
           </div>
         </div>
 

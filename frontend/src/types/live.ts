@@ -1,5 +1,6 @@
 export type LiveFeedKind = 'crypto-price' | 'sports-score';
 export type LiveCryptoMetric = 'price' | 'market-cap' | 'volume-24h';
+export type EffectiveStatus = 'upcoming' | 'live' | 'finished' | 'postponed' | 'cancelled' | 'unknown';
 
 export interface LiveCryptoFeedConfig {
   coingeckoId: string;
@@ -76,6 +77,7 @@ export interface LiveMarketDataConfiguredResponse {
   fetchedAt: string;
   nextSuggestedPollSeconds: number;
   data: LiveMarketData;
+  effectiveStatus?: EffectiveStatus;
 }
 
 export interface LiveMarketDataUnconfiguredResponse {

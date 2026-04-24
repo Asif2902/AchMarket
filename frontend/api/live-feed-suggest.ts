@@ -28,6 +28,7 @@ interface SportsCandidate {
   kickoffAt: string | null;
   status: string;
   statusLabel: string;
+  matchScore?: number;
 }
 
 const CRYPTO_ASSETS: CryptoAsset[] = [
@@ -236,6 +237,39 @@ function cleanTeamName(value: string): string {
     .trim();
 }
 
+function normalizeTeamName(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/\b(fc|afc|cf|sc|ac|club|team|the|united|city|town)\b/g, ' ')
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function teamsMatch(candidateHome: string, candidateAway: string, expectedHome: string, expectedAway: string): number {
+  const cHomeNorm = normalizeTeamName(candidateHome);
+  const cAwayNorm = normalizeTeamName(candidateAway);
+  const eHomeNorm = normalizeTeamName(expectedHome);
+  const eAwayNorm = normalizeTeamName(expectedAway);
+
+  // Check direct match
+  if (cHomeNorm === eHomeNorm && cAwayNorm === eAwayNorm) return 1.0;
+
+  // Check reverse match
+  if (cHomeNorm === eAwayNorm && cAwayNorm === eHomeNorm) return 0.9;
+
+  // Check partial matches
+  const homeMatch = cHomeNorm.includes(eHomeNorm) || eHomeNorm.includes(cHomeNorm) ||
+                   cHomeNorm.includes(eAwayNorm) || eAwayNorm.includes(cHomeNorm);
+  const awayMatch = cAwayNorm.includes(eAwayNorm) || eAwayNorm.includes(cAwayNorm) ||
+                   cAwayNorm.includes(eHomeNorm) || eHomeNorm.includes(cAwayNorm);
+
+  if (homeMatch && awayMatch) return 0.8;
+  if (homeMatch || awayMatch) return 0.4;
+
+  return 0;
+}
+
 function splitTitleSegments(title: string): string[] {
   return title
     .split(/[|:;,]/)
@@ -313,6 +347,12 @@ function textSimilarityScore(a: string, b: string): number {
 }
 
 function enrichSportsCandidateScore(candidate: SportsCandidate, pair: { home: string; away: string }): number {
+  // Use matchScore if available (more accurate)
+  if (candidate.matchScore !== undefined) {
+    const base = scoreSportsCandidate(candidate);
+    return candidate.matchScore * 0.6 + base * 0.4;
+  }
+
   const base = scoreSportsCandidate(candidate);
   const directOrder =
     textSimilarityScore(candidate.homeTeam, pair.home) +
@@ -407,6 +447,12 @@ function mapEventToSportsCandidate(
   const kickoffAt = kickoffRaw && Number.isFinite(Date.parse(kickoffRaw)) ? new Date(kickoffRaw).toISOString() : null;
   const status = normalizeSportsStatus(typeof event?.strStatus === 'string' ? event.strStatus : '');
 
+  // Calculate match score if fallback pair is provided
+  let matchScore = 0.5;
+  if (fallbackPair) {
+    matchScore = teamsMatch(homeTeam, awayTeam, fallbackPair.home, fallbackPair.away);
+  }
+
   return {
     eventId,
     leagueName: typeof event?.strLeague === 'string' ? event.strLeague : input.category || 'Sports',
@@ -415,6 +461,7 @@ function mapEventToSportsCandidate(
     kickoffAt,
     status: status.status,
     statusLabel: status.statusLabel,
+    matchScore,
   };
 }
 
@@ -441,9 +488,12 @@ async function fetchSportsCandidatesByQuery(
   const endpoint = `https://www.thesportsdb.com/api/v1/json/3/searchevents.php?e=${encodeURIComponent(normalizedQuery.replace(/\s+/g, '_'))}`;
   const json = await fetchJsonWithTimeout(endpoint);
   const events = Array.isArray(json?.event) ? json.event : [];
-  return events
+  const candidates = events
     .map((event: any) => mapEventToSportsCandidate(event, input, fallbackPair))
-    .filter((candidate: SportsCandidate | null): candidate is SportsCandidate => Boolean(candidate));
+    .filter((candidate: SportsCandidate | null): candidate is SportsCandidate => candidate !== null);
+
+  // Filter out candidates with very low match scores
+  return candidates.filter(c => (c.matchScore ?? 0) > 0.3);
 }
 
 function normalizeSportsSearchText(value: string): string {

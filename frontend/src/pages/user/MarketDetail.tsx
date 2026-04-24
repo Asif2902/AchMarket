@@ -515,7 +515,9 @@ export default function MarketDetail() {
 
     let cancelled = false;
     let inFlight = false;
-    let timeoutId: ReturnType<typeof setTimeout>;
+    let scheduleTimeoutId: ReturnType<typeof setTimeout> | undefined;
+    let abortTimeoutId: ReturnType<typeof setTimeout> | undefined;
+    let controller: AbortController | undefined;
 
     const isClosedStage = detail
       ? detail.stage === STAGE.Resolved || detail.stage === STAGE.Cancelled || detail.stage === STAGE.Expired
@@ -523,7 +525,7 @@ export default function MarketDetail() {
 
     const schedule = (seconds: number) => {
       if (cancelled || isClosedStage) return;
-      timeoutId = setTimeout(() => {
+      scheduleTimeoutId = setTimeout(() => {
         void poll(false);
       }, Math.max(5, seconds) * 1000);
     };
@@ -532,8 +534,18 @@ export default function MarketDetail() {
       if (cancelled || inFlight) return;
       inFlight = true;
       if (initial) setLiveLoading(true);
+
+      controller = new AbortController();
+      const FETCH_TIMEOUT_MS = 12000;
+
+      abortTimeoutId = setTimeout(() => {
+        if (controller) {
+          controller.abort();
+        }
+      }, FETCH_TIMEOUT_MS);
+
       try {
-        const data = await fetchLiveMarketData(marketAddress);
+        const data = await fetchLiveMarketData(marketAddress, controller.signal);
         if (cancelled) return;
         setLiveData(data);
         setLiveError(null);
@@ -549,6 +561,11 @@ export default function MarketDetail() {
           schedule(30);
         }
       } finally {
+        if (abortTimeoutId !== undefined) {
+          clearTimeout(abortTimeoutId);
+          abortTimeoutId = undefined;
+        }
+        controller = undefined;
         inFlight = false;
         if (!cancelled) setLiveLoading(false);
       }
@@ -558,7 +575,15 @@ export default function MarketDetail() {
 
     return () => {
       cancelled = true;
-      clearTimeout(timeoutId);
+      if (scheduleTimeoutId !== undefined) {
+        clearTimeout(scheduleTimeoutId);
+      }
+      if (abortTimeoutId !== undefined) {
+        clearTimeout(abortTimeoutId);
+      }
+      if (controller) {
+        controller.abort();
+      }
     };
   }, [marketAddress, detail?.stage]);
 
@@ -963,6 +988,8 @@ export default function MarketDetail() {
                 </div>
                 {!liveConfigured ? (
                   <span className="badge bg-dark-750/80 text-dark-300 border-white/[0.08]">Not Configured</span>
+                ) : liveConfigured?.effectiveStatus === 'upcoming' ? (
+                  <span className="badge bg-purple-500/15 text-purple-400 border-purple-500/25">Upcoming</span>
                 ) : (detail.stage === STAGE.Resolved || detail.stage === STAGE.Cancelled || detail.stage === STAGE.Expired) ? (
                   <span className="badge bg-cyan-500/15 text-cyan-300 border-cyan-500/25">Final Snapshot</span>
                 ) : liveConfigured?.stale ? (
@@ -1029,6 +1056,17 @@ export default function MarketDetail() {
 
               {liveConfigured && liveConfigured.data.kind === 'sports-score' && (
                 <div className="space-y-2.5">
+                  {liveConfigured.effectiveStatus === 'upcoming' && liveConfigured.data.kickoffAt && (
+                    <div className="p-3 rounded-lg bg-purple-500/10 border border-purple-500/20 text-sm text-purple-300">
+                      <div className="flex items-center gap-2">
+                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                        </svg>
+                        Match starts {new Date(liveConfigured.data.kickoffAt).toLocaleString()}
+                      </div>
+                      <p className="text-2xs text-purple-400/80 mt-1">Live trading will begin when the match starts</p>
+                    </div>
+                  )}
                   <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2">
                     <div className="min-w-0 text-left">
                       <p className="text-xs text-dark-400 uppercase tracking-wider">Home</p>

@@ -27,6 +27,7 @@ const MARKET_STAGE_CACHE_MS = 15_000;
 
 type LiveFeedKind = 'crypto-price' | 'sports-score';
 type LiveCryptoMetric = 'price' | 'market-cap' | 'volume-24h';
+type EffectiveStatus = 'upcoming' | 'live' | 'finished' | 'postponed' | 'cancelled' | 'unknown';
 
 interface LiveCryptoDoc {
   coingeckoId: string;
@@ -88,6 +89,7 @@ interface CachedLiveSnapshot {
   fetchedAt: string;
   nextSuggestedPollSeconds: number;
   data: LiveMarketData;
+  effectiveStatus?: EffectiveStatus;
 }
 
 interface LiveConfiguredResponse {
@@ -97,6 +99,7 @@ interface LiveConfiguredResponse {
   fetchedAt: string;
   nextSuggestedPollSeconds: number;
   data: LiveMarketData;
+  effectiveStatus?: EffectiveStatus;
 }
 
 interface LiveUnconfiguredResponse {
@@ -108,6 +111,7 @@ let indexesReady = false;
 let cachedClient: MongoClient | null = null;
 let cachedReadProvider: JsonRpcProvider | null = null;
 const marketStageCache = new Map<string, { stage: number; expiresAt: number }>();
+const inFlight = new Map<string, Promise<CachedLiveSnapshot>>();
 
 function normalizeAddress(address: string): string {
   return getAddress(address).toLowerCase();
@@ -289,6 +293,7 @@ function buildConfiguredResponse(snapshot: CachedLiveSnapshot, stale: boolean): 
     fetchedAt: snapshot.fetchedAt,
     nextSuggestedPollSeconds: snapshot.nextSuggestedPollSeconds,
     data: snapshot.data,
+    effectiveStatus: snapshot.effectiveStatus,
   };
 }
 
@@ -370,11 +375,25 @@ async function fetchSportsSnapshot(config: LiveFeedDoc): Promise<CachedLiveSnaps
   const kickoffRaw = typeof event.strTimestamp === 'string' ? event.strTimestamp : '';
   const kickoffAt = kickoffRaw && Number.isFinite(Date.parse(kickoffRaw)) ? new Date(kickoffRaw).toISOString() : null;
 
+  let effectiveStatus: EffectiveStatus | undefined;
+  if (status.status === 'scheduled') {
+    if (kickoffAt) {
+      const kickoffTime = new Date(kickoffAt).getTime();
+      const now = Date.now();
+      effectiveStatus = kickoffTime > now ? 'upcoming' : 'live';
+    } else {
+      effectiveStatus = 'scheduled';
+    }
+  } else {
+    effectiveStatus = status.status as EffectiveStatus;
+  }
+
   const fetchedAt = nowIso();
   return {
     asOf: fetchedAt,
     fetchedAt,
     nextSuggestedPollSeconds: SPORTS_MIN_REFRESH_SECONDS,
+    effectiveStatus,
     data: {
       kind: 'sports-score',
       provider: 'TheSportsDB',
@@ -396,6 +415,21 @@ async function fetchFreshSnapshot(config: LiveFeedDoc): Promise<CachedLiveSnapsh
     return fetchCryptoSnapshot(config);
   }
   return fetchSportsSnapshot(config);
+}
+
+async function fetchSharedFreshSnapshot(config: LiveFeedDoc): Promise<CachedLiveSnapshot> {
+  const key = config.marketAddress;
+  const existing = inFlight.get(key);
+  if (existing) {
+    return existing;
+  }
+
+  const promise = fetchFreshSnapshot(config).finally(() => {
+    inFlight.delete(key);
+  });
+
+  inFlight.set(key, promise);
+  return promise;
 }
 
 function normalizeMarketAddressInput(raw: unknown): string {
@@ -453,7 +487,7 @@ async function resolveLiveData(marketAddress: string): Promise<LiveConfiguredRes
   }
 
   try {
-    const fresh = await fetchFreshSnapshot(config);
+    const fresh = await fetchSharedFreshSnapshot(config);
 
     const collection = await getCollection();
     await collection.updateOne(
@@ -497,7 +531,7 @@ export default async function handler(req: any, res: any) {
     const lower = msg.toLowerCase();
     let code = 500;
     if (lower.includes('required') || lower.includes('invalid')) code = 400;
-    else if (lower.includes('not found')) code = 404;
+    else if (lower.includes('not found') || lower.includes('no price') || lower.includes('returned no price')) code = 404;
     else if (lower.includes('timed out')) code = 504;
     else if (lower.includes('mongo_uri') || lower.includes('enotfound')) code = 503;
     return res.status(code).json({ error: msg });

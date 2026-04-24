@@ -13,6 +13,7 @@ interface SportsCandidate {
   kickoffAt: string | null;
   status: string;
   statusLabel: string;
+  matchScore: number;
 }
 
 function normalizeQuery(value: string): string {
@@ -124,7 +125,40 @@ async function fetchJsonWithTimeout(url: string): Promise<any> {
   }
 }
 
-function mapEventToCandidate(event: any): SportsCandidate | null {
+function normalizeTeamName(name: string): string {
+  return name
+    .toLowerCase()
+    .replace(/\b(fc|afc|cf|sc|ac|club|team|the|united|city|town)\b/g, ' ')
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function teamsMatch(candidateHome: string, candidateAway: string, expectedHome: string, expectedAway: string): number {
+  const cHomeNorm = normalizeTeamName(candidateHome);
+  const cAwayNorm = normalizeTeamName(candidateAway);
+  const eHomeNorm = normalizeTeamName(expectedHome);
+  const eAwayNorm = normalizeTeamName(expectedAway);
+
+  // Check direct match
+  if (cHomeNorm === eHomeNorm && cAwayNorm === eAwayNorm) return 1.0;
+
+  // Check reverse match
+  if (cHomeNorm === eAwayNorm && cAwayNorm === eHomeNorm) return 0.9;
+
+  // Check partial matches
+  const homeMatch = cHomeNorm.includes(eHomeNorm) || eHomeNorm.includes(cHomeNorm) ||
+                   cHomeNorm.includes(eAwayNorm) || eAwayNorm.includes(cHomeNorm);
+  const awayMatch = cAwayNorm.includes(eAwayNorm) || eAwayNorm.includes(cAwayNorm) ||
+                   cAwayNorm.includes(eHomeNorm) || eHomeNorm.includes(cAwayNorm);
+
+  if (homeMatch && awayMatch) return 0.8;
+  if (homeMatch || awayMatch) return 0.4;
+
+  return 0;
+}
+
+function mapEventToCandidate(event: any, expectedPair: { left: string; right: string } | null): SportsCandidate | null {
   const eventId = typeof event?.idEvent === 'string' ? event.idEvent.trim() : '';
   if (!eventId) return null;
 
@@ -135,29 +169,63 @@ function mapEventToCandidate(event: any): SportsCandidate | null {
   const kickoffRaw = typeof event?.strTimestamp === 'string' ? event.strTimestamp : '';
   const kickoffAt = kickoffRaw && Number.isFinite(Date.parse(kickoffRaw)) ? new Date(kickoffRaw).toISOString() : null;
   const status = normalizeSportsStatus(typeof event?.strStatus === 'string' ? event.strStatus : '');
+  const leagueName = typeof event?.strLeague === 'string' ? event.strLeague.trim() : '';
+
+  // Calculate match score if expected pair is provided
+  let matchScore = 0.5; // default neutral score
+  if (expectedPair) {
+    matchScore = teamsMatch(homeTeam, awayTeam, expectedPair.left, expectedPair.right);
+  }
 
   return {
     eventId,
-    leagueName: typeof event?.strLeague === 'string' ? event.strLeague : 'Sports',
+    leagueName: leagueName || 'Sports',
     homeTeam,
     awayTeam,
     kickoffAt,
     status: status.status,
     statusLabel: status.statusLabel,
+    matchScore,
   };
 }
 
 async function resolveTeamId(teamName: string): Promise<string | null> {
   const q = normalizeQuery(teamName);
   if (!q) return null;
+
+  // Try exact match first with underscores (SportsDB convention)
   const endpoint = `https://www.thesportsdb.com/api/v1/json/3/searchteams.php?t=${encodeURIComponent(q.replace(/\s+/g, '_'))}`;
   const json = await fetchJsonWithTimeout(endpoint);
   const teams = Array.isArray(json?.teams) ? json.teams : [];
-  const first = teams.find((t: any) => typeof t?.idTeam === 'string' && t.idTeam.trim());
-  return first ? String(first.idTeam).trim() : null;
+
+  if (teams.length === 0) return null;
+
+  // Find best matching team
+  const normalizedQuery = normalizeTeamName(q);
+  let bestMatch = teams[0];
+  let bestScore = 0;
+
+  for (const team of teams) {
+    if (typeof team?.strTeam !== 'string') continue;
+    const teamNameNorm = normalizeTeamName(team.strTeam);
+    if (teamNameNorm === normalizedQuery) {
+      bestMatch = team;
+      break;
+    }
+    if (teamNameNorm.includes(normalizedQuery) || normalizedQuery.includes(teamNameNorm)) {
+      if (bestScore < 0.8) {
+        bestScore = 0.8;
+        bestMatch = team;
+      }
+    }
+  }
+
+  return bestMatch?.idTeam ? String(bestMatch.idTeam).trim() : null;
 }
 
 async function fetchTeamEvents(teamId: string): Promise<SportsCandidate[]> {
+  if (!teamId) return [];
+
   const endpoints = [
     `https://www.thesportsdb.com/api/v1/json/3/eventsnext.php?id=${encodeURIComponent(teamId)}`,
     `https://www.thesportsdb.com/api/v1/json/3/eventslast.php?id=${encodeURIComponent(teamId)}`,
@@ -165,33 +233,64 @@ async function fetchTeamEvents(teamId: string): Promise<SportsCandidate[]> {
 
   const responses = await Promise.all(
     endpoints.map(async (endpoint) => {
-      const json = await fetchJsonWithTimeout(endpoint);
-      const events = Array.isArray(json?.events)
-        ? json.events
-        : Array.isArray(json?.results)
-          ? json.results
-          : [];
-      return events
-        .map(mapEventToCandidate)
-        .filter((item: SportsCandidate | null): item is SportsCandidate => Boolean(item));
+      try {
+        const json = await fetchJsonWithTimeout(endpoint);
+        const events = Array.isArray(json?.events)
+          ? json.events
+          : Array.isArray(json?.results)
+            ? json.results
+            : [];
+        return events;
+      } catch {
+        return [];
+      }
     }),
   );
 
-  return responses.flat();
+  return responses.flat().map((event: any) => mapEventToCandidate(event, null)).filter((c): c is SportsCandidate => c !== null);
 }
 
-function scoreCandidate(candidate: SportsCandidate): number {
-  const kickoff = candidate.kickoffAt ? Date.parse(candidate.kickoffAt) : NaN;
-  if (!Number.isFinite(kickoff)) return 0.4;
+function scoreCandidate(candidate: SportsCandidate, query: string, expectedPair: { left: string; right: string } | null): number {
+  // Match score is the most important factor
+  const matchScore = candidate.matchScore || 0.5;
 
-  const now = Date.now();
-  const hours = Math.abs(kickoff - now) / (1000 * 60 * 60);
-  if (hours < 3) return 1;
-  if (hours < 24) return 0.92;
-  if (hours < 72) return 0.82;
-  if (hours < 14 * 24) return 0.7;
-  if (hours < 45 * 24) return 0.58;
-  return 0.45;
+  // Time proximity score
+  const kickoff = candidate.kickoffAt ? Date.parse(candidate.kickoffAt) : NaN;
+  let timeScore = 0.4;
+  if (Number.isFinite(kickoff)) {
+    const now = Date.now();
+    const hours = Math.abs(kickoff - now) / (1000 * 60 * 60);
+    if (hours < 3) timeScore = 1;
+    else if (hours < 24) timeScore = 0.92;
+    else if (hours < 72) timeScore = 0.82;
+    else if (hours < 14 * 24) timeScore = 0.7;
+    else if (hours < 45 * 24) timeScore = 0.58;
+  }
+
+  // If we have expected teams, prioritize match score
+  if (expectedPair) {
+    return matchScore * 0.6 + timeScore * 0.4;
+  }
+
+  // Otherwise use text overlap
+  const queryScore = Math.max(
+    textOverlap(candidate.homeTeam, query),
+    textOverlap(candidate.awayTeam, query),
+    textOverlap(`${candidate.homeTeam} ${candidate.awayTeam}`, query),
+  );
+
+  return timeScore * 0.5 + queryScore * 0.3 + matchScore * 0.2;
+}
+
+function textOverlap(a: string, b: string): number {
+  const aTokens = new Set(tokenize(a));
+  const bTokens = new Set(tokenize(b));
+  if (!aTokens.size || !bTokens.size) return 0;
+  let common = 0;
+  for (const token of aTokens) {
+    if (bTokens.has(token)) common += 1;
+  }
+  return common / Math.max(aTokens.size, bTokens.size);
 }
 
 function tokenize(value: string): string[] {
@@ -200,35 +299,6 @@ function tokenize(value: string): string[] {
     .split(/\s+/)
     .map((token) => token.replace(/[^a-z0-9]/g, ''))
     .filter((token) => token.length >= 2);
-}
-
-function textOverlap(a: string, b: string): number {
-  const aSet = new Set(tokenize(a));
-  const bSet = new Set(tokenize(b));
-  if (!aSet.size || !bSet.size) return 0;
-  let common = 0;
-  for (const token of aSet) {
-    if (bSet.has(token)) common += 1;
-  }
-  return common / Math.max(aSet.size, bSet.size);
-}
-
-function scoreCandidateForQuery(candidate: SportsCandidate, query: string): number {
-  const timeScore = scoreCandidate(candidate);
-  const pair = splitPairQuery(query);
-  if (!pair) {
-    const queryScore = Math.max(
-      textOverlap(candidate.homeTeam, query),
-      textOverlap(candidate.awayTeam, query),
-      textOverlap(`${candidate.homeTeam} ${candidate.awayTeam}`, query),
-    );
-    return timeScore * 0.6 + queryScore * 0.4;
-  }
-
-  const direct = (textOverlap(candidate.homeTeam, pair.left) + textOverlap(candidate.awayTeam, pair.right)) / 2;
-  const reverse = (textOverlap(candidate.homeTeam, pair.right) + textOverlap(candidate.awayTeam, pair.left)) / 2;
-  const pairScore = Math.max(direct, reverse);
-  return timeScore * 0.45 + pairScore * 0.55;
 }
 
 function dedupeCandidates(candidates: SportsCandidate[]): SportsCandidate[] {
@@ -263,42 +333,66 @@ export default async function handler(req: any, res: any) {
       return res.status(200).json({ query: '', candidates: [] });
     }
 
+    const expectedPair = splitPairQuery(query);
+
+    // Search by event name (limited to 2 results for free API)
     const variants = buildQueryVariants(query);
-    const searchGroupPromise = Promise.all(
-      variants.map(async (variant) => {
+    const searchGroupPromise = Promise.allSettled(
+      variants.slice(0, 3).map(async (variant) => {
         const endpoint = `https://www.thesportsdb.com/api/v1/json/3/searchevents.php?e=${encodeURIComponent(variant.replace(/\s+/g, '_'))}`;
         const json = await fetchJsonWithTimeout(endpoint);
         const events = Array.isArray(json?.event) ? json.event : [];
         return events
-          .map(mapEventToCandidate)
-          .filter((item: SportsCandidate | null): item is SportsCandidate => Boolean(item));
+          .map((event: any) => mapEventToCandidate(event, expectedPair))
+          .filter((item: SportsCandidate | null): item is SportsCandidate => item !== null);
       }),
+    ).then(results =>
+      results
+        .filter((r): r is PromiseFulfilledResult<SportsCandidate[]> => r.status === 'fulfilled')
+        .map(r => r.value)
     );
 
-    const pair = splitPairQuery(query);
+    // Search by team IDs (more reliable)
     let teamGroupsPromise: Promise<SportsCandidate[]> | null = null;
-    if (pair) {
+    if (expectedPair) {
       teamGroupsPromise = (async () => {
         const [leftId, rightId] = await Promise.all([
-          resolveTeamId(pair.left).catch(() => null),
-          resolveTeamId(pair.right).catch(() => null),
+          resolveTeamId(expectedPair.left).catch(() => null),
+          resolveTeamId(expectedPair.right).catch(() => null),
         ]);
 
-        const teamEvents = await Promise.all([
-          leftId ? fetchTeamEvents(leftId).catch(() => []) : Promise.resolve([]),
-          rightId ? fetchTeamEvents(rightId).catch(() => []) : Promise.resolve([]),
-        ]);
+        const teamEvents: SportsCandidate[] = [];
 
-        return teamEvents.flat();
+        // Fetch events for both teams
+        const teamIds = [leftId, rightId].filter(Boolean);
+        const eventsArrays = await Promise.all(
+          teamIds.map(id => id ? fetchTeamEvents(id).catch(() => []) : Promise.resolve([]))
+        );
+
+        // Merge and tag events with expected pair for scoring
+        for (const events of eventsArrays) {
+          for (const event of events) {
+            // Recalculate match score with expected pair
+            if (expectedPair) {
+              event.matchScore = teamsMatch(event.homeTeam, event.awayTeam, expectedPair.left, expectedPair.right);
+            }
+            teamEvents.push(event);
+          }
+        }
+
+        return teamEvents;
       })();
     }
 
-    const fetchedGroups = await searchGroupPromise;
-    const teamEvents = teamGroupsPromise ? await teamGroupsPromise : [];
+    const [fetchedGroups, teamEvents] = await Promise.all([
+      searchGroupPromise,
+      teamGroupsPromise || Promise.resolve([]),
+    ]);
 
     const candidates = dedupeCandidates([...fetchedGroups.flat(), ...teamEvents])
-      .sort((a, b) => scoreCandidateForQuery(b, query) - scoreCandidateForQuery(a, query))
-      .slice(0, 16);
+      .filter(c => c.matchScore > 0.3) // Only include candidates with decent team match
+      .sort((a, b) => scoreCandidate(b, query, expectedPair) - scoreCandidate(a, query, expectedPair))
+      .slice(0, 12);
 
     return res.status(200).json({ query, candidates });
   } catch (err: any) {

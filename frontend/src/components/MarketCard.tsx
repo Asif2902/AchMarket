@@ -4,6 +4,7 @@ import Countdown from './Countdown';
 import UsdcIcon from './UsdcIcon';
 import { formatCompactUSDC, makeMarketSlug, probToPercent, getStabilityLevel } from '../utils/format';
 import { STAGE, STAGE_LABELS, STAGE_COLORS } from '../config/network';
+import { EffectiveStatus } from '../types/live';
 
 export interface MarketSummaryData {
   market: string;
@@ -23,14 +24,16 @@ export interface MarketSummaryData {
 
 interface Props {
   data: MarketSummaryData;
+  effectiveStatus?: EffectiveStatus;
 }
 
-export default function MarketCard({ data }: Props) {
+export default function MarketCard({ data, effectiveStatus }: Props) {
   const isActive = data.stage === STAGE.Active;
   const isSuspended = data.stage === STAGE.Suspended;
   const isResolved = data.stage === STAGE.Resolved;
   const isCancelled = data.stage === STAGE.Cancelled || data.stage === STAGE.Expired;
-  const isTradingAllowed = isActive || isSuspended;
+  const showUpcoming = effectiveStatus === 'upcoming';
+  const isTradingAllowed = !showUpcoming && (isActive || isSuspended);
 
   const hasOutcomes = data.impliedProbabilitiesWad.length > 0;
   const rawLabel = hasOutcomes ? (data.outcomeLabels[0] ?? '') : '';
@@ -58,8 +61,12 @@ export default function MarketCard({ data }: Props) {
           <div className="absolute inset-0 bg-gradient-to-t from-[var(--bg-card)] via-[var(--bg-card)]/30 to-transparent" />
 
           <div className="absolute top-2 left-2">
-            <span className={`badge ${STAGE_COLORS[data.stage]} backdrop-blur-sm text-2xs`}>
-              {STAGE_LABELS[data.stage]}
+            <span className={`badge backdrop-blur-sm text-2xs ${
+              showUpcoming
+                ? 'bg-purple-500/20 text-purple-400 border-purple-500/30'
+                : `${STAGE_COLORS[data.stage]}`
+            }`}>
+              {showUpcoming ? 'Upcoming' : STAGE_LABELS[data.stage]}
             </span>
           </div>
           <div className="absolute top-2 right-2">
