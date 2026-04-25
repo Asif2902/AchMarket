@@ -546,8 +546,11 @@ async function resolveLiveData(marketAddress: string): Promise<LiveConfiguredRes
     );
 
     return buildConfiguredResponse(fresh, false);
-  } catch (fetchErr) {
-    if (cachedSnapshot) {
+  } catch (fetchErr: any) {
+    const errMsg = fetchErr?.message || '';
+    // Don't fall back to cache for validation errors (wrong event data)
+    const isValidationError = errMsg.includes('Event data mismatch') || errMsg.includes('eventId may be incorrect');
+    if (cachedSnapshot && !isValidationError) {
       return buildConfiguredResponse(cachedSnapshot, true);
     }
     throw fetchErr;
