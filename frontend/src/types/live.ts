@@ -23,7 +23,7 @@ export interface LiveFeedConfig {
   enabled: boolean;
   kind: LiveFeedKind;
   crypto: LiveCryptoFeedConfig | null;
-  sports: LiveSportsFeedConfig | null;
+  sports: (LiveSportsFeedConfig & { homeTeam?: string; awayTeam?: string; forceUpcoming?: boolean }) | null;
   updatedAt: string;
   updatedBy: string;
 }
@@ -43,16 +43,6 @@ export type LiveFeedConfigInput =
       sports: LiveSportsFeedConfig;
       crypto?: null;
     };
-
-export interface LiveFeedConfig {
-  marketAddress: string;
-  enabled: boolean;
-  kind: LiveFeedKind;
-  crypto: LiveCryptoFeedConfig | null;
-  sports: (LiveSportsFeedConfig & { homeTeam?: string; awayTeam?: string; forceUpcoming?: boolean }) | null;
-  updatedAt: string;
-  updatedBy: string;
-}
 
 export interface LiveCryptoMarketData {
   kind: 'crypto-price';
@@ -128,6 +118,7 @@ export interface LiveSportsSuggestionCandidate {
   kickoffAt: string | null;
   status: string;
   statusLabel: string;
+  matchScore?: number;
 }
 
 export interface LiveSportsSuggestion {
