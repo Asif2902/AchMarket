@@ -359,6 +359,36 @@ async function fetchCryptoSnapshot(config: LiveFeedDoc): Promise<CachedLiveSnaps
   };
 }
 
+function normalizeTeamName(name: string): string {
+  return name
+    .toLowerCase()
+    .replace(/\b(fc|afc|cf|sc|ac|club|team|the|united|city|town)\b/g, ' ')
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function teamsMatch(candidateHome: string, candidateAway: string, expectedHome: string, expectedAway: string): boolean {
+  const cHomeNorm = normalizeTeamName(candidateHome);
+  const cAwayNorm = normalizeTeamName(candidateAway);
+  const eHomeNorm = normalizeTeamName(expectedHome);
+  const eAwayNorm = normalizeTeamName(expectedAway);
+
+  // Check direct match
+  if (cHomeNorm === eHomeNorm && cAwayNorm === eAwayNorm) return true;
+
+  // Check reverse match
+  if (cHomeNorm === eAwayNorm && cAwayNorm === eHomeNorm) return true;
+
+  // Check if one contains the other (partial match)
+  const homeMatch = cHomeNorm.includes(eHomeNorm) || eHomeNorm.includes(cHomeNorm) ||
+                   cHomeNorm.includes(eAwayNorm) || eAwayNorm.includes(cHomeNorm);
+  const awayMatch = cAwayNorm.includes(eAwayNorm) || eAwayNorm.includes(cAwayNorm) ||
+                   cAwayNorm.includes(eHomeNorm) || eHomeNorm.includes(cAwayNorm);
+
+  return homeMatch && awayMatch;
+}
+
 async function fetchSportsSnapshot(config: LiveFeedDoc): Promise<CachedLiveSnapshot> {
   if (!config.sports) throw new Error('Sports feed config is missing.');
 
@@ -370,13 +400,28 @@ async function fetchSportsSnapshot(config: LiveFeedDoc): Promise<CachedLiveSnaps
     throw new Error('Sports event not found for this eventId.');
   }
 
+  // Validate that returned event matches expected teams
+  const returnedHome = typeof event?.strHomeTeam === 'string' ? event.strHomeTeam : '';
+  const returnedAway = typeof event?.strAwayTeam === 'string' ? event.strAwayTeam : '';
+  const expectedHome = config.sports.homeTeam || '';
+  const expectedAway = config.sports.awayTeam || '';
+
+  if (expectedHome && expectedAway &&
+      !teamsMatch(returnedHome, returnedAway, expectedHome, expectedAway)) {
+    throw new Error(`Event data mismatch: expected "${expectedHome} vs ${expectedAway}", but got "${returnedHome} vs ${returnedAway}". The eventId may be incorrect.`);
+  }
+
   const statusRaw = typeof event.strStatus === 'string' ? event.strStatus : '';
   const status = normalizeSportsStatus(statusRaw);
   const kickoffRaw = typeof event.strTimestamp === 'string' ? event.strTimestamp : '';
   const kickoffAt = kickoffRaw && Number.isFinite(Date.parse(kickoffRaw)) ? new Date(kickoffRaw).toISOString() : null;
 
   let effectiveStatus: EffectiveStatus | undefined;
-  if (status.status === 'scheduled') {
+
+  // If forceUpcoming is set in config, always show as upcoming
+  if (config.sports.forceUpcoming) {
+    effectiveStatus = 'upcoming';
+  } else if (status.status === 'scheduled') {
     if (kickoffAt) {
       const kickoffTime = new Date(kickoffAt).getTime();
       const now = Date.now();
@@ -399,8 +444,8 @@ async function fetchSportsSnapshot(config: LiveFeedDoc): Promise<CachedLiveSnaps
       provider: 'TheSportsDB',
       providerRef: eventId,
       leagueName: config.sports.leagueName || (typeof event.strLeague === 'string' ? event.strLeague : ''),
-      homeTeam: typeof event.strHomeTeam === 'string' ? event.strHomeTeam : 'Home',
-      awayTeam: typeof event.strAwayTeam === 'string' ? event.strAwayTeam : 'Away',
+      homeTeam: returnedHome || 'Home',
+      awayTeam: returnedAway || 'Away',
       homeScore: parseOptionalScore(event.intHomeScore),
       awayScore: parseOptionalScore(event.intAwayScore),
       status: status.status,

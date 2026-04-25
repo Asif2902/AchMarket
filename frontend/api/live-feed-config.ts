@@ -31,6 +31,9 @@ interface LiveCryptoDoc {
 interface LiveSportsDoc {
   eventId: string;
   leagueName: string;
+  homeTeam?: string;
+  awayTeam?: string;
+  forceUpcoming?: boolean;
 }
 
 interface LiveFeedDoc {
@@ -173,6 +176,9 @@ function sanitizePayload(input: LiveFeedPayload): LiveFeedPayload {
 
   const eventId = parseTrimmedString(input.sports?.eventId);
   const leagueName = parseTrimmedString(input.sports?.leagueName);
+  const homeTeam = parseTrimmedString(input.sports?.homeTeam);
+  const awayTeam = parseTrimmedString(input.sports?.awayTeam);
+  const forceUpcoming = Boolean(input.sports?.forceUpcoming);
 
   if (!eventId) throw new Error('eventId is required for sports feeds.');
   if (!leagueName) throw new Error('leagueName is required for sports feeds.');
@@ -182,7 +188,7 @@ function sanitizePayload(input: LiveFeedPayload): LiveFeedPayload {
     enabled,
     kind,
     crypto: null,
-    sports: { eventId, leagueName },
+    sports: { eventId, leagueName, homeTeam: homeTeam || undefined, awayTeam: awayTeam || undefined, forceUpcoming },
   };
 }
 
@@ -271,7 +277,13 @@ function toResponseConfig(doc: LiveFeedDoc | null) {
     enabled: doc.enabled,
     kind: doc.kind,
     crypto: doc.crypto,
-    sports: doc.sports,
+    sports: doc.sports ? {
+      eventId: doc.sports.eventId,
+      leagueName: doc.sports.leagueName,
+      homeTeam: doc.sports.homeTeam,
+      awayTeam: doc.sports.awayTeam,
+      forceUpcoming: doc.sports.forceUpcoming,
+    } : null,
     updatedAt: doc.updatedAt.toISOString(),
     updatedBy: doc.updatedBy,
   };

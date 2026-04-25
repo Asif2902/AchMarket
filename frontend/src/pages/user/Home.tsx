@@ -59,7 +59,7 @@ export default function Home() {
   const [categoryFilter, setCategoryFilter] = useState('All');
   const [subcategoryFilter, setSubcategoryFilter] = useState<string>('All');
   const [descriptionByMarket, setDescriptionByMarket] = useState<Record<string, string>>({});
-  fetchedMarketsRef.current = new Set();
+  const fetchedMarketsRef = useRef<Set<string>>(new Set());
   const [stageFilter, setStageFilter] = useState(0);
   const [stabilityFilter, setStabilityFilter] = useState('all');
   const [sortBy, setSortBy] = useState('trending');

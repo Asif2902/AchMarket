@@ -40,6 +40,9 @@ function serializeLiveFeedPayload(payload: LiveFeedConfigInput): string {
     sports: {
       eventId: payload.sports.eventId,
       leagueName: payload.sports.leagueName,
+      homeTeam: payload.sports.homeTeam || undefined,
+      awayTeam: payload.sports.awayTeam || undefined,
+      forceUpcoming: payload.sports.forceUpcoming,
     },
   });
 }
@@ -118,6 +121,9 @@ function sanitizeLiveFeedInput(input: LiveFeedConfigInput): LiveFeedConfigInput 
     sports: {
       eventId: input.sports.eventId.trim(),
       leagueName: input.sports.leagueName.trim(),
+      homeTeam: input.sports.homeTeam?.trim() || undefined,
+      awayTeam: input.sports.awayTeam?.trim() || undefined,
+      forceUpcoming: Boolean(input.sports.forceUpcoming),
     },
   };
 }

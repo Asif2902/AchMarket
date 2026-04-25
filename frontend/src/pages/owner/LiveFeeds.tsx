@@ -58,6 +58,9 @@ function LiveFeedModal({ isOpen, market, existing, onClose, onSaved }: LiveFeedM
   const [vsCurrency, setVsCurrency] = useState('usd');
   const [eventId, setEventId] = useState('');
   const [leagueName, setLeagueName] = useState('');
+  const [homeTeam, setHomeTeam] = useState('');
+  const [awayTeam, setAwayTeam] = useState('');
+  const [forceUpcoming, setForceUpcoming] = useState(false);
   const [suggestions, setSuggestions] = useState<LiveFeedSuggestionsResponse | null>(null);
   const [suggesting, setSuggesting] = useState(false);
   const [suggestionsError, setSuggestionsError] = useState<string | null>(null);
@@ -82,6 +85,9 @@ function LiveFeedModal({ isOpen, market, existing, onClose, onSaved }: LiveFeedM
       if (existing.kind === 'sports-score' && existing.sports) {
         setEventId(existing.sports.eventId || '');
         setLeagueName(existing.sports.leagueName || '');
+        setHomeTeam(existing.sports.homeTeam || '');
+        setAwayTeam(existing.sports.awayTeam || '');
+        setForceUpcoming(existing.sports.forceUpcoming || false);
       }
       setSuggestions(null);
       setSuggestionsError(null);
@@ -100,6 +106,9 @@ function LiveFeedModal({ isOpen, market, existing, onClose, onSaved }: LiveFeedM
     setCryptoMetric('price');
     setEventId('');
     setLeagueName('');
+    setHomeTeam('');
+    setAwayTeam('');
+    setForceUpcoming(false);
     setError(null);
   }, [isOpen, market, existing]);
 
@@ -197,6 +206,8 @@ function LiveFeedModal({ isOpen, market, existing, onClose, onSaved }: LiveFeedM
     setKind('sports-score');
     setEventId(suggestion.selectedEventId || '');
     setLeagueName(suggestion.selectedLeagueName || '');
+    setHomeTeam(suggestion.homeTeam || '');
+    setAwayTeam(suggestion.awayTeam || '');
     setSportsSearchQuery(`${suggestion.homeTeam || ''} vs ${suggestion.awayTeam || ''}`.trim());
   };
 
@@ -477,6 +488,8 @@ function LiveFeedModal({ isOpen, market, existing, onClose, onSaved }: LiveFeedM
                       const chosen = suggestions.sports.candidates.find((item) => item.eventId === nextId);
                       if (chosen) {
                         setLeagueName(chosen.leagueName);
+                        setHomeTeam(chosen.homeTeam || '');
+                        setAwayTeam(chosen.awayTeam || '');
                       }
                     }}
                     className="input-field"
@@ -530,6 +543,40 @@ function LiveFeedModal({ isOpen, market, existing, onClose, onSaved }: LiveFeedM
                   className="input-field"
                 />
               </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="label">Home Team (for validation)</label>
+                  <input
+                    type="text"
+                    value={homeTeam}
+                    onChange={(e) => setHomeTeam(e.target.value)}
+                    placeholder="Arsenal"
+                    className="input-field"
+                  />
+                </div>
+                <div>
+                  <label className="label">Away Team (for validation)</label>
+                  <input
+                    type="text"
+                    value={awayTeam}
+                    onChange={(e) => setAwayTeam(e.target.value)}
+                    placeholder="Atletico Madrid"
+                    className="input-field"
+                  />
+                </div>
+              </div>
+              <label className="flex items-center gap-2 text-sm text-dark-300">
+                <input
+                  type="checkbox"
+                  checked={forceUpcoming}
+                  onChange={(e) => setForceUpcoming(e.target.checked)}
+                  className="rounded border-white/[0.15] bg-dark-900"
+                />
+                Force Upcoming (always show as upcoming until manually disabled)
+              </label>
+              {forceUpcoming && (
+                <p className="text-2xs text-purple-400">This feed will always show as "Upcoming" regardless of match status. Disable this after the match starts.</p>
+              )}
             </>
           )}
 
