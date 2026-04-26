@@ -1,4 +1,4 @@
-import { sportsDbUrl, teamsMatch } from '../src/lib/sportsdb';
+import { sportsDbUrl, teamsMatch } from './_sportsdb';
 
 const CORS_ALLOWED_ORIGINS = (process.env.CORS_ALLOWED_ORIGINS ?? '')
   .split(',')
