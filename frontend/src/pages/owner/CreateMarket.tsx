@@ -11,6 +11,7 @@ import { compressMarketImage } from '../../utils/marketImage';
 import { uploadMarketMedia, deleteMarketMedia } from '../../services/marketMedia';
 import {
   fetchLiveFeedSuggestions,
+  lookupSportsEventById,
   searchSportsEvents,
   saveLiveFeedConfig,
 } from '../../services/live';
@@ -89,6 +90,8 @@ export default function CreateMarket() {
   const [feedSportsSearchQuery, setFeedSportsSearchQuery] = useState('');
   const [feedSportsSearchLoading, setFeedSportsSearchLoading] = useState(false);
   const [feedSportsSearchError, setFeedSportsSearchError] = useState('');
+  const [feedEventLookupLoading, setFeedEventLookupLoading] = useState(false);
+  const [feedEventLookupError, setFeedEventLookupError] = useState('');
   const [feedDetecting, setFeedDetecting] = useState(false);
   const [feedDetectionHint, setFeedDetectionHint] = useState('');
   const [feedDetectionError, setFeedDetectionError] = useState('');
@@ -254,7 +257,7 @@ export default function CreateMarket() {
 
   const feedCanSave = feedUserEdited && (feedKind === 'crypto-price'
     ? Boolean(feedCoingeckoId.trim() && feedBaseSymbol.trim() && feedQuoteSymbol.trim() && feedVsCurrency.trim())
-    : Boolean(feedEventId.trim() && feedLeagueName.trim()));
+    : Boolean(feedEventId.trim()));
 
   const detectFeedFromDraft = async () => {
     if (!title.trim() || !actualCategory.trim()) return;
@@ -338,6 +341,8 @@ export default function CreateMarket() {
     if (feedKind !== 'sports-score') {
       setFeedSportsSearchLoading(false);
       setFeedSportsSearchError('');
+      setFeedEventLookupLoading(false);
+      setFeedEventLookupError('');
       setFeedCandidates([]);
       setFeedEventId('');
       setFeedLeagueName('');
@@ -386,6 +391,45 @@ export default function CreateMarket() {
       cancelled = true;
     };
   }, [feedSportsSearchQuery, feedKind, feedEventId]);
+
+  const applyFeedSportsCandidate = (candidate: LiveFeedSuggestionsResponse['sports']['candidates'][number]) => {
+    setFeedEventId(candidate.eventId);
+    setFeedLeagueName(candidate.leagueName);
+    setFeedHomeTeam(candidate.homeTeam || '');
+    setFeedAwayTeam(candidate.awayTeam || '');
+  };
+
+  const resolveFeedSportsEventId = async (rawEventId: string) => {
+    const nextEventId = rawEventId.trim();
+    if (!nextEventId) return null;
+
+    const existingCandidate = feedCandidates.find((candidate) => candidate.eventId === nextEventId) || null;
+    if (existingCandidate) {
+      applyFeedSportsCandidate(existingCandidate);
+      setFeedEventLookupError('');
+      return existingCandidate;
+    }
+
+    setFeedEventLookupLoading(true);
+    setFeedEventLookupError('');
+    try {
+      const candidate = await lookupSportsEventById(nextEventId);
+      if (!candidate) {
+        throw new Error('Sports event not found for this event id.');
+      }
+
+      applyFeedSportsCandidate(candidate);
+      setFeedCandidates((prev) => [candidate, ...prev.filter((item) => item.eventId !== candidate.eventId)]);
+      setFeedEventLookupError('');
+      return candidate;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to load SportsDB event id.';
+      setFeedEventLookupError(message);
+      throw err;
+    } finally {
+      setFeedEventLookupLoading(false);
+    }
+  };
 
   const handleSubmit = async () => {
     if (!signer || !isValid || imageUploading || feedSaving) return;
@@ -457,15 +501,19 @@ export default function CreateMarket() {
               },
             };
           } else {
+            const resolvedCandidate = (!feedLeagueName.trim() || !feedHomeTeam.trim() || !feedAwayTeam.trim())
+              ? await resolveFeedSportsEventId(feedEventId.trim()).catch(() => null)
+              : null;
+
             payload = {
               marketAddress: marketAddr,
               enabled: true,
               kind: 'sports-score',
               sports: {
                 eventId: feedEventId.trim(),
-                leagueName: feedLeagueName.trim(),
-                homeTeam: feedHomeTeam.trim() || undefined,
-                awayTeam: feedAwayTeam.trim() || undefined,
+                leagueName: (resolvedCandidate?.leagueName || feedLeagueName).trim(),
+                homeTeam: (resolvedCandidate?.homeTeam || feedHomeTeam).trim() || undefined,
+                awayTeam: (resolvedCandidate?.awayTeam || feedAwayTeam).trim() || undefined,
                 forceUpcoming: feedForceUpcoming,
               },
             };
@@ -510,6 +558,7 @@ export default function CreateMarket() {
       setFeedSportsSearchError('');
       setFeedDetectionHint('');
       setFeedDetectionError('');
+      setFeedEventLookupError('');
       setFeedHomeTeam('');
       setFeedAwayTeam('');
       setFeedForceUpcoming(false);
@@ -1067,13 +1116,35 @@ export default function CreateMarket() {
                     ))}
                   </select>
                 )}
-                <input
-                  type="text"
-                  value={feedEventId}
-                  onChange={(e) => { setFeedEventId(e.target.value); setFeedUserEdited(true); }}
-                  placeholder="TheSportsDB event id"
-                  className="input-field"
-                />
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={feedEventId}
+                    onChange={(e) => {
+                      setFeedEventId(e.target.value);
+                      setFeedEventLookupError('');
+                      setFeedUserEdited(true);
+                    }}
+                    onBlur={() => {
+                      if (feedEventId.trim()) {
+                        void resolveFeedSportsEventId(feedEventId.trim()).catch(() => {});
+                      }
+                    }}
+                    placeholder="TheSportsDB event id"
+                    className="input-field"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => void resolveFeedSportsEventId(feedEventId.trim()).catch(() => {})}
+                    disabled={!feedEventId.trim() || feedEventLookupLoading}
+                    className="btn-secondary shrink-0 text-xs"
+                  >
+                    {feedEventLookupLoading ? 'Loading...' : 'Load ID'}
+                  </button>
+                </div>
+                {feedEventLookupError && (
+                  <p className="text-xs text-amber-400">{feedEventLookupError}</p>
+                )}
                 <input
                   type="text"
                   value={feedLeagueName}
@@ -1081,6 +1152,7 @@ export default function CreateMarket() {
                   placeholder="League name"
                   className="input-field"
                 />
+                <p className="text-xs text-dark-500">Paste only the SportsDB event id to auto-fill league and teams, or keep using search from the title above.</p>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <input
                     type="text"

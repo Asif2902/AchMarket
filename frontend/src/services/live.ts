@@ -215,3 +215,12 @@ export async function searchSportsEvents(query: string): Promise<LiveSportsSearc
   const response = await fetch(withCacheBust(`${LIVE_FEED_SEARCH_API_PATH}?query=${encodeURIComponent(trimmed)}`));
   return parseApiResponse<LiveSportsSearchResponse>(response);
 }
+
+export async function lookupSportsEventById(eventId: string) {
+  const trimmed = eventId.trim();
+  if (!trimmed) return null;
+
+  const response = await fetch(withCacheBust(`${LIVE_FEED_SEARCH_API_PATH}?eventId=${encodeURIComponent(trimmed)}`));
+  const body = await parseApiResponse<LiveSportsSearchResponse>(response);
+  return body.candidates[0] || null;
+}

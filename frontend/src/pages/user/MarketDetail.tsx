@@ -983,11 +983,11 @@ export default function MarketDetail() {
                       ? liveConfigured.data.kind === 'crypto-price'
                         ? `${liveConfigured.data.baseSymbol}/${liveConfigured.data.quoteSymbol} ${formatCryptoPrimaryLabel(liveConfigured.data.metric).toLowerCase()} feed`
                         : `${liveConfigured.data.leagueName || 'Sports'} live score feed`
-                      : 'No external feed configured for this market'}
+                      : 'This market resolves without an external reference feed'}
                   </p>
                 </div>
                 {!liveConfigured ? (
-                  <span className="badge bg-dark-750/80 text-dark-300 border-white/[0.08]">Not Configured</span>
+                  <span className="badge bg-dark-750/80 text-dark-300 border-white/[0.08]">No Feed</span>
                 ) : liveConfigured?.effectiveStatus === 'upcoming' ? (
                   <span className="badge bg-purple-500/15 text-purple-400 border-purple-500/25">Upcoming</span>
                 ) : (detail.stage === STAGE.Resolved || detail.stage === STAGE.Cancelled || detail.stage === STAGE.Expired) ? (
@@ -1006,8 +1006,8 @@ export default function MarketDetail() {
               {!liveConfigured && !liveLoading && (
                 <p className="text-xs text-dark-400">
                   {liveData && !liveData.configured
-                    ? (liveData.reason || 'No live feed is attached yet.')
-                    : (liveError || 'No live feed is attached yet.')}
+                    ? (liveData.reason || 'This market does not use an external reference feed.')
+                    : (liveError || 'This market does not use an external reference feed.')}
                 </p>
               )}
 

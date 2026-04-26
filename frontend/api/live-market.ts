@@ -466,7 +466,7 @@ function normalizeMarketAddressInput(raw: unknown): string {
 async function resolveLiveData(marketAddress: string): Promise<LiveConfiguredResponse | LiveUnconfiguredResponse> {
   const config = await getFeedConfig(marketAddress);
   if (!config) {
-    return { configured: false, reason: 'No live feed configured for this market.' };
+    return { configured: false, reason: 'This market does not use an external reference feed.' };
   }
   if (!config.enabled) {
     return { configured: false, reason: 'Live feed is disabled for this market.' };

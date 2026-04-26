@@ -7,6 +7,7 @@ import { useOwnerMarkets } from './OwnerMarketUtils';
 import {
   fetchLiveFeedConfigs,
   fetchLiveFeedSuggestions,
+  lookupSportsEventById,
   searchSportsEvents,
   saveLiveFeedConfig,
 } from '../../services/live';
@@ -67,6 +68,8 @@ function LiveFeedModal({ isOpen, market, existing, onClose, onSaved }: LiveFeedM
   const [sportsSearchQuery, setSportsSearchQuery] = useState('');
   const [sportsSearchLoading, setSportsSearchLoading] = useState(false);
   const [sportsSearchError, setSportsSearchError] = useState<string | null>(null);
+  const [eventLookupLoading, setEventLookupLoading] = useState(false);
+  const [eventLookupError, setEventLookupError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -92,7 +95,9 @@ function LiveFeedModal({ isOpen, market, existing, onClose, onSaved }: LiveFeedM
       setSuggestions(null);
       setSuggestionsError(null);
       setSportsSearchError(null);
+      setEventLookupError(null);
       setSportsSearchLoading(false);
+      setEventLookupLoading(false);
       setError(null);
       return;
     }
@@ -110,6 +115,7 @@ function LiveFeedModal({ isOpen, market, existing, onClose, onSaved }: LiveFeedM
     setAwayTeam('');
     setForceUpcoming(false);
     setError(null);
+    setEventLookupError(null);
   }, [isOpen, market, existing]);
 
   useEffect(() => {
@@ -193,6 +199,89 @@ function LiveFeedModal({ isOpen, market, existing, onClose, onSaved }: LiveFeedM
     };
   }, [sportsSearchQuery, kind, isOpen, existing?.kind, eventId]);
 
+  const applySportsCandidate = (candidate: LiveFeedSuggestionsResponse['sports']['candidates'][number]) => {
+    setEventId(candidate.eventId);
+    setLeagueName(candidate.leagueName);
+    setHomeTeam(candidate.homeTeam || '');
+    setAwayTeam(candidate.awayTeam || '');
+  };
+
+  const resolveSportsEventId = async (rawEventId: string) => {
+    const nextEventId = rawEventId.trim();
+    if (!nextEventId) return null;
+
+    const existingCandidate = suggestions?.sports.candidates.find((candidate) => candidate.eventId === nextEventId) || null;
+    if (existingCandidate) {
+      applySportsCandidate(existingCandidate);
+      setEventLookupError(null);
+      return existingCandidate;
+    }
+
+    setEventLookupLoading(true);
+    setEventLookupError(null);
+    try {
+      const candidate = await lookupSportsEventById(nextEventId);
+      if (!candidate) {
+        throw new Error('Sports event not found for this event id.');
+      }
+
+      applySportsCandidate(candidate);
+      setSuggestions((prev) => {
+        if (!prev) {
+          return {
+            crypto: {
+              detected: false,
+              confidence: 0,
+              reason: 'No crypto suggestion yet.',
+              coingeckoId: null,
+              baseSymbol: null,
+              quoteSymbol: 'USD',
+              vsCurrency: 'usd',
+              metric: 'price',
+            },
+            sports: {
+              detected: true,
+              confidence: 0.6,
+              reason: 'Loaded sports event from TheSportsDB event id.',
+              homeTeam: candidate.homeTeam || null,
+              awayTeam: candidate.awayTeam || null,
+              selectedEventId: candidate.eventId,
+              selectedLeagueName: candidate.leagueName,
+              candidates: [candidate],
+            },
+          };
+        }
+
+        const candidates = [
+          candidate,
+          ...prev.sports.candidates.filter((item) => item.eventId !== candidate.eventId),
+        ];
+
+        return {
+          ...prev,
+          sports: {
+            ...prev.sports,
+            detected: true,
+            reason: 'Loaded sports event from TheSportsDB event id.',
+            homeTeam: candidate.homeTeam || prev.sports.homeTeam,
+            awayTeam: candidate.awayTeam || prev.sports.awayTeam,
+            selectedEventId: candidate.eventId,
+            selectedLeagueName: candidate.leagueName,
+            candidates,
+          },
+        };
+      });
+
+      return candidate;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to load SportsDB event id.';
+      setEventLookupError(message);
+      throw err;
+    } finally {
+      setEventLookupLoading(false);
+    }
+  };
+
   const applyCryptoSuggestion = (suggestion: LiveFeedSuggestionsResponse['crypto']) => {
     if (!suggestion.detected || !suggestion.coingeckoId || !suggestion.baseSymbol) return;
     setKind('crypto-price');
@@ -261,8 +350,8 @@ function LiveFeedModal({ isOpen, market, existing, onClose, onSaved }: LiveFeedM
     if (kind === 'crypto-price') {
       return Boolean(coingeckoId.trim() && baseSymbol.trim() && quoteSymbol.trim() && vsCurrency.trim());
     }
-    return Boolean(eventId.trim() && leagueName.trim());
-  }, [signer, address, market, kind, coingeckoId, baseSymbol, quoteSymbol, vsCurrency, eventId, leagueName]);
+    return Boolean(eventId.trim());
+  }, [signer, address, market, kind, coingeckoId, baseSymbol, quoteSymbol, vsCurrency, eventId]);
 
   const handleSave = async () => {
     if (!signer || !address || !market || !canSave) return;
@@ -284,15 +373,19 @@ function LiveFeedModal({ isOpen, market, existing, onClose, onSaved }: LiveFeedM
           },
         };
     } else {
+      const resolvedCandidate = (!leagueName.trim() || !homeTeam.trim() || !awayTeam.trim())
+        ? await resolveSportsEventId(eventId.trim()).catch(() => null)
+        : null;
+
       payload = {
         marketAddress: market.address,
         enabled,
         kind: 'sports-score',
         sports: {
           eventId: eventId.trim(),
-          leagueName: leagueName.trim(),
-          homeTeam: homeTeam.trim() || undefined,
-          awayTeam: awayTeam.trim() || undefined,
+          leagueName: (resolvedCandidate?.leagueName || leagueName).trim(),
+          homeTeam: (resolvedCandidate?.homeTeam || homeTeam).trim() || undefined,
+          awayTeam: (resolvedCandidate?.awayTeam || awayTeam).trim() || undefined,
           forceUpcoming,
         },
       };
@@ -529,14 +622,35 @@ function LiveFeedModal({ isOpen, market, existing, onClose, onSaved }: LiveFeedM
 
               <div>
                 <label className="label">TheSportsDB Event ID</label>
-                <input
-                  type="text"
-                  value={eventId}
-                  onChange={(e) => setEventId(e.target.value)}
-                  placeholder="1032862"
-                  className="input-field"
-                />
-                <p className="text-2xs text-dark-500 mt-1">Use the event id from TheSportsDB to track current score.</p>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={eventId}
+                    onChange={(e) => {
+                      setEventId(e.target.value);
+                      setEventLookupError(null);
+                    }}
+                    onBlur={() => {
+                      if (eventId.trim()) {
+                        void resolveSportsEventId(eventId.trim()).catch(() => {});
+                      }
+                    }}
+                    placeholder="2466173"
+                    className="input-field"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => void resolveSportsEventId(eventId.trim()).catch(() => {})}
+                    disabled={!eventId.trim() || eventLookupLoading}
+                    className="btn-secondary shrink-0"
+                  >
+                    {eventLookupLoading ? 'Loading...' : 'Load ID'}
+                  </button>
+                </div>
+                <p className="text-2xs text-dark-500 mt-1">Paste only the TheSportsDB event id and we will auto-fill league and teams.</p>
+                {eventLookupError && (
+                  <p className="text-2xs text-amber-400 mt-1">{eventLookupError}</p>
+                )}
               </div>
               <div>
                 <label className="label">League Name</label>

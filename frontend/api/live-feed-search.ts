@@ -222,6 +222,18 @@ async function fetchTeamEvents(teamId: string): Promise<SportsCandidate[]> {
   return responses.flat().map((event: any) => mapEventToCandidate(event, null)).filter((c): c is SportsCandidate => c !== null);
 }
 
+async function fetchEventById(eventId: string): Promise<SportsCandidate | null> {
+  const normalizedId = eventId.trim();
+  if (!normalizedId) return null;
+
+  const endpoint = sportsDbUrl(`lookupevent.php?id=${encodeURIComponent(normalizedId)}`);
+  const json = await fetchJsonWithTimeout(endpoint);
+  const event = Array.isArray(json?.events) ? json.events[0] : null;
+  const candidate = mapEventToCandidate(event, null);
+  if (!candidate) return null;
+  return candidate.eventId === normalizedId ? candidate : null;
+}
+
 function scoreCandidate(candidate: SportsCandidate, query: string, expectedPair: { left: string; right: string } | null): number {
   const matchScore = candidate.matchScore || 0.5;
   const kickoff = candidate.kickoffAt ? Date.parse(candidate.kickoffAt) : NaN;
@@ -313,6 +325,15 @@ export default async function handler(req: any, res: any) {
   if (req.method !== 'GET') return res.status(405).json({ error: 'Method not allowed' });
 
   try {
+    const eventIdRaw = typeof req.query?.eventId === 'string' ? req.query.eventId.trim() : '';
+    if (eventIdRaw) {
+      const candidate = await fetchEventById(eventIdRaw);
+      if (!candidate) {
+        return res.status(404).json({ error: 'Sports event not found for this event id.' });
+      }
+      return res.status(200).json({ query: '', candidates: [candidate] });
+    }
+
     const queryRaw = typeof req.query?.query === 'string' ? req.query.query : '';
     const query = normalizeQuery(queryRaw);
     if (!query) {
