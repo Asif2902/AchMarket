@@ -1,6 +1,6 @@
 import { getAddress, Contract, JsonRpcProvider } from 'ethers';
 import { MongoClient, type Collection } from 'mongodb';
-import { sportsDbUrl, teamsMatch } from './_sportsdb';
+import { sportsDbUrl, teamsMatch } from '../src/lib/sportsdb';
 
 const LIVE_FEEDS_COLLECTION = 'live_feeds';
 const MONGO_URI = process.env.MONGO_URI;
