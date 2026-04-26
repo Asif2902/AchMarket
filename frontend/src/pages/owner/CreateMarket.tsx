@@ -82,6 +82,9 @@ export default function CreateMarket() {
   const [feedVsCurrency, setFeedVsCurrency] = useState('usd');
   const [feedEventId, setFeedEventId] = useState('');
   const [feedLeagueName, setFeedLeagueName] = useState('');
+  const [feedHomeTeam, setFeedHomeTeam] = useState('');
+  const [feedAwayTeam, setFeedAwayTeam] = useState('');
+  const [feedForceUpcoming, setFeedForceUpcoming] = useState(false);
   const [feedCandidates, setFeedCandidates] = useState<LiveFeedSuggestionsResponse['sports']['candidates']>([]);
   const [feedSportsSearchQuery, setFeedSportsSearchQuery] = useState('');
   const [feedSportsSearchLoading, setFeedSportsSearchLoading] = useState(false);
@@ -282,6 +285,8 @@ export default function CreateMarket() {
         setFeedKind('sports-score');
         setFeedEventId(suggestions.sports.selectedEventId || '');
         setFeedLeagueName(suggestions.sports.selectedLeagueName || '');
+        setFeedHomeTeam(suggestions.sports.homeTeam || '');
+        setFeedAwayTeam(suggestions.sports.awayTeam || '');
         setFeedSportsSearchQuery(`${suggestions.sports.homeTeam || ''} vs ${suggestions.sports.awayTeam || ''}`.trim());
         setFeedDetectionHint(suggestions.sports.reason || 'Detected sports feed suggestion.');
         setFeedUserEdited(true);
@@ -298,6 +303,8 @@ export default function CreateMarket() {
         setFeedKind('sports-score');
         setFeedEventId(suggestions.sports.selectedEventId || '');
         setFeedLeagueName(suggestions.sports.selectedLeagueName || '');
+        setFeedHomeTeam(suggestions.sports.homeTeam || '');
+        setFeedAwayTeam(suggestions.sports.awayTeam || '');
         setFeedSportsSearchQuery(`${suggestions.sports.homeTeam || ''} vs ${suggestions.sports.awayTeam || ''}`.trim());
         setFeedDetectionHint(suggestions.sports.reason || 'Detected sports feed suggestion.');
         setFeedUserEdited(true);
@@ -334,6 +341,9 @@ export default function CreateMarket() {
       setFeedCandidates([]);
       setFeedEventId('');
       setFeedLeagueName('');
+      setFeedHomeTeam('');
+      setFeedAwayTeam('');
+      setFeedForceUpcoming(false);
       return;
     }
     const query = feedSportsSearchQuery.trim();
@@ -343,6 +353,8 @@ export default function CreateMarket() {
       setFeedCandidates([]);
       setFeedEventId('');
       setFeedLeagueName('');
+      setFeedHomeTeam('');
+      setFeedAwayTeam('');
       return;
     }
 
@@ -357,6 +369,8 @@ export default function CreateMarket() {
         if (!feedEventId && result.candidates[0]) {
           setFeedEventId(result.candidates[0].eventId);
           setFeedLeagueName(result.candidates[0].leagueName);
+          setFeedHomeTeam(result.candidates[0].homeTeam || '');
+          setFeedAwayTeam(result.candidates[0].awayTeam || '');
         }
       })
       .catch((err) => {
@@ -450,6 +464,9 @@ export default function CreateMarket() {
               sports: {
                 eventId: feedEventId.trim(),
                 leagueName: feedLeagueName.trim(),
+                homeTeam: feedHomeTeam.trim() || undefined,
+                awayTeam: feedAwayTeam.trim() || undefined,
+                forceUpcoming: feedForceUpcoming,
               },
             };
           }
@@ -493,6 +510,9 @@ export default function CreateMarket() {
       setFeedSportsSearchError('');
       setFeedDetectionHint('');
       setFeedDetectionError('');
+      setFeedHomeTeam('');
+      setFeedAwayTeam('');
+      setFeedForceUpcoming(false);
     } catch (err) {
       keepUploadedImageOnCloseRef.current = false;
       setTxResult({ type: 'error', text: parseContractError(err) });
@@ -1030,7 +1050,11 @@ export default function CreateMarket() {
                       const id = e.target.value;
                       setFeedEventId(id);
                       const found = feedCandidates.find((c) => c.eventId === id);
-                      if (found) setFeedLeagueName(found.leagueName);
+                      if (found) {
+                        setFeedLeagueName(found.leagueName);
+                        setFeedHomeTeam(found.homeTeam || '');
+                        setFeedAwayTeam(found.awayTeam || '');
+                      }
                       setFeedUserEdited(true);
                     }}
                     className="input-field"
@@ -1057,6 +1081,31 @@ export default function CreateMarket() {
                   placeholder="League name"
                   className="input-field"
                 />
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <input
+                    type="text"
+                    value={feedHomeTeam}
+                    onChange={(e) => { setFeedHomeTeam(e.target.value); setFeedUserEdited(true); }}
+                    placeholder="Home team (validation)"
+                    className="input-field"
+                  />
+                  <input
+                    type="text"
+                    value={feedAwayTeam}
+                    onChange={(e) => { setFeedAwayTeam(e.target.value); setFeedUserEdited(true); }}
+                    placeholder="Away team (validation)"
+                    className="input-field"
+                  />
+                </div>
+                <label className="flex items-center gap-2 text-sm text-dark-300">
+                  <input
+                    type="checkbox"
+                    checked={feedForceUpcoming}
+                    onChange={(e) => { setFeedForceUpcoming(e.target.checked); setFeedUserEdited(true); }}
+                    className="rounded border-white/[0.15] bg-dark-900"
+                  />
+                  Force Upcoming until you disable it
+                </label>
               </div>
             )}
           </div>

@@ -63,6 +63,9 @@ interface LiveFeedPayload {
   sports?: {
     eventId?: unknown;
     leagueName?: unknown;
+    homeTeam?: unknown;
+    awayTeam?: unknown;
+    forceUpcoming?: unknown;
   } | null;
 }
 

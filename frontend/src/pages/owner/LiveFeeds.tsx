@@ -175,6 +175,8 @@ function LiveFeedModal({ isOpen, market, existing, onClose, onSaved }: LiveFeedM
         if (!eventId && result.candidates[0]) {
           setEventId(result.candidates[0].eventId);
           setLeagueName(result.candidates[0].leagueName);
+          setHomeTeam(result.candidates[0].homeTeam || '');
+          setAwayTeam(result.candidates[0].awayTeam || '');
         }
       })
       .catch((err) => {
@@ -289,6 +291,9 @@ function LiveFeedModal({ isOpen, market, existing, onClose, onSaved }: LiveFeedM
         sports: {
           eventId: eventId.trim(),
           leagueName: leagueName.trim(),
+          homeTeam: homeTeam.trim() || undefined,
+          awayTeam: awayTeam.trim() || undefined,
+          forceUpcoming,
         },
       };
     }

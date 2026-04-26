@@ -1,3 +1,5 @@
+import { sportsDbUrl, teamsMatch } from './_sportsdb';
+
 const CORS_ALLOWED_ORIGINS = (process.env.CORS_ALLOWED_ORIGINS ?? '')
   .split(',')
   .map((value) => value.trim())
@@ -227,6 +229,9 @@ function detectCrypto(input: SuggestRequest) {
 
 function cleanTeamName(value: string): string {
   return value
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/\bathletico\b/gi, 'atletico')
     .replace(/\b(will|be|is|are|the|a|an|to|of|in|on|at|by|for|market|match|game|final|playoff|season|today|tomorrow)\b/gi, '')
     .replace(/\b(fc|afc|cf|sc|ac|club|team)\b/gi, '')
     .replace(/\b(win|wins|winner|to win|draw|yes|no|over|under)\b/gi, '')
@@ -235,39 +240,6 @@ function cleanTeamName(value: string): string {
     .replace(/[-_]/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
-}
-
-function normalizeTeamName(value: string): string {
-  return value
-    .toLowerCase()
-    .replace(/\b(fc|afc|cf|sc|ac|club|team|the|united|city|town)\b/g, ' ')
-    .replace(/[^a-z0-9\s]/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
-
-function teamsMatch(candidateHome: string, candidateAway: string, expectedHome: string, expectedAway: string): number {
-  const cHomeNorm = normalizeTeamName(candidateHome);
-  const cAwayNorm = normalizeTeamName(candidateAway);
-  const eHomeNorm = normalizeTeamName(expectedHome);
-  const eAwayNorm = normalizeTeamName(expectedAway);
-
-  // Check direct match
-  if (cHomeNorm === eHomeNorm && cAwayNorm === eAwayNorm) return 1.0;
-
-  // Check reverse match
-  if (cHomeNorm === eAwayNorm && cAwayNorm === eHomeNorm) return 0.9;
-
-  // Check partial matches
-  const homeMatch = cHomeNorm.includes(eHomeNorm) || eHomeNorm.includes(cHomeNorm) ||
-                   cHomeNorm.includes(eAwayNorm) || eAwayNorm.includes(cHomeNorm);
-  const awayMatch = cAwayNorm.includes(eAwayNorm) || eAwayNorm.includes(cAwayNorm) ||
-                   cAwayNorm.includes(eHomeNorm) || eHomeNorm.includes(cAwayNorm);
-
-  if (homeMatch && awayMatch) return 0.8;
-  if (homeMatch || awayMatch) return 0.4;
-
-  return 0;
 }
 
 function splitTitleSegments(title: string): string[] {
@@ -415,15 +387,32 @@ async function fetchJsonWithTimeout(url: string): Promise<any> {
 
 function scoreSportsCandidate(candidate: SportsCandidate): number {
   const kickoffMs = candidate.kickoffAt ? Date.parse(candidate.kickoffAt) : NaN;
-  if (!Number.isFinite(kickoffMs)) return 0;
+  if (candidate.status === 'live') return 1;
+  if (!Number.isFinite(kickoffMs)) return candidate.status === 'finished' ? 0.15 : 0;
 
-  const now = Date.now();
-  const diffHours = Math.abs(kickoffMs - now) / (1000 * 60 * 60);
-  if (diffHours < 6) return 1;
-  if (diffHours < 24) return 0.9;
-  if (diffHours < 72) return 0.8;
-  if (diffHours < 14 * 24) return 0.65;
-  return 0.5;
+  const hoursFromNow = (kickoffMs - Date.now()) / (1000 * 60 * 60);
+  const absHours = Math.abs(hoursFromNow);
+
+  if (candidate.status === 'scheduled') {
+    if (hoursFromNow >= -1) {
+      if (hoursFromNow < 6) return 1;
+      if (hoursFromNow < 24) return 0.94;
+      if (hoursFromNow < 72) return 0.86;
+      if (hoursFromNow < 14 * 24) return 0.72;
+      return 0.58;
+    }
+    return absHours < 24 ? 0.15 : 0.05;
+  }
+
+  if (candidate.status === 'finished') {
+    if (absHours < 6) return 0.4;
+    if (absHours < 24) return 0.25;
+    return 0.12;
+  }
+
+  if (absHours < 24) return 0.5;
+  if (absHours < 72) return 0.38;
+  return 0.25;
 }
 
 function mapEventToSportsCandidate(
@@ -485,19 +474,21 @@ async function fetchSportsCandidatesByQuery(
   const normalizedQuery = query.replace(/\s+/g, ' ').trim();
   if (!normalizedQuery || normalizedQuery.length < 2) return [];
 
-  const endpoint = `https://www.thesportsdb.com/api/v1/json/3/searchevents.php?e=${encodeURIComponent(normalizedQuery.replace(/\s+/g, '_'))}`;
+  const endpoint = sportsDbUrl(`searchevents.php?e=${encodeURIComponent(normalizeSportsSearchText(normalizedQuery).replace(/\s+/g, '_'))}`);
   const json = await fetchJsonWithTimeout(endpoint);
   const events = Array.isArray(json?.event) ? json.event : [];
   const candidates = events
     .map((event: any) => mapEventToSportsCandidate(event, input, fallbackPair))
     .filter((candidate: SportsCandidate | null): candidate is SportsCandidate => candidate !== null);
 
-  // Filter out candidates with very low match scores
-  return candidates.filter(c => (c.matchScore ?? 0) > 0.3);
+  return candidates.filter((candidate: SportsCandidate) => fallbackPair ? (candidate.matchScore ?? 0) >= 0.55 : (candidate.matchScore ?? 0) > 0.3);
 }
 
 function normalizeSportsSearchText(value: string): string {
   return value
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/\bathletico\b/gi, 'atletico')
     .replace(/[–—-]/g, ' ')
     .replace(/[|:,;()\[\]{}]/g, ' ')
     .replace(/\b(friendly|qualifier|qualifying|prediction|market|odds|line)\b/gi, ' ')

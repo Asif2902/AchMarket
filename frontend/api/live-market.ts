@@ -1,5 +1,6 @@
 import { getAddress, Contract, JsonRpcProvider } from 'ethers';
 import { MongoClient, type Collection } from 'mongodb';
+import { sportsDbUrl, teamsMatch } from './_sportsdb';
 
 const LIVE_FEEDS_COLLECTION = 'live_feeds';
 const MONGO_URI = process.env.MONGO_URI;
@@ -40,6 +41,9 @@ interface LiveCryptoDoc {
 interface LiveSportsDoc {
   eventId: string;
   leagueName: string;
+  homeTeam?: string;
+  awayTeam?: string;
+  forceUpcoming?: boolean;
 }
 
 interface LiveFeedDoc {
@@ -359,45 +363,20 @@ async function fetchCryptoSnapshot(config: LiveFeedDoc): Promise<CachedLiveSnaps
   };
 }
 
-function normalizeTeamName(name: string): string {
-  return name
-    .toLowerCase()
-    .replace(/\b(fc|afc|cf|sc|ac|club|team|the|united|city|town)\b/g, ' ')
-    .replace(/[^a-z0-9\s]/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
-
-function teamsMatch(candidateHome: string, candidateAway: string, expectedHome: string, expectedAway: string): boolean {
-  const cHomeNorm = normalizeTeamName(candidateHome);
-  const cAwayNorm = normalizeTeamName(candidateAway);
-  const eHomeNorm = normalizeTeamName(expectedHome);
-  const eAwayNorm = normalizeTeamName(expectedAway);
-
-  // Check direct match
-  if (cHomeNorm === eHomeNorm && cAwayNorm === eAwayNorm) return true;
-
-  // Check reverse match
-  if (cHomeNorm === eAwayNorm && cAwayNorm === eHomeNorm) return true;
-
-  // Check if one contains the other (partial match)
-  const homeMatch = cHomeNorm.includes(eHomeNorm) || eHomeNorm.includes(cHomeNorm) ||
-                   cHomeNorm.includes(eAwayNorm) || eAwayNorm.includes(cHomeNorm);
-  const awayMatch = cAwayNorm.includes(eAwayNorm) || eAwayNorm.includes(cAwayNorm) ||
-                   cAwayNorm.includes(eHomeNorm) || eHomeNorm.includes(cAwayNorm);
-
-  return homeMatch && awayMatch;
-}
-
 async function fetchSportsSnapshot(config: LiveFeedDoc): Promise<CachedLiveSnapshot> {
   if (!config.sports) throw new Error('Sports feed config is missing.');
 
   const eventId = config.sports.eventId.trim();
-  const endpoint = `https://www.thesportsdb.com/api/v1/json/3/lookupevent.php?id=${encodeURIComponent(eventId)}`;
+  const endpoint = sportsDbUrl(`lookupevent.php?id=${encodeURIComponent(eventId)}`);
   const json = await fetchJsonWithTimeout(endpoint);
   const event = Array.isArray(json?.events) ? json.events[0] : null;
   if (!event) {
     throw new Error('Sports event not found for this eventId.');
+  }
+
+  const returnedEventId = typeof event?.idEvent === 'string' ? event.idEvent.trim() : '';
+  if (returnedEventId && returnedEventId !== eventId) {
+    throw new Error(`Sports event mismatch: requested "${eventId}" but provider returned "${returnedEventId}".`);
   }
 
   // Validate that returned event matches expected teams
@@ -407,7 +386,7 @@ async function fetchSportsSnapshot(config: LiveFeedDoc): Promise<CachedLiveSnaps
   const expectedAway = config.sports.awayTeam || '';
 
   if (expectedHome && expectedAway &&
-      !teamsMatch(returnedHome, returnedAway, expectedHome, expectedAway)) {
+      teamsMatch(returnedHome, returnedAway, expectedHome, expectedAway) < 0.8) {
     throw new Error(`Event data mismatch: expected "${expectedHome} vs ${expectedAway}", but got "${returnedHome} vs ${returnedAway}". The eventId may be incorrect.`);
   }
 
@@ -427,7 +406,7 @@ async function fetchSportsSnapshot(config: LiveFeedDoc): Promise<CachedLiveSnaps
       const now = Date.now();
       effectiveStatus = kickoffTime > now ? 'upcoming' : 'live';
     } else {
-      effectiveStatus = 'scheduled';
+      effectiveStatus = 'upcoming';
     }
   } else {
     effectiveStatus = status.status as EffectiveStatus;

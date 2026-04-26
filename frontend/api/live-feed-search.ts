@@ -1,3 +1,5 @@
+import { normalizeTeamName, sportsDbUrl, teamsMatch } from './_sportsdb';
+
 const CORS_ALLOWED_ORIGINS = (process.env.CORS_ALLOWED_ORIGINS ?? '')
   .split(',')
   .map((value) => value.trim())
@@ -18,6 +20,9 @@ interface SportsCandidate {
 
 function normalizeQuery(value: string): string {
   return value
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/\bathletico\b/gi, 'atletico')
     .replace(/[–—-]/g, ' ')
     .replace(/[|:,;()\[\]{}]/g, ' ')
     .replace(/\b(friendly|qualifier|qualifying|prediction|market|odds|line)\b/gi, ' ')
@@ -125,39 +130,6 @@ async function fetchJsonWithTimeout(url: string): Promise<any> {
   }
 }
 
-function normalizeTeamName(name: string): string {
-  return name
-    .toLowerCase()
-    .replace(/\b(fc|afc|cf|sc|ac|club|team|the|united|city|town)\b/g, ' ')
-    .replace(/[^a-z0-9\s]/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
-
-function teamsMatch(candidateHome: string, candidateAway: string, expectedHome: string, expectedAway: string): number {
-  const cHomeNorm = normalizeTeamName(candidateHome);
-  const cAwayNorm = normalizeTeamName(candidateAway);
-  const eHomeNorm = normalizeTeamName(expectedHome);
-  const eAwayNorm = normalizeTeamName(expectedAway);
-
-  // Check direct match
-  if (cHomeNorm === eHomeNorm && cAwayNorm === eAwayNorm) return 1.0;
-
-  // Check reverse match
-  if (cHomeNorm === eAwayNorm && cAwayNorm === eHomeNorm) return 0.9;
-
-  // Check partial matches
-  const homeMatch = cHomeNorm.includes(eHomeNorm) || eHomeNorm.includes(cHomeNorm) ||
-                   cHomeNorm.includes(eAwayNorm) || eAwayNorm.includes(cHomeNorm);
-  const awayMatch = cAwayNorm.includes(eAwayNorm) || eAwayNorm.includes(cAwayNorm) ||
-                   cAwayNorm.includes(eHomeNorm) || eHomeNorm.includes(cAwayNorm);
-
-  if (homeMatch && awayMatch) return 0.8;
-  if (homeMatch || awayMatch) return 0.4;
-
-  return 0;
-}
-
 function mapEventToCandidate(event: any, expectedPair: { left: string; right: string } | null): SportsCandidate | null {
   const eventId = typeof event?.idEvent === 'string' ? event.idEvent.trim() : '';
   if (!eventId) return null;
@@ -194,7 +166,7 @@ async function resolveTeamId(teamName: string): Promise<string | null> {
   if (!q) return null;
 
   // Try exact match first with underscores (SportsDB convention)
-  const endpoint = `https://www.thesportsdb.com/api/v1/json/3/searchteams.php?t=${encodeURIComponent(q.replace(/\s+/g, '_'))}`;
+  const endpoint = sportsDbUrl(`searchteams.php?t=${encodeURIComponent(q.replace(/\s+/g, '_'))}`);
   const json = await fetchJsonWithTimeout(endpoint);
   const teams = Array.isArray(json?.teams) ? json.teams : [];
 
@@ -227,8 +199,8 @@ async function fetchTeamEvents(teamId: string): Promise<SportsCandidate[]> {
   if (!teamId) return [];
 
   const endpoints = [
-    `https://www.thesportsdb.com/api/v1/json/3/eventsnext.php?id=${encodeURIComponent(teamId)}`,
-    `https://www.thesportsdb.com/api/v1/json/3/eventslast.php?id=${encodeURIComponent(teamId)}`,
+    sportsDbUrl(`eventsnext.php?id=${encodeURIComponent(teamId)}`),
+    sportsDbUrl(`eventslast.php?id=${encodeURIComponent(teamId)}`),
   ];
 
   const responses = await Promise.all(
@@ -251,28 +223,42 @@ async function fetchTeamEvents(teamId: string): Promise<SportsCandidate[]> {
 }
 
 function scoreCandidate(candidate: SportsCandidate, query: string, expectedPair: { left: string; right: string } | null): number {
-  // Match score is the most important factor
   const matchScore = candidate.matchScore || 0.5;
-
-  // Time proximity score
   const kickoff = candidate.kickoffAt ? Date.parse(candidate.kickoffAt) : NaN;
-  let timeScore = 0.4;
-  if (Number.isFinite(kickoff)) {
-    const now = Date.now();
-    const hours = Math.abs(kickoff - now) / (1000 * 60 * 60);
-    if (hours < 3) timeScore = 1;
-    else if (hours < 24) timeScore = 0.92;
-    else if (hours < 72) timeScore = 0.82;
-    else if (hours < 14 * 24) timeScore = 0.7;
-    else if (hours < 45 * 24) timeScore = 0.58;
+  let timeScore = 0.35;
+  if (candidate.status === 'live') {
+    timeScore = 1;
+  } else if (Number.isFinite(kickoff)) {
+    const hoursFromNow = (kickoff - Date.now()) / (1000 * 60 * 60);
+    const absHours = Math.abs(hoursFromNow);
+
+    if (candidate.status === 'scheduled') {
+      if (hoursFromNow >= -1) {
+        if (hoursFromNow < 6) timeScore = 1;
+        else if (hoursFromNow < 24) timeScore = 0.95;
+        else if (hoursFromNow < 72) timeScore = 0.88;
+        else if (hoursFromNow < 14 * 24) timeScore = 0.75;
+        else timeScore = 0.62;
+      } else {
+        timeScore = absHours < 24 ? 0.18 : 0.05;
+      }
+    } else if (candidate.status === 'finished') {
+      if (absHours < 6) timeScore = 0.42;
+      else if (absHours < 24) timeScore = 0.28;
+      else timeScore = 0.12;
+    } else {
+      if (absHours < 24) timeScore = 0.55;
+      else if (absHours < 72) timeScore = 0.42;
+      else timeScore = 0.3;
+    }
+  } else if (candidate.status === 'finished') {
+    timeScore = 0.12;
   }
 
-  // If we have expected teams, prioritize match score
   if (expectedPair) {
-    return matchScore * 0.6 + timeScore * 0.4;
+    return matchScore * 0.72 + timeScore * 0.28;
   }
 
-  // Otherwise use text overlap
   const queryScore = Math.max(
     textOverlap(candidate.homeTeam, query),
     textOverlap(candidate.awayTeam, query),
@@ -339,7 +325,7 @@ export default async function handler(req: any, res: any) {
     const variants = buildQueryVariants(query);
     const searchGroupPromise = Promise.allSettled(
       variants.slice(0, 3).map(async (variant) => {
-        const endpoint = `https://www.thesportsdb.com/api/v1/json/3/searchevents.php?e=${encodeURIComponent(variant.replace(/\s+/g, '_'))}`;
+        const endpoint = sportsDbUrl(`searchevents.php?e=${encodeURIComponent(variant.replace(/\s+/g, '_'))}`);
         const json = await fetchJsonWithTimeout(endpoint);
         const events = Array.isArray(json?.event) ? json.event : [];
         return events
@@ -390,7 +376,7 @@ export default async function handler(req: any, res: any) {
     ]);
 
     const candidates = dedupeCandidates([...fetchedGroups.flat(), ...teamEvents])
-      .filter(c => c.matchScore > 0.3) // Only include candidates with decent team match
+      .filter((candidate) => expectedPair ? candidate.matchScore >= 0.55 : candidate.matchScore > 0.3)
       .sort((a, b) => scoreCandidate(b, query, expectedPair) - scoreCandidate(a, query, expectedPair))
       .slice(0, 12);
 
