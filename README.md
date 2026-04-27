@@ -7,7 +7,7 @@ A decentralized prediction market platform built on ARC Testnet. Users can creat
 - **Create Markets**: Anyone can create prediction markets for any event
 - **Trade Outcomes**: Buy and sell outcome tokens with automated price discovery
 - **Liquidity Provision**: Automatic market making via LMSR
-- **Settlement**: Automatic resolution and payouts when markets resolve
+- **Settlement**: Automatic resolution and payouts when markets resolvee
 - **Decentralized**: Fully on-chain, no centralized intermediaries
 
 ## Architecture
