@@ -557,7 +557,7 @@ export default async function handler(req: any, res: any) {
     const msg = err?.message || 'Unexpected error';
     const lower = msg.toLowerCase();
     let code = 500;
-    if (lower.includes('required') || lower.includes('invalid') || lower.includes('sports event mismatch')) code = 400;
+    if (lower.includes('required') || lower.includes('invalid') || lower.includes('sports event mismatch') || lower.includes('event data mismatch')) code = 400;
     else if (lower.includes('not found') || lower.includes('no price') || lower.includes('returned no price')) code = 404;
     else if (lower.includes('timed out')) code = 504;
     else if (lower.includes('mongo_uri') || lower.includes('enotfound')) code = 503;

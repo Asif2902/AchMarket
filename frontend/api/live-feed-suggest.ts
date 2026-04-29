@@ -135,11 +135,14 @@ function normalizeSportsStatus(statusRaw: string): { status: string; statusLabel
 function parseRequestBody(raw: unknown): SuggestRequest {
   const body = (raw && typeof raw === 'object') ? (raw as Record<string, unknown>) : {};
   return {
-    title: typeof body.title === 'string' ? body.title.trim() : '',
-    category: typeof body.category === 'string' ? body.category.trim() : '',
-    description: typeof body.description === 'string' ? body.description.trim() : '',
+    title: typeof body.title === 'string' ? body.title.trim().slice(0, 200) : '',
+    category: typeof body.category === 'string' ? body.category.trim().slice(0, 100) : '',
+    description: typeof body.description === 'string' ? body.description.trim().slice(0, 1000) : '',
     outcomeLabels: Array.isArray(body.outcomeLabels)
-      ? body.outcomeLabels.map((value) => (typeof value === 'string' ? value.trim() : '')).filter(Boolean)
+      ? body.outcomeLabels
+          .slice(0, 10)
+          .map((value) => (typeof value === 'string' ? value.trim().slice(0, 50) : ''))
+          .filter(Boolean)
       : [],
   };
 }

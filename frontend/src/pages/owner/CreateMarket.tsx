@@ -86,6 +86,7 @@ export default function CreateMarket() {
   const [feedHomeTeam, setFeedHomeTeam] = useState('');
   const [feedAwayTeam, setFeedAwayTeam] = useState('');
   const [feedForceUpcoming, setFeedForceUpcoming] = useState(false);
+  const feedEventIdRef = useRef('');
   const [feedCandidates, setFeedCandidates] = useState<LiveFeedSuggestionsResponse['sports']['candidates']>([]);
   const [feedSportsSearchQuery, setFeedSportsSearchQuery] = useState('');
   const [feedSportsSearchLoading, setFeedSportsSearchLoading] = useState(false);
@@ -111,6 +112,10 @@ export default function CreateMarket() {
   latestImageUploadKeyRef.current = imageUploadKey;
   addressRef.current = address;
   signerRef.current = signer;
+
+  useEffect(() => {
+    feedEventIdRef.current = feedEventId;
+  }, [feedEventId]);
 
   useEffect(() => {
     latestImagePreviewRef.current = localImagePreviewUrl;
@@ -334,6 +339,7 @@ export default function CreateMarket() {
     return () => {
       clearTimeout(timer);
       feedDetectRequestIdRef.current += 1;
+      setFeedDetecting(false);
     };
   }, [title, actualCategory, description, outcomes]);
 
@@ -367,8 +373,9 @@ export default function CreateMarket() {
       .then((result) => {
         if (cancelled) return;
         setFeedCandidates(result.candidates);
-        if (!feedEventId && result.candidates[0]) {
+        if (!feedEventIdRef.current && result.candidates[0]) {
           setFeedEventId(result.candidates[0].eventId);
+          feedEventIdRef.current = result.candidates[0].eventId;
           setFeedLeagueName(result.candidates[0].leagueName);
           setFeedHomeTeam(result.candidates[0].homeTeam || '');
           setFeedAwayTeam(result.candidates[0].awayTeam || '');
@@ -386,10 +393,11 @@ export default function CreateMarket() {
     return () => {
       cancelled = true;
     };
-  }, [feedSportsSearchQuery, feedKind, feedEventId]);
+  }, [feedSportsSearchQuery, feedKind]);
 
   const applyFeedSportsCandidate = (candidate: LiveFeedSuggestionsResponse['sports']['candidates'][number]) => {
     setFeedEventId(candidate.eventId);
+    feedEventIdRef.current = candidate.eventId;
     setFeedLeagueName(candidate.leagueName);
     setFeedHomeTeam(candidate.homeTeam || '');
     setFeedAwayTeam(candidate.awayTeam || '');

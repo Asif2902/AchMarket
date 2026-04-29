@@ -160,11 +160,12 @@ export async function saveLiveFeedConfig(
   payload: LiveFeedConfigInput,
   signer: Signer,
 ): Promise<LiveFeedConfig> {
+  const walletAddress = sanitizeMarketAddress(_address);
   const canonicalMarketAddress = sanitizeMarketAddress(payload.marketAddress);
   const sanitizedPayload = sanitizeLiveFeedInput(payload);
   sanitizedPayload.marketAddress = canonicalMarketAddress;
   const timestamp = Date.now();
-  const message = buildLiveFeedSigningMessage(canonicalMarketAddress, sanitizedPayload, timestamp);
+  const message = buildLiveFeedSigningMessage(walletAddress, sanitizedPayload, timestamp);
   const signature = await signer.signMessage(message);
 
   const response = await fetch(LIVE_FEED_CONFIG_API_PATH, {
@@ -173,7 +174,7 @@ export async function saveLiveFeedConfig(
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      address: canonicalMarketAddress,
+      address: walletAddress,
       timestamp,
       signature,
       payload: sanitizedPayload,

@@ -61,7 +61,8 @@ function LiveFeedModal({ isOpen, market, existing, onClose, onSaved }: LiveFeedM
   const [leagueName, setLeagueName] = useState('');
   const [homeTeam, setHomeTeam] = useState('');
   const [awayTeam, setAwayTeam] = useState('');
-
+  const [forceUpcoming, setForceUpcoming] = useState(false);
+  const eventIdRef = useRef('');
   const [suggestions, setSuggestions] = useState<LiveFeedSuggestionsResponse | null>(null);
   const [suggesting, setSuggesting] = useState(false);
   const [suggestionsError, setSuggestionsError] = useState<string | null>(null);
@@ -72,6 +73,10 @@ function LiveFeedModal({ isOpen, market, existing, onClose, onSaved }: LiveFeedM
   const [eventLookupError, setEventLookupError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    eventIdRef.current = eventId;
+  }, [eventId]);
 
   useEffect(() => {
     if (!isOpen || !market) return;
@@ -88,6 +93,7 @@ function LiveFeedModal({ isOpen, market, existing, onClose, onSaved }: LiveFeedM
     setLeagueName('');
     setHomeTeam('');
     setAwayTeam('');
+    setForceUpcoming(false);
     setError(null);
     setEventLookupError(null);
     setSuggestions(null);
@@ -112,6 +118,7 @@ function LiveFeedModal({ isOpen, market, existing, onClose, onSaved }: LiveFeedM
         setLeagueName(existing.sports.leagueName || '');
         setHomeTeam(existing.sports.homeTeam || '');
         setAwayTeam(existing.sports.awayTeam || '');
+        setForceUpcoming(existing.sports.forceUpcoming || false);
       }
     }
   }, [isOpen, market, existing]);
@@ -176,8 +183,9 @@ function LiveFeedModal({ isOpen, market, existing, onClose, onSaved }: LiveFeedM
           };
         });
 
-        if (!eventId && result.candidates[0]) {
+        if (!eventIdRef.current && result.candidates[0]) {
           setEventId(result.candidates[0].eventId);
+          eventIdRef.current = result.candidates[0].eventId;
           setLeagueName(result.candidates[0].leagueName);
           setHomeTeam(result.candidates[0].homeTeam || '');
           setAwayTeam(result.candidates[0].awayTeam || '');
@@ -195,7 +203,7 @@ function LiveFeedModal({ isOpen, market, existing, onClose, onSaved }: LiveFeedM
     return () => {
       cancelled = true;
     };
-  }, [sportsSearchQuery, kind, isOpen, existing?.kind, eventId]);
+  }, [sportsSearchQuery, kind, isOpen, existing?.kind]);
 
   const applySportsCandidate = (candidate: LiveFeedSuggestionsResponse['sports']['candidates'][number]) => {
     setEventId(candidate.eventId);
@@ -384,6 +392,7 @@ function LiveFeedModal({ isOpen, market, existing, onClose, onSaved }: LiveFeedM
           leagueName: (resolvedCandidate?.leagueName || leagueName).trim(),
           homeTeam: (resolvedCandidate?.homeTeam || homeTeam).trim() || undefined,
           awayTeam: (resolvedCandidate?.awayTeam || awayTeam).trim() || undefined,
+          forceUpcoming,
         },
       };
     }
@@ -676,14 +685,26 @@ function LiveFeedModal({ isOpen, market, existing, onClose, onSaved }: LiveFeedM
                     type="text"
                     value={awayTeam}
                     onChange={(e) => setAwayTeam(e.target.value)}
-                    placeholder="Atletico Madrid"
-                    className="input-field"
-                  />
-                </div>
-              </div>
-
-            </>
-          )}
+                     placeholder="Atletico Madrid"
+                     className="input-field"
+                   />
+                 </div>
+               </div>
+               <label className="flex items-center gap-2 text-sm text-dark-300">
+                 <input
+                   type="checkbox"
+                   checked={forceUpcoming}
+                   onChange={(e) => setForceUpcoming(e.target.checked)}
+                   className="rounded border-white/[0.15] bg-dark-900"
+                 />
+                 Force Upcoming (always show as upcoming until manually disabled)
+               </label>
+               {forceUpcoming && (
+                 <p className="text-2xs text-purple-400">This feed will always show as "Upcoming" regardless of match status. Disable this after the match starts.</p>
+               )}
+ 
+             </>
+           )}
 
           {error && (
             <div className="p-3 rounded-xl bg-red-500/10 text-red-400 border border-red-500/20 text-sm">
