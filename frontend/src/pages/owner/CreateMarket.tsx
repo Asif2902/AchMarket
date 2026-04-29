@@ -266,6 +266,7 @@ export default function CreateMarket() {
 
   const detectFeedFromDraft = async () => {
     if (!title.trim() || !actualCategory.trim()) return;
+    if (feedUserEdited) return;
 
     feedDetectRequestIdRef.current += 1;
     const requestId = feedDetectRequestIdRef.current;
@@ -317,6 +318,17 @@ export default function CreateMarket() {
         setFeedDetectionHint(suggestions.sports.reason || 'Detected sports feed suggestion.');
         setFeedUserEdited(true);
       } else {
+        setFeedKind('crypto-price');
+        setFeedEventId('');
+        setFeedLeagueName('');
+        setFeedHomeTeam('');
+        setFeedAwayTeam('');
+        setFeedCoingeckoId('bitcoin');
+        setFeedBaseSymbol('BTC');
+        setFeedQuoteSymbol('USD');
+        setFeedVsCurrency('usd');
+        setFeedCryptoMetric('price');
+        setFeedUserEdited(false);
         setFeedDetectionHint('No strong feed suggestion found. Fill manually or continue without feed.');
       }
     } catch (err) {
@@ -1205,7 +1217,12 @@ export default function CreateMarket() {
               disabled={!isValid || submitting || imageUploading || feedSaving}
               className="btn-primary w-full py-3.5 text-base font-semibold"
             >
-              {submitting ? (
+              {feedSaving ? (
+                <span className="flex items-center justify-center gap-2">
+                  <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                  Saving Live Feed...
+                </span>
+              ) : submitting ? (
                 <span className="flex items-center justify-center gap-2">
                   <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
                   Creating Market...
@@ -1214,11 +1231,6 @@ export default function CreateMarket() {
                 <span className="flex items-center justify-center gap-2">
                   <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
                   Waiting for image upload...
-                </span>
-              ) : feedSaving ? (
-                <span className="flex items-center justify-center gap-2">
-                  <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                  Saving Live Feed...
                 </span>
               ) : (
                 <span className="flex items-center justify-center gap-2">

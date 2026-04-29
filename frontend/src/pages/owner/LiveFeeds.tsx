@@ -131,7 +131,6 @@ function LiveFeedModal({ isOpen, market, existing, onClose, onSaved }: LiveFeedM
 
   useEffect(() => {
     if (!isOpen || kind !== 'sports-score') return;
-    if (existing?.kind === 'sports-score') return;
     const query = sportsSearchQuery.trim();
     if (!query || query.length < 3) {
       setSportsSearchError(null);

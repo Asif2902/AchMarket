@@ -134,17 +134,36 @@ function normalizeSportsStatus(statusRaw: string): { status: string; statusLabel
 
 function parseRequestBody(raw: unknown): SuggestRequest {
   const body = (raw && typeof raw === 'object') ? (raw as Record<string, unknown>) : {};
-  return {
-    title: typeof body.title === 'string' ? body.title.trim().slice(0, 200) : '',
-    category: typeof body.category === 'string' ? body.category.trim().slice(0, 100) : '',
-    description: typeof body.description === 'string' ? body.description.trim().slice(0, 1000) : '',
-    outcomeLabels: Array.isArray(body.outcomeLabels)
-      ? body.outcomeLabels
-          .slice(0, 10)
-          .map((value) => (typeof value === 'string' ? value.trim().slice(0, 50) : ''))
-          .filter(Boolean)
-      : [],
-  };
+
+  const title = typeof body.title === 'string' ? body.title.trim() : '';
+  const category = typeof body.category === 'string' ? body.category.trim() : '';
+  const description = typeof body.description === 'string' ? body.description.trim() : '';
+  const outcomeLabels = Array.isArray(body.outcomeLabels)
+    ? body.outcomeLabels
+        .filter((value): value is string => typeof value === 'string')
+        .map((value) => value.trim())
+        .filter(Boolean)
+    : [];
+
+  if (title.length > 200) {
+    throw new Error('title exceeds 200 characters');
+  }
+  if (category.length > 100) {
+    throw new Error('category exceeds 100 characters');
+  }
+  if (description.length > 1000) {
+    throw new Error('description exceeds 1000 characters');
+  }
+  if (outcomeLabels.length > 10) {
+    throw new Error('outcomeLabels exceeds 10 items');
+  }
+  for (const label of outcomeLabels) {
+    if (label.length > 50) {
+      throw new Error('outcomeLabel exceeds 50 characters');
+    }
+  }
+
+  return { title, category, description, outcomeLabels };
 }
 
 function detectCrypto(input: SuggestRequest) {
