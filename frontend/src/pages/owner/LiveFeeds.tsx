@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { STAGE, STAGE_LABELS, STAGE_COLORS } from '../../config/network';
 import { useWallet } from '../../context/WalletContext';
 import { PageLoader } from '../../components/LoadingSpinner';
