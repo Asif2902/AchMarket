@@ -356,10 +356,6 @@ export default function CreateMarket() {
       setFeedSportsSearchLoading(false);
       setFeedSportsSearchError('');
       setFeedCandidates([]);
-      setFeedEventId('');
-      setFeedLeagueName('');
-      setFeedHomeTeam('');
-      setFeedAwayTeam('');
       return;
     }
 
@@ -553,12 +549,17 @@ export default function CreateMarket() {
         return null;
       });
       setOutcomes(['Yes', 'No']);
+      setFeedEnabled(true);
+      setFeedKind('crypto-price');
+      setFeedUserEdited(false);
       setFeedCandidates([]);
       setFeedSportsSearchQuery('');
       setFeedSportsSearchError('');
       setFeedDetectionHint('');
       setFeedDetectionError('');
       setFeedEventLookupError('');
+      setFeedEventId('');
+      setFeedLeagueName('');
       setFeedHomeTeam('');
       setFeedAwayTeam('');
       setFeedForceUpcoming(false);
@@ -1079,7 +1080,14 @@ export default function CreateMarket() {
                 <input
                   type="text"
                   value={feedSportsSearchQuery}
-                  onChange={(e) => setFeedSportsSearchQuery(e.target.value)}
+                  onChange={(e) => {
+                    setFeedSportsSearchQuery(e.target.value);
+                    // Clear selected event when search query is edited
+                    setFeedEventId('');
+                    setFeedLeagueName('');
+                    setFeedHomeTeam('');
+                    setFeedAwayTeam('');
+                  }}
                   placeholder="Search matches, e.g. Brazil vs France"
                   className="input-field"
                 />

@@ -1064,7 +1064,7 @@ export default function MarketDetail() {
                         </svg>
                         Match starts {new Date(liveConfigured.data.kickoffAt).toLocaleString()}
                       </div>
-                      <p className="text-2xs text-purple-400/80 mt-1">Live trading will begin when the match starts</p>
+                      <p className="text-2xs text-purple-400/80 mt-1">Live Score will begin when the match starts</p>
                     </div>
                   )}
                   <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2">

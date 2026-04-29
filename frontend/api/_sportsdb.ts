@@ -50,10 +50,14 @@ export function teamsMatch(candidateHome: string, candidateAway: string, expecte
   if (cHomeNorm === eHomeNorm && cAwayNorm === eAwayNorm) return 1.0;
   if (cHomeNorm === eAwayNorm && cAwayNorm === eHomeNorm) return 0.9;
 
-  const homeMatch = cHomeNorm.includes(eHomeNorm) || eHomeNorm.includes(cHomeNorm) ||
-    cHomeNorm.includes(eAwayNorm) || eAwayNorm.includes(cHomeNorm);
-  const awayMatch = cAwayNorm.includes(eAwayNorm) || eAwayNorm.includes(cAwayNorm) ||
-    cAwayNorm.includes(eHomeNorm) || eHomeNorm.includes(cAwayNorm);
+  const homeMatch = (cHomeNorm && eHomeNorm && cHomeNorm.includes(eHomeNorm)) ||
+    (eHomeNorm && cHomeNorm && eHomeNorm.includes(cHomeNorm)) ||
+    (cHomeNorm && eAwayNorm && cHomeNorm.includes(eAwayNorm)) ||
+    (eAwayNorm && cHomeNorm && eAwayNorm.includes(cHomeNorm));
+  const awayMatch = (cAwayNorm && eAwayNorm && cAwayNorm.includes(eAwayNorm)) ||
+    (eAwayNorm && cAwayNorm && eAwayNorm.includes(cAwayNorm)) ||
+    (cAwayNorm && eHomeNorm && cAwayNorm.includes(eHomeNorm)) ||
+    (eHomeNorm && cAwayNorm && eHomeNorm.includes(cAwayNorm));
 
   if (homeMatch && awayMatch) return 0.8;
   if (homeMatch || awayMatch) return 0.4;

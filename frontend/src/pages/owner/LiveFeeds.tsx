@@ -61,7 +61,7 @@ function LiveFeedModal({ isOpen, market, existing, onClose, onSaved }: LiveFeedM
   const [leagueName, setLeagueName] = useState('');
   const [homeTeam, setHomeTeam] = useState('');
   const [awayTeam, setAwayTeam] = useState('');
-  const [forceUpcoming, setForceUpcoming] = useState(false);
+
   const [suggestions, setSuggestions] = useState<LiveFeedSuggestionsResponse | null>(null);
   const [suggesting, setSuggesting] = useState(false);
   const [suggestionsError, setSuggestionsError] = useState<string | null>(null);
@@ -75,6 +75,28 @@ function LiveFeedModal({ isOpen, market, existing, onClose, onSaved }: LiveFeedM
 
   useEffect(() => {
     if (!isOpen || !market) return;
+
+    // Reset all state to defaults first
+    setKind('crypto-price');
+    setEnabled(true);
+    setCoingeckoId('bitcoin');
+    setBaseSymbol('BTC');
+    setQuoteSymbol('USD');
+    setVsCurrency('usd');
+    setCryptoMetric('price');
+    setEventId('');
+    setLeagueName('');
+    setHomeTeam('');
+    setAwayTeam('');
+    setError(null);
+    setEventLookupError(null);
+    setSuggestions(null);
+    setSuggestionsError(null);
+    setSportsSearchError(null);
+    setSportsSearchLoading(false);
+    setEventLookupLoading(false);
+
+    // Then apply existing config if present
     if (existing) {
       setKind(existing.kind);
       setEnabled(existing.enabled);
@@ -90,32 +112,8 @@ function LiveFeedModal({ isOpen, market, existing, onClose, onSaved }: LiveFeedM
         setLeagueName(existing.sports.leagueName || '');
         setHomeTeam(existing.sports.homeTeam || '');
         setAwayTeam(existing.sports.awayTeam || '');
-        setForceUpcoming(existing.sports.forceUpcoming || false);
       }
-      setSuggestions(null);
-      setSuggestionsError(null);
-      setSportsSearchError(null);
-      setEventLookupError(null);
-      setSportsSearchLoading(false);
-      setEventLookupLoading(false);
-      setError(null);
-      return;
     }
-
-    setKind('crypto-price');
-    setEnabled(true);
-    setCoingeckoId('bitcoin');
-    setBaseSymbol('BTC');
-    setQuoteSymbol('USD');
-    setVsCurrency('usd');
-    setCryptoMetric('price');
-    setEventId('');
-    setLeagueName('');
-    setHomeTeam('');
-    setAwayTeam('');
-    setForceUpcoming(false);
-    setError(null);
-    setEventLookupError(null);
   }, [isOpen, market, existing]);
 
   useEffect(() => {
@@ -386,7 +384,6 @@ function LiveFeedModal({ isOpen, market, existing, onClose, onSaved }: LiveFeedM
           leagueName: (resolvedCandidate?.leagueName || leagueName).trim(),
           homeTeam: (resolvedCandidate?.homeTeam || homeTeam).trim() || undefined,
           awayTeam: (resolvedCandidate?.awayTeam || awayTeam).trim() || undefined,
-          forceUpcoming,
         },
       };
     }
@@ -684,18 +681,7 @@ function LiveFeedModal({ isOpen, market, existing, onClose, onSaved }: LiveFeedM
                   />
                 </div>
               </div>
-              <label className="flex items-center gap-2 text-sm text-dark-300">
-                <input
-                  type="checkbox"
-                  checked={forceUpcoming}
-                  onChange={(e) => setForceUpcoming(e.target.checked)}
-                  className="rounded border-white/[0.15] bg-dark-900"
-                />
-                Force Upcoming (always show as upcoming until manually disabled)
-              </label>
-              {forceUpcoming && (
-                <p className="text-2xs text-purple-400">This feed will always show as "Upcoming" regardless of match status. Disable this after the match starts.</p>
-              )}
+
             </>
           )}
 
@@ -758,6 +744,7 @@ export default function LiveFeeds() {
     let cancelled = false;
     const run = async () => {
       if (!filteredMarkets.length) {
+        setConfigLoading(false);
         return;
       }
       setConfigLoading(true);

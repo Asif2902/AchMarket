@@ -156,14 +156,15 @@ export async function fetchLiveFeedConfigs(marketAddresses: string[]): Promise<L
 }
 
 export async function saveLiveFeedConfig(
-  address: string,
+  _address: string,
   payload: LiveFeedConfigInput,
   signer: Signer,
 ): Promise<LiveFeedConfig> {
-  const normalizedAddress = sanitizeMarketAddress(address);
+  const canonicalMarketAddress = sanitizeMarketAddress(payload.marketAddress);
   const sanitizedPayload = sanitizeLiveFeedInput(payload);
+  sanitizedPayload.marketAddress = canonicalMarketAddress;
   const timestamp = Date.now();
-  const message = buildLiveFeedSigningMessage(normalizedAddress, sanitizedPayload, timestamp);
+  const message = buildLiveFeedSigningMessage(canonicalMarketAddress, sanitizedPayload, timestamp);
   const signature = await signer.signMessage(message);
 
   const response = await fetch(LIVE_FEED_CONFIG_API_PATH, {
@@ -172,7 +173,7 @@ export async function saveLiveFeedConfig(
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      address: normalizedAddress,
+      address: canonicalMarketAddress,
       timestamp,
       signature,
       payload: sanitizedPayload,
@@ -222,5 +223,6 @@ export async function lookupSportsEventById(eventId: string) {
 
   const response = await fetch(withCacheBust(`${LIVE_FEED_SEARCH_API_PATH}?eventId=${encodeURIComponent(trimmed)}`));
   const body = await parseApiResponse<LiveSportsSearchResponse>(response);
-  return body.candidates[0] || null;
+  const candidates = Array.isArray(body.candidates) ? body.candidates : [];
+  return candidates.length > 0 ? candidates[0] : null;
 }
