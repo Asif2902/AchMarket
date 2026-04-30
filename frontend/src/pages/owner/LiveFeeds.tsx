@@ -64,6 +64,8 @@ function LiveFeedModal({ isOpen, market, existing, onClose, onSaved }: LiveFeedM
   const [forceUpcoming, setForceUpcoming] = useState(false);
   const eventIdRef = useRef('');
   const suggestRequestIdRef = useRef(0);
+  const sportsSearchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const eventLookupIdRef = useRef(0);
   const [suggestions, setSuggestions] = useState<LiveFeedSuggestionsResponse | null>(null);
   const [suggesting, setSuggesting] = useState(false);
   const [suggestionsError, setSuggestionsError] = useState<string | null>(null);
@@ -140,70 +142,80 @@ function LiveFeedModal({ isOpen, market, existing, onClose, onSaved }: LiveFeedM
       return;
     }
 
-    let cancelled = false;
-    setSportsSearchLoading(true);
-    setSportsSearchError(null);
+    if (sportsSearchTimerRef.current) {
+      clearTimeout(sportsSearchTimerRef.current);
+    }
 
-    searchSportsEvents(query)
-      .then((result) => {
-        if (cancelled) return;
-        setSuggestions((prev) => {
-          if (!prev) {
+    let cancelled = false;
+    sportsSearchTimerRef.current = setTimeout(() => {
+      setSportsSearchLoading(true);
+      setSportsSearchError(null);
+
+      searchSportsEvents(query)
+        .then((result) => {
+          if (cancelled) return;
+          setSuggestions((prev) => {
+            if (!prev) {
+              return {
+                crypto: {
+                  detected: false,
+                  confidence: 0,
+                  reason: 'No crypto suggestion yet.',
+                  coingeckoId: null,
+                  baseSymbol: null,
+                  quoteSymbol: 'USD',
+                  vsCurrency: 'usd',
+                  metric: 'price',
+                },
+                sports: {
+                  detected: result.candidates.length > 0,
+                  confidence: result.candidates.length > 0 ? 0.55 : 0,
+                  reason: result.candidates.length > 0
+                    ? 'Found sports matches from search query. Pick the correct one.'
+                    : 'No sports matches found from search query.',
+                  homeTeam: result.candidates[0]?.homeTeam || null,
+                  awayTeam: result.candidates[0]?.awayTeam || null,
+                  selectedEventId: result.candidates[0]?.eventId || null,
+                  selectedLeagueName: result.candidates[0]?.leagueName || null,
+                  candidates: result.candidates,
+                },
+              };
+            }
             return {
-              crypto: {
-                detected: false,
-                confidence: 0,
-                reason: 'No crypto suggestion yet.',
-                coingeckoId: null,
-                baseSymbol: null,
-                quoteSymbol: 'USD',
-                vsCurrency: 'usd',
-                metric: 'price',
-              },
+              ...prev,
               sports: {
-                detected: result.candidates.length > 0,
-                confidence: result.candidates.length > 0 ? 0.55 : 0,
-                reason: result.candidates.length > 0
-                  ? 'Found sports matches from search query. Pick the correct one.'
-                  : 'No sports matches found from search query.',
-                homeTeam: result.candidates[0]?.homeTeam || null,
-                awayTeam: result.candidates[0]?.awayTeam || null,
-                selectedEventId: result.candidates[0]?.eventId || null,
-                selectedLeagueName: result.candidates[0]?.leagueName || null,
+                ...prev.sports,
                 candidates: result.candidates,
+                selectedEventId: prev.sports.selectedEventId || result.candidates[0]?.eventId || null,
+                selectedLeagueName: prev.sports.selectedLeagueName || result.candidates[0]?.leagueName || null,
               },
             };
-          }
-          return {
-            ...prev,
-            sports: {
-              ...prev.sports,
-              candidates: result.candidates,
-              selectedEventId: prev.sports.selectedEventId || result.candidates[0]?.eventId || null,
-              selectedLeagueName: prev.sports.selectedLeagueName || result.candidates[0]?.leagueName || null,
-            },
-          };
-        });
+          });
 
-        if (!eventIdRef.current && result.candidates[0]) {
-          setEventId(result.candidates[0].eventId);
-          eventIdRef.current = result.candidates[0].eventId;
-          setLeagueName(result.candidates[0].leagueName);
-          setHomeTeam(result.candidates[0].homeTeam || '');
-          setAwayTeam(result.candidates[0].awayTeam || '');
-        }
-      })
-      .catch((err) => {
-        if (cancelled) return;
-        const message = err instanceof Error ? err.message : 'Failed to search sports matches.';
-        setSportsSearchError(message);
-      })
-      .finally(() => {
-        if (!cancelled) setSportsSearchLoading(false);
-      });
+          if (!eventIdRef.current && result.candidates[0]) {
+            setEventId(result.candidates[0].eventId);
+            eventIdRef.current = result.candidates[0].eventId;
+            setLeagueName(result.candidates[0].leagueName);
+            setHomeTeam(result.candidates[0].homeTeam || '');
+            setAwayTeam(result.candidates[0].awayTeam || '');
+          }
+        })
+        .catch((err) => {
+          if (cancelled) return;
+          const message = err instanceof Error ? err.message : 'Failed to search sports matches.';
+          setSportsSearchError(message);
+        })
+        .finally(() => {
+          if (!cancelled) setSportsSearchLoading(false);
+        });
+    }, 300);
 
     return () => {
       cancelled = true;
+      if (sportsSearchTimerRef.current) {
+        clearTimeout(sportsSearchTimerRef.current);
+        sportsSearchTimerRef.current = null;
+      }
     };
   }, [sportsSearchQuery, kind, isOpen, existing?.kind]);
 
@@ -225,12 +237,13 @@ function LiveFeedModal({ isOpen, market, existing, onClose, onSaved }: LiveFeedM
       return existingCandidate;
     }
 
+    const lookupId = ++eventLookupIdRef.current;
     setEventLookupLoading(true);
     setEventLookupError(null);
     try {
       const candidate = await lookupSportsEventById(nextEventId);
-      if (!candidate) {
-        throw new Error('Sports event not found for this event id.');
+      if (!candidate || lookupId !== eventLookupIdRef.current) {
+        return null;
       }
 
       applySportsCandidate(candidate);
@@ -282,11 +295,14 @@ function LiveFeedModal({ isOpen, market, existing, onClose, onSaved }: LiveFeedM
 
       return candidate;
     } catch (err) {
+      if (lookupId !== eventLookupIdRef.current) return null;
       const message = err instanceof Error ? err.message : 'Failed to load SportsDB event id.';
       setEventLookupError(message);
       throw err;
     } finally {
-      setEventLookupLoading(false);
+      if (lookupId === eventLookupIdRef.current) {
+        setEventLookupLoading(false);
+      }
     }
   };
 

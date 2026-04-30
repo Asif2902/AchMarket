@@ -404,7 +404,8 @@ async function fetchSportsSnapshot(config: LiveFeedDoc): Promise<CachedLiveSnaps
     effectiveStatus = kickoffTime > now ? 'upcoming' : 'live';
   } else if (config.sports.forceUpcoming) {
     // forceUpcoming is set but match is no longer scheduled (live/finished/etc.) - use actual status
-    effectiveStatus = status.status as EffectiveStatus;
+    // Map 'scheduled' to 'upcoming' since it's not a valid EffectiveStatus
+    effectiveStatus = status.status === 'scheduled' ? 'upcoming' : status.status as EffectiveStatus;
   } else if (status.status === 'scheduled') {
     if (kickoffAt) {
       const kickoffTime = new Date(kickoffAt).getTime();

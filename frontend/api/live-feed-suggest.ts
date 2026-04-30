@@ -51,6 +51,8 @@ const CRYPTO_ASSETS: CryptoAsset[] = [
   { id: 'optimism', symbol: 'OP', aliases: ['op', 'optimism'] },
 ];
 
+const AMBIGUOUS_ALIASES = new Set(['ton', 'link', 'dot', 'op', 'arb', 'sui']);
+
 const SPORTS_STOP_WORDS = new Set([
   'will',
   'be',
@@ -166,20 +168,42 @@ function detectCrypto(input: SuggestRequest) {
     let reason = '';
 
     for (const alias of asset.aliases) {
+      const isAmbiguous = AMBIGUOUS_ALIASES.has(alias) && alias.length <= 3;
+      const hasDollarPrefix = new RegExp(`\\$${alias}\\b`, 'i').test(title) ||
+        new RegExp(`\\$${alias}\\b`, 'i').test(category) ||
+        new RegExp(`\\$${alias}\\b`, 'i').test(description) ||
+        new RegExp(`\\$${alias}\\b`, 'i').test(outcomes);
+
       if (containsWord(title, alias)) {
-        score = Math.max(score, 0.9);
+        if (isAmbiguous && !hasDollarPrefix) {
+          score = Math.max(score, 0.6);
+        } else {
+          score = Math.max(score, 0.9);
+        }
         reason = `Detected ${asset.symbol} in market title`;
       }
       if (containsWord(category, alias)) {
-        score = Math.max(score, 0.75);
+        if (isAmbiguous && !hasDollarPrefix) {
+          score = Math.max(score, 0.55);
+        } else {
+          score = Math.max(score, 0.75);
+        }
         reason = reason || `Detected ${asset.symbol} in market category`;
       }
       if (containsWord(description, alias)) {
-        score = Math.max(score, 0.7);
+        if (isAmbiguous && !hasDollarPrefix) {
+          score = Math.max(score, 0.5);
+        } else {
+          score = Math.max(score, 0.7);
+        }
         reason = reason || `Detected ${asset.symbol} in market description`;
       }
       if (containsWord(outcomes, alias)) {
-        score = Math.max(score, 0.68);
+        if (isAmbiguous && !hasDollarPrefix) {
+          score = Math.max(score, 0.48);
+        } else {
+          score = Math.max(score, 0.68);
+        }
         reason = reason || `Detected ${asset.symbol} in outcome labels`;
       }
     }
@@ -554,7 +578,7 @@ async function detectSports(input: SuggestRequest) {
     const queries = buildSportsQueryVariants(input.title.trim(), teamPair);
 
     const fetchedGroups = await Promise.all(
-      queries.map((query) => fetchSportsCandidatesByQuery(query, input, teamPair).catch(() => [])),
+      queries.map((query) => fetchSportsCandidatesByQuery(query, input, teamPair)),
     );
 
     candidates = dedupeSportsCandidates(fetchedGroups.flat())
@@ -563,7 +587,7 @@ async function detectSports(input: SuggestRequest) {
   } else if (categoryHint && input.title.trim()) {
     const queries = buildSportsQueryVariants(input.title.trim(), null);
     const fetchedGroups = await Promise.all(
-      queries.map((query) => fetchSportsCandidatesByQuery(query, input, null).catch(() => [])),
+      queries.map((query) => fetchSportsCandidatesByQuery(query, input, null)),
     );
     const titleOnlyCandidates = fetchedGroups.flat();
     candidates = dedupeSportsCandidates(titleOnlyCandidates)
