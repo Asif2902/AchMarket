@@ -134,20 +134,54 @@ function normalizeSportsStatus(statusRaw: string): { status: string; statusLabel
   return { status: 'unknown', statusLabel: clean };
 }
 
+const MAX_TITLE_LEN = 300;
+const MAX_CATEGORY_LEN = 200;
+const MAX_DESCRIPTION_LEN = 5000;
+const MAX_OUTCOME_LABELS = 20;
+const MAX_LABEL_LEN = 100;
+
 function parseRequestBody(raw: unknown): SuggestRequest {
   const body = (raw && typeof raw === 'object') ? (raw as Record<string, unknown>) : {};
 
-  const title = typeof body.title === 'string' ? body.title.trim() : '';
-  const category = typeof body.category === 'string' ? body.category.trim() : '';
-  const description = typeof body.description === 'string' ? body.description.trim() : '';
+  // Check raw sizes before any processing to reject oversized payloads early
+  const rawTitle = typeof body.title === 'string' ? body.title : '';
+  const rawCategory = typeof body.category === 'string' ? body.category : '';
+  const rawDescription = typeof body.description === 'string' ? body.description : '';
+
+  if (rawTitle.length > MAX_TITLE_LEN) {
+    throw new Error(`title exceeds ${MAX_TITLE_LEN} characters`);
+  }
+  if (rawCategory.length > MAX_CATEGORY_LEN) {
+    throw new Error(`category exceeds ${MAX_CATEGORY_LEN} characters`);
+  }
+  if (rawDescription.length > MAX_DESCRIPTION_LEN) {
+    throw new Error(`description exceeds ${MAX_DESCRIPTION_LEN} characters`);
+  }
+
+  const title = rawTitle.trim();
+  const category = rawCategory.trim();
+  const description = rawDescription.trim();
+
   const outcomeLabels = Array.isArray(body.outcomeLabels)
     ? body.outcomeLabels
         .filter((value): value is string => typeof value === 'string')
-        .map((value) => value.trim())
-        .filter(Boolean)
     : [];
 
-  return { title, category, description, outcomeLabels };
+  if (outcomeLabels.length > MAX_OUTCOME_LABELS) {
+    throw new Error(`outcomeLabels exceeds ${MAX_OUTCOME_LABELS} items`);
+  }
+
+  for (const label of outcomeLabels) {
+    if (label.length > MAX_LABEL_LEN) {
+      throw new Error(`outcomeLabel exceeds ${MAX_LABEL_LEN} characters`);
+    }
+  }
+
+  const trimmedLabels = outcomeLabels
+    .map((value) => value.trim())
+    .filter(Boolean);
+
+  return { title, category, description, outcomeLabels: trimmedLabels };
 }
 
 function detectCrypto(input: SuggestRequest) {
@@ -168,7 +202,7 @@ function detectCrypto(input: SuggestRequest) {
     let reason = '';
 
     for (const alias of asset.aliases) {
-      const isAmbiguous = AMBIGUOUS_ALIASES.has(alias) && alias.length <= 3;
+      const isAmbiguous = AMBIGUOUS_ALIASES.has(alias) && alias.length >= 3;
       const hasDollarPrefix = new RegExp(`\\$${alias}\\b`, 'i').test(title) ||
         new RegExp(`\\$${alias}\\b`, 'i').test(category) ||
         new RegExp(`\\$${alias}\\b`, 'i').test(description) ||
@@ -176,7 +210,7 @@ function detectCrypto(input: SuggestRequest) {
 
       if (containsWord(title, alias)) {
         if (isAmbiguous && !hasDollarPrefix) {
-          score = Math.max(score, 0.6);
+          score = Math.max(score, 0.54);
         } else {
           score = Math.max(score, 0.9);
         }
@@ -184,7 +218,7 @@ function detectCrypto(input: SuggestRequest) {
       }
       if (containsWord(category, alias)) {
         if (isAmbiguous && !hasDollarPrefix) {
-          score = Math.max(score, 0.55);
+          score = Math.max(score, 0.50);
         } else {
           score = Math.max(score, 0.75);
         }

@@ -448,7 +448,7 @@ async function fetchFreshSnapshot(config: LiveFeedDoc): Promise<CachedLiveSnapsh
 }
 
 async function fetchSharedFreshSnapshot(config: LiveFeedDoc): Promise<CachedLiveSnapshot> {
-  const key = config.marketAddress;
+  const key = `${config.marketAddress}:${config.updatedAt.toISOString()}`;
   const existing = inFlight.get(key);
   if (existing) {
     return existing;
@@ -521,7 +521,7 @@ async function resolveLiveData(marketAddress: string): Promise<LiveConfiguredRes
 
     const collection = await getCollection();
     await collection.updateOne(
-      { marketAddress },
+      { marketAddress, updatedAt: config.updatedAt },
       {
         $set: {
           lastSnapshot: fresh,
@@ -563,10 +563,22 @@ export default async function handler(req: any, res: any) {
     const msg = err?.message || 'Unexpected error';
     const lower = msg.toLowerCase();
     let code = 500;
-    if (lower.includes('required') || lower.includes('invalid') || lower.includes('sports event mismatch') || lower.includes('event data mismatch')) code = 400;
-    else if (lower.includes('not found') || lower.includes('no price') || lower.includes('returned no price')) code = 404;
-    else if (lower.includes('timed out')) code = 504;
-    else if (lower.includes('mongo_uri') || lower.includes('enotfound')) code = 503;
+
+    // Check for explicit status code on error object first
+    if (err.statusCode && typeof err.statusCode === 'number') {
+      code = err.statusCode;
+    } else if (lower.includes('missing required') || lower.includes('field') && lower.includes('invalid')) {
+      // Only mark as 400 if it's a specific field validation error
+      code = 400;
+    } else if (lower.includes('not found') || lower.includes('no price') || lower.includes('returned no price')) {
+      code = 404;
+    } else if (lower.includes('timed out')) {
+      code = 504;
+    } else if (lower.includes('mongo_uri') || lower.includes('enotfound')) {
+      code = 503;
+    }
+    // Note: Generic "invalid" phrases like "RPC_URL is invalid" will correctly get 500
+
     return res.status(code).json({ error: msg });
   }
 }
