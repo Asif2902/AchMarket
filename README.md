@@ -9,6 +9,10 @@ A decentralized prediction market platform built on ARC Testnet. Users can creat
 - **Liquidity Provision**: Automatic market making via LMSR
 - **Settlement**: Automatic resolution and payouts when markets resolve
 - **Decentralized**: Fully on-chain, no centralized intermediaries
+- **Live Feeds**: Automated market resolution via external data feeds
+  - **Crypto Price Feeds**: Track cryptocurrency prices (BTC, ETH, SOL, etc.) with configurable metrics (price, market cap, volume)
+  - **Sports Score Feeds**: Automatically resolve sports betting markets using TheSportsDB integration
+  - **Smart Detection**: Auto-detect market type from title, category, and description
 
 ## Architecture
 
@@ -20,6 +24,13 @@ AchMarket/
 │   ├── PredictionMarketLens.sol
 │   └── LMSRMath.sol
 ├── frontend/            # React + TypeScript frontend
+│   ├── api/           # Backend API routes (live feeds, market data)
+│   ├── src/
+│   │   ├── components/   # Reusable UI components
+│   │   ├── pages/        # Application pages
+│   │   ├── services/     # API service layers
+│   │   └── types/        # TypeScript type definitions
+│   └── public/
 ├── scripts/            # Deployment scripts
 └── whitepaper/         # Protocol documentation
 ```
@@ -66,6 +77,13 @@ cd frontend
 npm run dev
 ```
 
+### Type Checking
+
+```bash
+cd frontend
+npm run typecheck
+```
+
 ## Smart Contracts
 
 ### Core Contracts
@@ -86,6 +104,20 @@ npm run dev
 | RPC URL | https://rpc.testnet.arc.network |
 | Explorer | https://testnet.arcscan.app |
 
+## Live Feed API
+
+### Endpoints
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/live-feed-suggest` | POST | Get feed suggestions based on market data |
+| `/api/live-feed-config` | GET/POST | Manage live feed configuration |
+| `/api/live-market` | GET | Get live market data and status |
+
+### Supported Crypto Assets
+
+Bitcoin (BTC), Ethereum (ETH), Solana (SOL), Binance Coin (BNB), Ripple (XRP), Dogecoin (DOGE), Cardano (ADA), Avalanche (AVAX), Toncoin (TON), Chainlink (LINK), Sui (SUI), Polkadot (DOT), Tron (TRX), Arbitrum (ARB), Optimism (OP)
+
 ## Technology Stack
 
 ### Smart Contracts
@@ -98,8 +130,19 @@ npm run dev
 - TypeScript
 - Vite
 - Tailwind CSS
-- wagmi + viem
+- ethers.js
+
+## Recent Updates
+
+- Improved crypto asset detection with ambiguous alias handling
+- Enhanced error handling for sports feed API failures
+- Debounced sports search to prevent API spamming
+- Fixed race conditions in event lookup and feed suggestions
+- Improved forceUpcoming logic to show live status when matches start
+- Added dialog semantics and accessibility improvements to modals
+- Form validation returns proper 400 errors instead of 500
+- Prevented re-entry in form submissions
 
 ## License
 
-GNU General Public License v3.0 - see LICENSE file for details
+GNU General Public License v3.0 - see LICENSE file for details.
