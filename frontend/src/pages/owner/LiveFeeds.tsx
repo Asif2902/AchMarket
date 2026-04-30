@@ -134,6 +134,8 @@ function LiveFeedModal({ isOpen, market, existing, onClose, onSaved }: LiveFeedM
     const query = sportsSearchQuery.trim();
     if (!query || query.length < 3) {
       setSportsSearchError(null);
+      setSuggestions(prev => prev ? { ...prev, sports: { ...prev.sports, candidates: [] } } : null);
+      setSportsSearchLoading(false);
       return;
     }
 

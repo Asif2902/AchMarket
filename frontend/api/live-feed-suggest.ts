@@ -151,9 +151,6 @@ function parseRequestBody(raw: unknown): SuggestRequest {
   if (category.length > 100) {
     throw new Error('category exceeds 100 characters');
   }
-  if (description.length > 1000) {
-    throw new Error('description exceeds 1000 characters');
-  }
   if (outcomeLabels.length > 10) {
     throw new Error('outcomeLabels exceeds 10 items');
   }
@@ -689,6 +686,10 @@ export default async function handler(req: any, res: any) {
     const input = parseRequestBody(body);
     if (!input.title) {
       return res.status(400).json({ error: 'title is required' });
+    }
+
+    if (input.description.length > 2000) {
+      return res.status(400).json({ error: 'description exceeds 2000 characters' });
     }
 
     const [crypto, sports] = await Promise.all([

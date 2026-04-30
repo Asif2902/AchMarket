@@ -108,6 +108,7 @@ export default function CreateMarket() {
   const signerRef = useRef(signer);
   const keepUploadedImageOnCloseRef = useRef(false);
   const feedDetectRequestIdRef = useRef(0);
+  const submittingRef = useRef(false);
 
   latestImageUploadKeyRef.current = imageUploadKey;
   addressRef.current = address;
@@ -353,7 +354,7 @@ export default function CreateMarket() {
       feedDetectRequestIdRef.current += 1;
       setFeedDetecting(false);
     };
-  }, [title, actualCategory, description, outcomes]);
+  }, [title, actualCategory, description, outcomes, feedUserEdited]);
 
   useEffect(() => {
     if (feedKind !== 'sports-score') {
@@ -448,10 +449,17 @@ export default function CreateMarket() {
   };
 
   const handleSubmit = async () => {
-    if (!signer || !isValid || imageUploading || feedSaving) return;
+    if (submittingRef.current) return;
+    submittingRef.current = true;
+
+    if (!signer || !isValid || imageUploading || feedSaving) {
+      submittingRef.current = false;
+      return;
+    }
 
     if (!address || !ethers.isAddress(address)) {
       setTxResult({ type: 'error', text: 'Invalid wallet address. Please reconnect your wallet.' });
+      submittingRef.current = false;
       return;
     }
 
@@ -587,6 +595,8 @@ export default function CreateMarket() {
       keepUploadedImageOnCloseRef.current = false;
       setTxResult({ type: 'error', text: parseContractError(err) });
       setSubmitting(false);
+    } finally {
+      submittingRef.current = false;
     }
   };
 
@@ -1102,6 +1112,7 @@ export default function CreateMarket() {
                   value={feedSportsSearchQuery}
                   onChange={(e) => {
                     setFeedSportsSearchQuery(e.target.value);
+                    setFeedUserEdited(true);
                     // Clear selected event when search query is edited
                     setFeedEventId('');
                     setFeedLeagueName('');
