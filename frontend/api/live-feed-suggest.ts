@@ -145,21 +145,6 @@ function parseRequestBody(raw: unknown): SuggestRequest {
         .filter(Boolean)
     : [];
 
-  if (title.length > 200) {
-    throw new Error('title exceeds 200 characters');
-  }
-  if (category.length > 100) {
-    throw new Error('category exceeds 100 characters');
-  }
-  if (outcomeLabels.length > 10) {
-    throw new Error('outcomeLabels exceeds 10 items');
-  }
-  for (const label of outcomeLabels) {
-    if (label.length > 50) {
-      throw new Error('outcomeLabel exceeds 50 characters');
-    }
-  }
-
   return { title, category, description, outcomeLabels };
 }
 
@@ -310,8 +295,14 @@ function extractTeamsFromTitle(title: string): { home: string; away: string } | 
   for (const pattern of patterns) {
     const match = compact.match(pattern);
     if (!match) continue;
-    const home = cleanTeamName(match[1]);
-    const away = cleanTeamName(match[2]);
+    let home, away;
+    if (pattern.source.includes('@')) {
+      home = cleanTeamName(match[2]);
+      away = cleanTeamName(match[1]);
+    } else {
+      home = cleanTeamName(match[1]);
+      away = cleanTeamName(match[2]);
+    }
     if (home && away && home.toLowerCase() !== away.toLowerCase()) {
       return { home, away };
     }
@@ -690,6 +681,21 @@ export default async function handler(req: any, res: any) {
 
     if (input.description.length > 2000) {
       return res.status(400).json({ error: 'description exceeds 2000 characters' });
+    }
+
+    if (input.title.length > 200) {
+      return res.status(400).json({ error: 'title exceeds 200 characters' });
+    }
+    if (input.category.length > 100) {
+      return res.status(400).json({ error: 'category exceeds 100 characters' });
+    }
+    if (input.outcomeLabels.length > 10) {
+      return res.status(400).json({ error: 'outcomeLabels exceeds 10 items' });
+    }
+    for (const label of input.outcomeLabels) {
+      if (label.length > 50) {
+        return res.status(400).json({ error: 'outcomeLabel exceeds 50 characters' });
+      }
     }
 
     const [crypto, sports] = await Promise.all([

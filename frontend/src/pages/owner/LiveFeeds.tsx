@@ -63,6 +63,7 @@ function LiveFeedModal({ isOpen, market, existing, onClose, onSaved }: LiveFeedM
   const [awayTeam, setAwayTeam] = useState('');
   const [forceUpcoming, setForceUpcoming] = useState(false);
   const eventIdRef = useRef('');
+  const suggestRequestIdRef = useRef(0);
   const [suggestions, setSuggestions] = useState<LiveFeedSuggestionsResponse | null>(null);
   const [suggesting, setSuggesting] = useState(false);
   const [suggestionsError, setSuggestionsError] = useState<string | null>(null);
@@ -312,6 +313,7 @@ function LiveFeedModal({ isOpen, market, existing, onClose, onSaved }: LiveFeedM
   useEffect(() => {
     if (!isOpen || !market) return;
 
+    const requestId = ++suggestRequestIdRef.current;
     let cancelled = false;
     setSuggesting(true);
     setSuggestions(null);
@@ -324,7 +326,7 @@ function LiveFeedModal({ isOpen, market, existing, onClose, onSaved }: LiveFeedM
       outcomeLabels: market.outcomeLabels,
     })
       .then((result) => {
-        if (cancelled) return;
+        if (cancelled || requestId !== suggestRequestIdRef.current) return;
         setSuggestions(result);
 
         if (existing) return;
@@ -339,12 +341,12 @@ function LiveFeedModal({ isOpen, market, existing, onClose, onSaved }: LiveFeedM
         }
       })
       .catch((err) => {
-        if (cancelled) return;
+        if (cancelled || requestId !== suggestRequestIdRef.current) return;
         const message = err instanceof Error ? err.message : 'Could not auto-detect feed suggestions.';
         setSuggestionsError(message);
       })
       .finally(() => {
-        if (!cancelled) setSuggesting(false);
+        if (!cancelled && requestId === suggestRequestIdRef.current) setSuggesting(false);
       });
 
     return () => {
@@ -384,6 +386,12 @@ function LiveFeedModal({ isOpen, market, existing, onClose, onSaved }: LiveFeedM
         ? await resolveSportsEventId(eventId.trim()).catch(() => null)
         : null;
 
+      if (resolvedCandidate === null && (!leagueName.trim() || !homeTeam.trim() || !awayTeam.trim())) {
+        setError('Unable to resolve sports event. Please check the event ID and try again.');
+        setSaving(false);
+        return;
+      }
+
       payload = {
         marketAddress: market.address,
         enabled,
@@ -411,18 +419,18 @@ function LiveFeedModal({ isOpen, market, existing, onClose, onSaved }: LiveFeedM
 
   if (!isOpen || !market) return null;
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+    return (
+    <div role="dialog" aria-modal="true" aria-labelledby="live-feed-settings-title" className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-dark-950/80 backdrop-blur-sm animate-fade-in" onClick={onClose} />
       <div className="relative card w-full max-w-lg max-h-[90vh] overflow-y-auto p-6 animate-slide-up">
-        <button onClick={onClose} className="absolute top-4 right-4 w-8 h-8 rounded-lg bg-dark-750 border border-white/[0.08] flex items-center justify-center text-dark-400 hover:text-white hover:border-white/[0.15] transition-colors">
+        <button onClick={onClose} aria-label="Close live feed settings" className="absolute top-4 right-4 w-8 h-8 rounded-lg bg-dark-750 border border-white/[0.08] flex items-center justify-center text-dark-400 hover:text-white hover:border-white/[0.15] transition-colors">
           <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
           </svg>
         </button>
 
         <div className="mb-5">
-          <h2 className="text-xl font-bold text-white">Live Feed Settings</h2>
+          <h2 id="live-feed-settings-title" className="text-xl font-bold text-white">Live Feed Settings</h2>
           <p className="text-xs text-dark-400 mt-1">{market.title}</p>
         </div>
 
