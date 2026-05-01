@@ -134,6 +134,9 @@ Bitcoin (BTC), Ethereum (ETH), Solana (SOL), Binance Coin (BNB), Ripple (XRP), D
 
 ## Recent Updates
 
+- Fixed CORS preflight in live-feed-suggest to allow signing headers (X-Wallet-Address, X-Timestamp, X-Signature)
+- Fixed market stage handling in live-market to fail closed on RPC/read failures
+- Added missing environment variable exports (CORS_ALLOWED_ORIGINS, MONGO_URI, MONGO_DB_NAME, RPC_URL, FACTORY_ADDRESS) in live-feed-config
 - Improved crypto asset detection with ambiguous alias handling
 - Enhanced error handling for sports feed API failures
 - Debounced sports search to prevent API spamming
