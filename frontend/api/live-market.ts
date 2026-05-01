@@ -494,8 +494,8 @@ async function resolveLiveData(marketAddress: string): Promise<LiveConfiguredRes
   }
 
   const marketStage = await getMarketStage(marketAddress);
-  const marketIsClosed = typeof marketStage === 'number' ? isClosedStage(marketStage) : false;
-  const marketIsLiveOrUnknown = typeof marketStage === 'number' ? isLiveStage(marketStage) : true;
+  const marketIsClosed = typeof marketStage === 'number' ? isClosedStage(marketStage) : true;
+  const marketIsLiveOrUnknown = typeof marketStage === 'number' ? isLiveStage(marketStage) : false;
 
   const cachedSnapshot = config.lastSnapshot || null;
   const cachedAt = config.lastSnapshotAt instanceof Date ? config.lastSnapshotAt : null;

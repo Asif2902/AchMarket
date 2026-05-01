@@ -66,6 +66,20 @@ let cachedClient: MongoClient | null = null;
 let cachedReadProvider: JsonRpcProvider | null = null;
 let cachedFactoryContract: Contract | null = null;
 
+export const CORS_ALLOWED_ORIGINS: string[] = (process.env.CORS_ALLOWED_ORIGINS || '*')
+  .split(',')
+  .map(s => s.trim());
+export const MONGO_URI: string = process.env.MONGO_URI || '';
+export const MONGO_DB_NAME: string = process.env.MONGO_DB_NAME || 'achmarket';
+export const RPC_URL: string = process.env.RPC_URL || 'https://arc-testnet.drpc.org/';
+export const FACTORY_ADDRESS: string = process.env.FACTORY_ADDRESS || '';
+
+if (process.env.NODE_ENV === 'production') {
+  if (!process.env.RPC_URL) console.error('RPC_URL is required in production.');
+  if (!process.env.FACTORY_ADDRESS) console.error('FACTORY_ADDRESS is required in production.');
+  if (!process.env.MONGO_URI) console.error('MONGO_URI is required in production.');
+}
+
 function normalizeAddress(address: string): string {
   return getAddress(address).toLowerCase();
 }
