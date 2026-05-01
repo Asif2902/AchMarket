@@ -1,4 +1,5 @@
 import { sportsDbUrl, teamsMatch } from './_sportsdb.js';
+import { extractSignedHeaders, verifySignedMessage } from './_signature';
 
 const CORS_ALLOWED_ORIGINS = (process.env.CORS_ALLOWED_ORIGINS ?? '')
   .split(',')
@@ -57,6 +58,13 @@ const CRYPTO_ASSETS: CryptoAsset[] = [
   { id: 'arbitrum', symbol: 'ARB', aliases: ['arb', 'arbitrum'] },
   { id: 'optimism', symbol: 'OP', aliases: ['op', 'optimism'] },
 ];
+
+const DOLLAR_PREFIX_REGEX = new Map<string, RegExp>();
+for (const asset of CRYPTO_ASSETS) {
+  for (const alias of asset.aliases) {
+    DOLLAR_PREFIX_REGEX.set(alias, new RegExp(`\\$${alias}\\b`, 'i'));
+  }
+}
 
 const AMBIGUOUS_ALIASES = new Set(['ton', 'link', 'dot', 'op', 'arb', 'sui']);
 
@@ -210,10 +218,13 @@ function detectCrypto(input: SuggestRequest) {
 
     for (const alias of asset.aliases) {
       const isAmbiguous = AMBIGUOUS_ALIASES.has(alias) && alias.length >= 3;
-      const hasDollarPrefix = new RegExp(`\\$${alias}\\b`, 'i').test(title) ||
-        new RegExp(`\\$${alias}\\b`, 'i').test(category) ||
-        new RegExp(`\\$${alias}\\b`, 'i').test(description) ||
-        new RegExp(`\\$${alias}\\b`, 'i').test(outcomes);
+      const dollarRegex = DOLLAR_PREFIX_REGEX.get(alias);
+      const hasDollarPrefix = dollarRegex
+        ? dollarRegex.test(title) ||
+          dollarRegex.test(category) ||
+          dollarRegex.test(description) ||
+          dollarRegex.test(outcomes)
+        : false;
 
       if (containsWord(title, alias)) {
         if (isAmbiguous && !hasDollarPrefix) {
@@ -636,6 +647,19 @@ async function detectSports(input: SuggestRequest) {
       .slice(0, 5);
   }
 
+  if (teamPair && candidates.length === 0) {
+    return {
+      detected: false,
+      confidence: 0,
+      reason: 'Teams detected but no matching events found; please enter Event ID or review.',
+      homeTeam: teamPair.home,
+      awayTeam: teamPair.away,
+      selectedEventId: null,
+      selectedLeagueName: null,
+      candidates: [],
+    };
+  }
+
   if (!teamPair && candidates.length === 0) {
     return {
       detected: false,
@@ -730,16 +754,27 @@ export default async function handler(req: any, res: any) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
   try {
-    let body = req.body;
-    if (typeof body === 'string') {
+    const { address, timestamp, signature } = extractSignedHeaders(req);
+
+    let rawBody = req.body;
+    if (typeof rawBody === 'string') {
       try {
-        body = JSON.parse(body);
+        rawBody = JSON.parse(rawBody);
       } catch {
         return res.status(400).json({ error: 'Invalid JSON' });
       }
     }
 
-    const input = parseRequestBody(body);
+    const message = [
+      'AchMarket Live Feed Suggest',
+      `Address: ${address}`,
+      `Timestamp: ${timestamp}`,
+      `Body: ${JSON.stringify(rawBody)}`,
+    ].join('\n');
+
+    verifySignedMessage(address, timestamp, signature, message);
+
+    const input = parseRequestBody(rawBody);
     if (!input.title) {
       return res.status(400).json({ error: 'title is required' });
     }

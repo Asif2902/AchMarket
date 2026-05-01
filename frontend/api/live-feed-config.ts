@@ -1,16 +1,8 @@
-import { recoverAddress, hashMessage, getAddress, Contract, JsonRpcProvider } from 'ethers';
+import { hashMessage, getAddress, Contract, JsonRpcProvider } from 'ethers';
 import { MongoClient, type Collection } from 'mongodb';
+import { extractSignedHeaders, verifySignedMessage, SIG_VALIDITY_MS } from './_signature';
 
 const LIVE_FEEDS_COLLECTION = 'live_feeds';
-const MONGO_URI = process.env.MONGO_URI;
-const MONGO_DB_NAME = process.env.MONGO_DB_NAME ?? 'achmarket';
-const FACTORY_ADDRESS = process.env.FACTORY_ADDRESS || '0xd7b122B12caCB299249f89be7F241a47f762f283';
-const RPC_URL = process.env.RPC_URL || 'https://arc-testnet.drpc.org/';
-const CORS_ALLOWED_ORIGINS = (process.env.CORS_ALLOWED_ORIGINS ?? '')
-  .split(',')
-  .map((value) => value.trim())
-  .filter(Boolean);
-const SIG_VALIDITY_MS = 10 * 60 * 1000;
 
 const FACTORY_OWNER_ABI = [
   'function owner() view returns (address)',
@@ -111,21 +103,6 @@ function serializeLiveFeedPayload(payload: LiveFeedPayload): string {
       forceUpcoming: payload.sports?.forceUpcoming,
     },
   });
-}
-
-function buildSigningMessage(address: string, payload: LiveFeedPayload, timestamp: number): string {
-  return [
-    'AchMarket Live Feed Config',
-    `Address: ${address}`,
-    `Timestamp: ${timestamp}`,
-    `Payload: ${serializeLiveFeedPayload(payload)}`,
-    'No gas fee. Sign only if you trust this request.',
-  ].join('\n');
-}
-
-function verifyMessage(message: string, signature: string): string {
-  const addr = recoverAddress(hashMessage(message), signature);
-  return addr.toLowerCase();
 }
 
 function resolveCorsOrigin(originHeader: unknown): string | null {
@@ -317,29 +294,8 @@ async function getSingleConfig(rawMarketAddress: unknown): Promise<LiveFeedDoc |
   return collection.findOne({ marketAddress });
 }
 
-async function upsertConfig(addressRaw: unknown, payloadRaw: unknown, timestampRaw: unknown, signatureRaw: unknown) {
-  const address = normalizeAddress(parseTrimmedString(addressRaw));
-  const signature = parseTrimmedString(signatureRaw);
-  const timestamp = Number(timestampRaw);
+async function upsertConfig(address: string, payloadRaw: unknown) {
   const payload = sanitizePayload((payloadRaw || {}) as LiveFeedPayload);
-
-  if (!address || !signature) throw new Error('address and signature are required.');
-  if (!Number.isFinite(timestamp)) throw new Error('Invalid timestamp.');
-
-  const now = Date.now();
-  if (timestamp > now + 5000) throw new Error('Timestamp is in the future.');
-  if (now - timestamp > SIG_VALIDITY_MS) throw new Error('Signature expired. Please try again.');
-
-  const message = buildSigningMessage(address, payload, timestamp);
-  let recovered = '';
-  try {
-    recovered = verifyMessage(message, signature);
-  } catch {
-    throw new Error('Invalid signature format.');
-  }
-  if (normalizeAddress(recovered) !== address) {
-    throw new Error('Invalid signature for wallet address.');
-  }
 
   await assertOwnerAddress(address);
   await assertKnownMarket(payload.marketAddress);
@@ -396,6 +352,8 @@ export default async function handler(req: any, res: any) {
     }
 
     if (req.method === 'POST') {
+      const { address, timestamp, signature } = extractSignedHeaders(req);
+
       let body = req.body;
       if (typeof body === 'string') {
         try {
@@ -405,7 +363,17 @@ export default async function handler(req: any, res: any) {
         }
       }
 
-      const config = await upsertConfig(body?.address, body?.payload, body?.timestamp, body?.signature);
+      const payload = body?.payload;
+      const message = [
+        'AchMarket Live Feed Config',
+        `Address: ${address}`,
+        `Timestamp: ${timestamp}`,
+        `Payload: ${JSON.stringify(payload)}`,
+      ].join('\n');
+
+      verifySignedMessage(address, timestamp, signature, message);
+
+      const config = await upsertConfig(address, payload);
       return res.status(200).json({ config });
     }
 

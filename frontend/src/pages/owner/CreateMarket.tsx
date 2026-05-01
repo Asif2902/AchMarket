@@ -99,6 +99,11 @@ export default function CreateMarket() {
   const [feedUserEdited, setFeedUserEdited] = useState(false);
   const [feedSaving, setFeedSaving] = useState(false);
 
+  const [cryptoPricePreview, setCryptoPricePreview] = useState<number | null>(null);
+  const [cryptoPriceLoading, setCryptoPriceLoading] = useState(false);
+  const [cryptoPriceError, setCryptoPriceError] = useState<string | null>(null);
+  const [showConfirmDialog, setShowConfirmDialog] = useState(false);
+
   const [submitting, setSubmitting] = useState(false);
   const [txResult, setTxResult] = useState<{ type: 'success' | 'error'; text: string; market?: string; marketId?: string } | null>(null);
   const imageFileInputRef = useRef<HTMLInputElement | null>(null);
@@ -355,6 +360,43 @@ export default function CreateMarket() {
       setFeedDetecting(false);
     };
   }, [title, actualCategory, description, outcomes, feedUserEdited]);
+
+  useEffect(() => {
+    if (feedKind !== 'crypto-price' || !feedCoingeckoId.trim()) {
+      setCryptoPricePreview(null);
+      setCryptoPriceError(null);
+      return;
+    }
+
+    let cancelled = false;
+    setCryptoPriceLoading(true);
+    setCryptoPriceError(null);
+
+    fetch(`https://api.coingecko.com/api/v3/simple/price?ids=${encodeURIComponent(feedCoingeckoId.trim())}&vs_currencies=usd`)
+      .then(async (res) => {
+        if (cancelled) return;
+        if (res.status === 429) {
+          throw new Error('Rate limit exceeded. Please try again in a moment.');
+        }
+        if (!res.ok) throw new Error('Failed to fetch price');
+        const data = await res.json();
+        const price = data[feedCoingeckoId.trim()]?.usd;
+        if (price === undefined) throw new Error('Price not found');
+        setCryptoPricePreview(typeof price === 'number' ? price : null);
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        setCryptoPriceError(err instanceof Error ? err.message : 'Failed to fetch price');
+        setCryptoPricePreview(null);
+      })
+      .finally(() => {
+        if (!cancelled) setCryptoPriceLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [feedKind, feedCoingeckoId]);
 
   useEffect(() => {
     if (feedKind !== 'sports-score') {
@@ -1224,7 +1266,7 @@ export default function CreateMarket() {
           {/* Submit */}
           <div className="card p-5">
             <button
-              onClick={handleSubmit}
+              onClick={() => setShowConfirmDialog(true)}
               disabled={!isValid || submitting || imageUploading || feedSaving}
               className="btn-primary w-full py-3.5 text-base font-semibold"
             >
@@ -1339,6 +1381,20 @@ export default function CreateMarket() {
                     </span>
                   )}
                 </div>
+                {feedKind === 'crypto-price' && (
+                  <div className="mt-2 pt-3 border-t border-white/[0.08]">
+                    {cryptoPriceLoading ? (
+                      <p className="text-xs text-dark-500">Loading price...</p>
+                    ) : cryptoPriceError ? (
+                      <p className="text-xs text-red-400">{cryptoPriceError}</p>
+                    ) : cryptoPricePreview !== null ? (
+                      <p className="text-xs text-dark-300">
+                        <span className="text-dark-500">Current {feedBaseSymbol} Price: </span>
+                        <span className="text-emerald-400 font-semibold">${cryptoPricePreview.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                      </p>
+                    ) : null}
+                  </div>
+                )}
               </div>
             </div>
 
@@ -1369,6 +1425,71 @@ export default function CreateMarket() {
           </div>
         </div>
       </div>
+
+      {/* Confirmation Dialog */}
+      {showConfirmDialog && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-dark-950/80 backdrop-blur-sm" onClick={() => setShowConfirmDialog(false)} />
+          <div className="relative card w-full max-w-md p-6 animate-slide-up">
+            <h3 className="text-lg font-bold text-white mb-4">Confirm Market Creation</h3>
+
+            <div className="space-y-3 mb-6 text-sm">
+              <div>
+                <span className="text-dark-400">Title: </span>
+                <span className="text-white">{title || <span className="italic text-dark-500">Untitled</span>}</span>
+              </div>
+              <div>
+                <span className="text-dark-400">Category: </span>
+                <span className="text-white">{actualCategory || '-'}</span>
+              </div>
+              <div>
+                <span className="text-dark-400">Outcomes: </span>
+                <span className="text-white">{outcomes.filter(o => o.trim()).join(', ') || '-'}</span>
+              </div>
+              {outcomes.length === 2 && outcomes[0].trim().toLowerCase() === 'yes' && outcomes[1].trim().toLowerCase() === 'no' && (
+                <div className="p-3 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-400 text-xs">
+                  <svg className="w-4 h-4 inline mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                  You are about to create a market with default "Yes/No" outcomes. Consider customizing outcomes for better user experience.
+                </div>
+              )}
+              <div>
+                <span className="text-dark-400">Duration: </span>
+                <span className="text-white">{durationSeconds >= 86400 ? `${Math.floor(durationSeconds / 86400)} days` : `${Math.floor(durationSeconds / 3600)} hours`}</span>
+              </div>
+              <div>
+                <span className="text-dark-400">Liquidity (b): </span>
+                <span className="text-white">{bValue}</span>
+              </div>
+              {feedEnabled && (
+                <div>
+                  <span className="text-dark-400">Live Feed: </span>
+                  <span className="text-emerald-400">{feedKind === 'crypto-price' ? 'Crypto Price' : 'Sports Score'}</span>
+                </div>
+              )}
+            </div>
+
+            <div className="flex gap-3">
+              <button
+                onClick={() => setShowConfirmDialog(false)}
+                className="flex-1 btn-secondary py-2.5"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => {
+                  setShowConfirmDialog(false);
+                  handleSubmit();
+                }}
+                className="flex-1 btn-primary py-2.5"
+              >
+                Confirm & Create
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

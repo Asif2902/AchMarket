@@ -236,6 +236,7 @@ function nowIso(): string {
 function toFiniteNumber(value: unknown): number | null {
   if (typeof value === 'number' && Number.isFinite(value)) return value;
   if (typeof value === 'string') {
+    if (value.trim() === '') return null;
     const parsed = Number(value);
     if (Number.isFinite(parsed)) return parsed;
   }
@@ -569,6 +570,9 @@ export default async function handler(req: any, res: any) {
       code = err.statusCode;
     } else if (lower.includes('missing required') || lower.includes('is required') || lower.includes('required') || (lower.includes('field') && lower.includes('invalid'))) {
       // Only mark as 400 if it's a specific field validation error
+      code = 400;
+    } else if (lower.includes('sports event mismatch') || lower.includes('event data mismatch') || lower.includes('mismatch')) {
+      // Event/feed validation failures are client errors
       code = 400;
     } else if (lower.includes('not found') || lower.includes('no price') || lower.includes('returned no price')) {
       code = 404;
