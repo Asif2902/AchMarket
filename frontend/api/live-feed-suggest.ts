@@ -7,6 +7,13 @@ const CORS_ALLOWED_ORIGINS = (process.env.CORS_ALLOWED_ORIGINS ?? '')
 
 const FETCH_TIMEOUT_MS = 7000;
 
+class ValidationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'ValidationError';
+  }
+}
+
 interface SuggestRequest {
   title: string;
   category: string;
@@ -149,13 +156,13 @@ function parseRequestBody(raw: unknown): SuggestRequest {
   const rawDescription = typeof body.description === 'string' ? body.description : '';
 
   if (rawTitle.length > MAX_TITLE_LEN) {
-    throw new Error(`title exceeds ${MAX_TITLE_LEN} characters`);
+    throw new ValidationError(`title exceeds ${MAX_TITLE_LEN} characters`);
   }
   if (rawCategory.length > MAX_CATEGORY_LEN) {
-    throw new Error(`category exceeds ${MAX_CATEGORY_LEN} characters`);
+    throw new ValidationError(`category exceeds ${MAX_CATEGORY_LEN} characters`);
   }
   if (rawDescription.length > MAX_DESCRIPTION_LEN) {
-    throw new Error(`description exceeds ${MAX_DESCRIPTION_LEN} characters`);
+    throw new ValidationError(`description exceeds ${MAX_DESCRIPTION_LEN} characters`);
   }
 
   const title = rawTitle.trim();
@@ -168,12 +175,12 @@ function parseRequestBody(raw: unknown): SuggestRequest {
     : [];
 
   if (outcomeLabels.length > MAX_OUTCOME_LABELS) {
-    throw new Error(`outcomeLabels exceeds ${MAX_OUTCOME_LABELS} items`);
+    throw new ValidationError(`outcomeLabels exceeds ${MAX_OUTCOME_LABELS} items`);
   }
 
   for (const label of outcomeLabels) {
     if (label.length > MAX_LABEL_LEN) {
-      throw new Error(`outcomeLabel exceeds ${MAX_LABEL_LEN} characters`);
+      throw new ValidationError(`outcomeLabel exceeds ${MAX_LABEL_LEN} characters`);
     }
   }
 
@@ -737,25 +744,6 @@ export default async function handler(req: any, res: any) {
       return res.status(400).json({ error: 'title is required' });
     }
 
-    if (input.description.length > 2000) {
-      return res.status(400).json({ error: 'description exceeds 2000 characters' });
-    }
-
-    if (input.title.length > 200) {
-      return res.status(400).json({ error: 'title exceeds 200 characters' });
-    }
-    if (input.category.length > 100) {
-      return res.status(400).json({ error: 'category exceeds 100 characters' });
-    }
-    if (input.outcomeLabels.length > 10) {
-      return res.status(400).json({ error: 'outcomeLabels exceeds 10 items' });
-    }
-    for (const label of input.outcomeLabels) {
-      if (label.length > 50) {
-        return res.status(400).json({ error: 'outcomeLabel exceeds 50 characters' });
-      }
-    }
-
     const [crypto, sports] = await Promise.all([
       Promise.resolve(detectCrypto(input)),
       detectSports(input),
@@ -763,6 +751,9 @@ export default async function handler(req: any, res: any) {
 
     return res.status(200).json({ crypto, sports });
   } catch (err: any) {
+    if (err instanceof ValidationError) {
+      return res.status(400).json({ error: err.message });
+    }
     const msg = err?.message || 'Unexpected error';
     return res.status(500).json({ error: msg });
   }

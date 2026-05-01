@@ -567,7 +567,7 @@ export default async function handler(req: any, res: any) {
     // Check for explicit status code on error object first
     if (err.statusCode && typeof err.statusCode === 'number') {
       code = err.statusCode;
-    } else if (lower.includes('missing required') || lower.includes('field') && lower.includes('invalid')) {
+    } else if (lower.includes('missing required') || lower.includes('is required') || lower.includes('required') || (lower.includes('field') && lower.includes('invalid'))) {
       // Only mark as 400 if it's a specific field validation error
       code = 400;
     } else if (lower.includes('not found') || lower.includes('no price') || lower.includes('returned no price')) {
