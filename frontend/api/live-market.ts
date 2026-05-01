@@ -1,7 +1,7 @@
 import { getAddress, Contract, JsonRpcProvider } from 'ethers';
 import { MongoClient, type Collection } from 'mongodb';
 import { sportsDbUrl, teamsMatch } from './_sportsdb.js';
-import { normalizeSportsStatus } from './_sports-status';
+import { normalizeSportsStatus } from './_sports-status.js';
 
 const LIVE_FEEDS_COLLECTION = 'live_feeds';
 const MONGO_URI = process.env.MONGO_URI;

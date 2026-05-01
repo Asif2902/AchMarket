@@ -1,6 +1,6 @@
 import { sportsDbUrl, teamsMatch } from './_sportsdb.js';
 import { extractSignedHeaders, verifySignedMessage } from './_signature';
-import { normalizeSportsStatus } from './_sports-status';
+import { normalizeSportsStatus } from './_sports-status.js';
 
 const CORS_ALLOWED_ORIGINS = (process.env.CORS_ALLOWED_ORIGINS ?? '')
   .split(',')
