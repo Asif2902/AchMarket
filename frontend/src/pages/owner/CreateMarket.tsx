@@ -1075,14 +1075,14 @@ export default function CreateMarket() {
             <div className="flex gap-2 mb-3">
               <button
                 type="button"
-                onClick={() => setFeedKind('crypto-price')}
+                onClick={() => { setFeedKind('crypto-price'); setFeedUserEdited(true); }}
                 className={`chip ${feedKind === 'crypto-price' ? 'chip-active' : ''}`}
               >
                 Crypto Price
               </button>
               <button
                 type="button"
-                onClick={() => setFeedKind('sports-score')}
+                onClick={() => { setFeedKind('sports-score'); setFeedUserEdited(true); }}
                 className={`chip ${feedKind === 'sports-score' ? 'chip-active' : ''}`}
               >
                 Sports Score

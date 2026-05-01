@@ -754,7 +754,20 @@ export default async function handler(req: any, res: any) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
   try {
-    const { address, timestamp, signature } = extractSignedHeaders(req);
+    let address = '';
+    let timestamp = 0;
+    let signature = '';
+    let signed = false;
+
+    try {
+      const extracted = extractSignedHeaders(req);
+      address = extracted.address;
+      timestamp = extracted.timestamp;
+      signature = extracted.signature;
+            signed = !!(address && signature);
+    } catch {
+      // Unsigned request - continue without signature verification
+    }
 
     let rawBody = req.body;
     if (typeof rawBody === 'string') {
@@ -765,14 +778,20 @@ export default async function handler(req: any, res: any) {
       }
     }
 
-    const message = [
-      'AchMarket Live Feed Suggest',
-      `Address: ${address}`,
-      `Timestamp: ${timestamp}`,
-      `Body: ${JSON.stringify(rawBody)}`,
-    ].join('\n');
+    if (signed) {
+      const message = [
+        'AchMarket Live Feed Suggest',
+        `Address: ${address}`,
+        `Timestamp: ${timestamp}`,
+        `Body: ${JSON.stringify(rawBody)}`,
+      ].join('\n');
 
-    verifySignedMessage(address, timestamp, signature, message);
+      try {
+        verifySignedMessage(address, timestamp, signature, message);
+      } catch (sigErr: any) {
+        return res.status(401).json({ error: sigErr.message || 'Invalid signature' });
+      }
+    }
 
     const input = parseRequestBody(rawBody);
     if (!input.title) {
@@ -789,7 +808,19 @@ export default async function handler(req: any, res: any) {
     if (err instanceof ValidationError) {
       return res.status(400).json({ error: err.message });
     }
+
     const msg = err?.message || 'Unexpected error';
+    const lower = msg.toLowerCase();
+
+    // Auth/signature failures
+    if (lower.includes('expired') || lower.includes('invalid signature for wallet')) {
+      return res.status(401).json({ error: msg });
+    }
+    // Malformed header/validation problems
+    if (lower.includes('wallet address') || lower.includes('signature') || lower.includes('timestamp') || lower.includes('invalid')) {
+      return res.status(400).json({ error: msg });
+    }
+
     return res.status(500).json({ error: msg });
   }
 }

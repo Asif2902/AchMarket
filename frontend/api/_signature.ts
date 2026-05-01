@@ -8,6 +8,38 @@ export interface SignedRequest {
   signature: string;
 }
 
+export function serializeLiveFeedPayload(payload: any): string {
+  if (payload?.kind === 'crypto-price') {
+    return JSON.stringify({
+      marketAddress: payload.marketAddress,
+      enabled: payload.enabled,
+      kind: payload.kind,
+      crypto: {
+        coingeckoId: payload.crypto.coingeckoId,
+        baseSymbol: payload.crypto.baseSymbol,
+        quoteSymbol: payload.crypto.quoteSymbol,
+        vsCurrency: payload.crypto.vsCurrency,
+        metric: payload.crypto.metric,
+      },
+      sports: null,
+    });
+  }
+
+  return JSON.stringify({
+    marketAddress: payload.marketAddress,
+    enabled: payload.enabled,
+    kind: payload.kind,
+    crypto: null,
+    sports: {
+      eventId: payload.sports.eventId,
+      leagueName: payload.sports.leagueName,
+      homeTeam: payload.sports.homeTeam || undefined,
+      awayTeam: payload.sports.awayTeam || undefined,
+      forceUpcoming: payload.sports.forceUpcoming,
+    },
+  });
+}
+
 export function extractSignedHeaders(req: any): SignedRequest {
   const address = typeof req.headers?.['x-wallet-address'] === 'string'
     ? getAddress(req.headers['x-wallet-address']).toLowerCase()

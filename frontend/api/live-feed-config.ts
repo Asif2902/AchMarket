@@ -1,6 +1,6 @@
 import { hashMessage, getAddress, Contract, JsonRpcProvider } from 'ethers';
 import { MongoClient, type Collection } from 'mongodb';
-import { extractSignedHeaders, verifySignedMessage, SIG_VALIDITY_MS } from './_signature';
+import { extractSignedHeaders, verifySignedMessage, SIG_VALIDITY_MS, serializeLiveFeedPayload } from './_signature';
 
 const LIVE_FEEDS_COLLECTION = 'live_feeds';
 
@@ -368,7 +368,8 @@ export default async function handler(req: any, res: any) {
         'AchMarket Live Feed Config',
         `Address: ${address}`,
         `Timestamp: ${timestamp}`,
-        `Payload: ${JSON.stringify(payload)}`,
+        `Payload: ${serializeLiveFeedPayload(payload)}`,
+        'No gas fee. Sign only if you trust this request.',
       ].join('\n');
 
       verifySignedMessage(address, timestamp, signature, message);

@@ -5,7 +5,17 @@ import { sportsDbUrl, teamsMatch } from './_sportsdb.js';
 const LIVE_FEEDS_COLLECTION = 'live_feeds';
 const MONGO_URI = process.env.MONGO_URI;
 const MONGO_DB_NAME = process.env.MONGO_DB_NAME ?? 'achmarket';
-const RPC_URL = process.env.RPC_URL || 'https://arc-testnet.drpc.org/';
+const RPC_URL_RAW = process.env.RPC_URL;
+let RPC_URL: string;
+if (!RPC_URL_RAW && process.env.NODE_ENV === 'production') {
+  throw new Error('RPC_URL is required in production. Configure RPC_URL with a valid URL.');
+}
+if (RPC_URL_RAW) {
+  RPC_URL = RPC_URL_RAW;
+} else {
+  console.warn('RPC_URL not set, using default testnet URL. This is only appropriate for development.');
+  RPC_URL = 'https://arc-testnet.drpc.org/';
+}
 const CORS_ALLOWED_ORIGINS = (process.env.CORS_ALLOWED_ORIGINS ?? '')
   .split(',')
   .map((value) => value.trim())
