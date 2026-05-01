@@ -477,7 +477,11 @@ function normalizeMarketAddressInput(raw: unknown): string {
   if (typeof raw !== 'string' || !raw.trim()) {
     throw new Error('marketAddress query parameter is required.');
   }
-  return normalizeAddress(raw.trim());
+  try {
+    return normalizeAddress(raw.trim());
+  } catch {
+    throw new Error('marketAddress is invalid.');
+  }
 }
 
 async function resolveLiveData(marketAddress: string): Promise<LiveConfiguredResponse | LiveUnconfiguredResponse> {
@@ -578,7 +582,13 @@ export default async function handler(req: any, res: any) {
     // Check for explicit status code on error object first
     if (err.statusCode && typeof err.statusCode === 'number') {
       code = err.statusCode;
-    } else if (lower.includes('missing required') || lower.includes('is required') || lower.includes('required') || (lower.includes('field') && lower.includes('invalid'))) {
+    } else if (
+      lower.includes('missing required')
+      || lower.includes('is required')
+      || lower.includes('required')
+      || (lower.includes('field') && lower.includes('invalid'))
+      || ((lower.includes('marketaddress') || lower.includes('market address')) && lower.includes('invalid'))
+    ) {
       // Only mark as 400 if it's a specific field validation error
       code = 400;
     } else if (lower.includes('sports event mismatch') || lower.includes('event data mismatch') || lower.includes('mismatch')) {

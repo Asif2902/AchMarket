@@ -764,9 +764,18 @@ export default async function handler(req: any, res: any) {
       address = extracted.address;
       timestamp = extracted.timestamp;
       signature = extracted.signature;
-            signed = !!(address && signature);
-    } catch {
-      // Unsigned request - continue without signature verification
+      signed = !!(address && signature);
+    } catch (headerErr: any) {
+      const walletHeader = req.headers?.['x-wallet-address'];
+      const signatureHeader = req.headers?.['x-signature'];
+      const hasWalletHeader = typeof walletHeader === 'string' && walletHeader.trim().length > 0;
+      const hasSignatureHeader = typeof signatureHeader === 'string' && signatureHeader.trim().length > 0;
+
+      if (!hasWalletHeader && !hasSignatureHeader) {
+        signed = false;
+      } else {
+        return res.status(400).json({ error: headerErr?.message || 'Invalid signing headers' });
+      }
     }
 
     let rawBody = req.body;

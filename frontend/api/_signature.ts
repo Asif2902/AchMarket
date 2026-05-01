@@ -14,13 +14,15 @@ export function serializeLiveFeedPayload(payload: any): string {
       marketAddress: payload.marketAddress,
       enabled: payload.enabled,
       kind: payload.kind,
-      crypto: {
-        coingeckoId: payload.crypto.coingeckoId,
-        baseSymbol: payload.crypto.baseSymbol,
-        quoteSymbol: payload.crypto.quoteSymbol,
-        vsCurrency: payload.crypto.vsCurrency,
-        metric: payload.crypto.metric,
-      },
+      crypto: payload?.crypto
+        ? {
+            coingeckoId: payload.crypto?.coingeckoId ?? null,
+            baseSymbol: payload.crypto?.baseSymbol ?? null,
+            quoteSymbol: payload.crypto?.quoteSymbol ?? null,
+            vsCurrency: payload.crypto?.vsCurrency ?? null,
+            metric: payload.crypto?.metric ?? null,
+          }
+        : null,
       sports: null,
     });
   }
@@ -30,13 +32,15 @@ export function serializeLiveFeedPayload(payload: any): string {
     enabled: payload.enabled,
     kind: payload.kind,
     crypto: null,
-    sports: {
-      eventId: payload.sports.eventId,
-      leagueName: payload.sports.leagueName,
-      homeTeam: payload.sports.homeTeam || undefined,
-      awayTeam: payload.sports.awayTeam || undefined,
-      forceUpcoming: payload.sports.forceUpcoming,
-    },
+    sports: payload?.sports
+      ? {
+          eventId: payload.sports?.eventId ?? null,
+          leagueName: payload.sports?.leagueName ?? null,
+          homeTeam: payload.sports?.homeTeam || undefined,
+          awayTeam: payload.sports?.awayTeam || undefined,
+          forceUpcoming: payload.sports?.forceUpcoming ?? null,
+        }
+      : null,
   });
 }
 

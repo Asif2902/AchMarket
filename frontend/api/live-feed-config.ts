@@ -70,41 +70,6 @@ function normalizeAddress(address: string): string {
   return getAddress(address).toLowerCase();
 }
 
-function serializeLiveFeedPayload(payload: LiveFeedPayload): string {
-  const marketAddress = typeof payload.marketAddress === 'string' ? payload.marketAddress : '';
-  const enabled = Boolean(payload.enabled);
-  const kind = payload.kind === 'sports-score' ? 'sports-score' : 'crypto-price';
-  if (kind === 'crypto-price') {
-    return JSON.stringify({
-      marketAddress,
-      enabled,
-      kind,
-      crypto: {
-        coingeckoId: typeof payload.crypto?.coingeckoId === 'string' ? payload.crypto.coingeckoId : '',
-        baseSymbol: typeof payload.crypto?.baseSymbol === 'string' ? payload.crypto.baseSymbol : '',
-        quoteSymbol: typeof payload.crypto?.quoteSymbol === 'string' ? payload.crypto.quoteSymbol : '',
-        vsCurrency: typeof payload.crypto?.vsCurrency === 'string' ? payload.crypto.vsCurrency : '',
-        metric: typeof payload.crypto?.metric === 'string' ? payload.crypto.metric : 'price',
-      },
-      sports: null,
-    });
-  }
-
-  return JSON.stringify({
-    marketAddress,
-    enabled,
-    kind,
-    crypto: null,
-    sports: {
-      eventId: typeof payload.sports?.eventId === 'string' ? payload.sports.eventId : '',
-      leagueName: typeof payload.sports?.leagueName === 'string' ? payload.sports.leagueName : '',
-      homeTeam: typeof payload.sports?.homeTeam === 'string' ? payload.sports.homeTeam : undefined,
-      awayTeam: typeof payload.sports?.awayTeam === 'string' ? payload.sports.awayTeam : undefined,
-      forceUpcoming: payload.sports?.forceUpcoming,
-    },
-  });
-}
-
 function resolveCorsOrigin(originHeader: unknown): string | null {
   if (process.env.NODE_ENV !== 'production') return '*';
   if (typeof originHeader !== 'string' || !originHeader) return null;
@@ -334,7 +299,7 @@ export default async function handler(req: any, res: any) {
     res.setHeader('Vary', 'Origin');
   }
   res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, X-Wallet-Address, X-Timestamp, X-Signature');
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
 
   if (req.method === 'OPTIONS') return res.status(200).json({ ok: true });
