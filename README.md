@@ -134,6 +134,9 @@ Bitcoin (BTC), Ethereum (ETH), Solana (SOL), Binance Coin (BNB), Ripple (XRP), D
 
 ## Recent Updates
 
+- Fixed live-feed-suggest to parse JSON body before extractSignedHeaders to read timestamp correctly
+- Fixed getMarketStage in live-market to propagate RPC/provider errors instead of swallowing them
+- Extracted normalizeSportsStatus to shared _sports-status.ts module to eliminate duplication
 - Fixed CORS preflight in live-feed-suggest to allow signing headers (X-Wallet-Address, X-Timestamp, X-Signature)
 - Fixed market stage handling in live-market to fail closed on RPC/read failures
 - Added missing environment variable exports (CORS_ALLOWED_ORIGINS, MONGO_URI, MONGO_DB_NAME, RPC_URL, FACTORY_ADDRESS) in live-feed-config

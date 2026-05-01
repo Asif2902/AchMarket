@@ -1,6 +1,7 @@
 import { getAddress, Contract, JsonRpcProvider } from 'ethers';
 import { MongoClient, type Collection } from 'mongodb';
 import { sportsDbUrl, teamsMatch } from './_sportsdb.js';
+import { normalizeSportsStatus } from './_sports-status';
 
 const LIVE_FEEDS_COLLECTION = 'live_feeds';
 const MONGO_URI = process.env.MONGO_URI;
@@ -179,19 +180,15 @@ async function getMarketStage(marketAddress: string): Promise<number | null> {
     return cached.stage;
   }
 
-  try {
-    const market = new Contract(marketAddress, MARKET_STAGE_ABI, getReadProvider());
-    const stageValue = Number(await market.stage());
-    if (!Number.isFinite(stageValue)) return null;
-    marketStageCache.set(marketAddress, {
-      stage: stageValue,
-      expiresAt: now + MARKET_STAGE_CACHE_MS,
-    });
-    cleanupStageCache();
-    return stageValue;
-  } catch {
-    return null;
-  }
+  const market = new Contract(marketAddress, MARKET_STAGE_ABI, getReadProvider());
+  const stageValue = Number(await market.stage());
+  if (!Number.isFinite(stageValue)) return null;
+  marketStageCache.set(marketAddress, {
+    stage: stageValue,
+    expiresAt: now + MARKET_STAGE_CACHE_MS,
+  });
+  cleanupStageCache();
+  return stageValue;
 }
 
 async function getCollection(): Promise<Collection<LiveFeedDoc>> {
@@ -312,29 +309,7 @@ function buildConfiguredResponse(snapshot: CachedLiveSnapshot, stale: boolean): 
   };
 }
 
-function normalizeSportsStatus(statusRaw: string): { status: string; statusLabel: string } {
-  const clean = statusRaw.trim();
-  const lower = clean.toLowerCase();
 
-  if (!clean) return { status: 'unknown', statusLabel: 'Status unavailable' };
-  if (lower.includes('in play') || lower.includes('live') || lower.includes('half') || lower.includes('extra')) {
-    return { status: 'live', statusLabel: clean };
-  }
-  if (lower.includes('finished') || lower.includes('full time') || lower.includes('ft')) {
-    return { status: 'finished', statusLabel: clean };
-  }
-  if (lower.includes('not started') || lower.includes('scheduled') || lower.includes('ns')) {
-    return { status: 'scheduled', statusLabel: clean };
-  }
-  if (lower.includes('postponed')) {
-    return { status: 'postponed', statusLabel: clean };
-  }
-  if (lower.includes('cancelled') || lower.includes('abandoned')) {
-    return { status: 'cancelled', statusLabel: clean };
-  }
-
-  return { status: 'unknown', statusLabel: clean };
-}
 
 async function fetchCryptoSnapshot(config: LiveFeedDoc): Promise<CachedLiveSnapshot> {
   if (!config.crypto) throw new Error('Crypto feed config is missing.');

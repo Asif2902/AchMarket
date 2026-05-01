@@ -1,5 +1,6 @@
 import { sportsDbUrl, teamsMatch } from './_sportsdb.js';
 import { extractSignedHeaders, verifySignedMessage } from './_signature';
+import { normalizeSportsStatus } from './_sports-status';
 
 const CORS_ALLOWED_ORIGINS = (process.env.CORS_ALLOWED_ORIGINS ?? '')
   .split(',')
@@ -123,30 +124,6 @@ function uniqueStrings(values: string[]): string[] {
     out.push(value.trim());
   }
   return out;
-}
-
-function normalizeSportsStatus(statusRaw: string): { status: string; statusLabel: string } {
-  const clean = (statusRaw || '').trim();
-  const lower = clean.toLowerCase();
-
-  if (!clean) return { status: 'unknown', statusLabel: 'Status unavailable' };
-  if (lower.includes('in play') || lower.includes('live') || lower.includes('half') || lower.includes('extra')) {
-    return { status: 'live', statusLabel: clean };
-  }
-  if (lower.includes('finished') || lower.includes('full time') || lower.includes('ft')) {
-    return { status: 'finished', statusLabel: clean };
-  }
-  if (lower.includes('not started') || lower.includes('scheduled') || lower.includes('ns')) {
-    return { status: 'scheduled', statusLabel: clean };
-  }
-  if (lower.includes('postponed')) {
-    return { status: 'postponed', statusLabel: clean };
-  }
-  if (lower.includes('cancelled') || lower.includes('abandoned')) {
-    return { status: 'cancelled', statusLabel: clean };
-  }
-
-  return { status: 'unknown', statusLabel: clean };
 }
 
 const MAX_TITLE_LEN = 300;
@@ -759,6 +736,16 @@ export default async function handler(req: any, res: any) {
     let signature = '';
     let signed = false;
 
+    let rawBody = req.body;
+    if (typeof rawBody === 'string') {
+      try {
+        rawBody = JSON.parse(rawBody);
+        req.body = rawBody;
+      } catch {
+        return res.status(400).json({ error: 'Invalid JSON' });
+      }
+    }
+
     try {
       const extracted = extractSignedHeaders(req);
       address = extracted.address;
@@ -775,15 +762,6 @@ export default async function handler(req: any, res: any) {
         signed = false;
       } else {
         return res.status(400).json({ error: headerErr?.message || 'Invalid signing headers' });
-      }
-    }
-
-    let rawBody = req.body;
-    if (typeof rawBody === 'string') {
-      try {
-        rawBody = JSON.parse(rawBody);
-      } catch {
-        return res.status(400).json({ error: 'Invalid JSON' });
       }
     }
 
