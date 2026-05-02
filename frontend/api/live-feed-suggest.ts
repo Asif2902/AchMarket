@@ -1,7 +1,7 @@
 import { sportsDbUrl, teamsMatch } from './_sportsdb.js';
-import { extractSignedHeaders, verifySignedMessage } from './_signature';
+import { extractSignedHeaders, verifySignedMessage } from './_signature.js';
 import { normalizeSportsStatus } from './_sports-status.js';
-import { searchCoinGeckoAssets, type CoinGeckoSearchCandidate } from './_coingecko';
+import { searchCoinGeckoAssets, type CoinGeckoSearchCandidate } from './_coingecko.js';
 
 const CORS_ALLOWED_ORIGINS = (process.env.CORS_ALLOWED_ORIGINS ?? '')
   .split(',')

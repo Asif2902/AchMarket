@@ -1,6 +1,6 @@
 import { hashMessage, getAddress, Contract, JsonRpcProvider } from 'ethers';
 import { MongoClient, type Collection } from 'mongodb';
-import { extractSignedHeaders, verifySignedMessage, SIG_VALIDITY_MS, serializeLiveFeedPayload } from './_signature';
+import { extractSignedHeaders, verifySignedMessage, SIG_VALIDITY_MS, serializeLiveFeedPayload } from './_signature.js';
 
 const LIVE_FEEDS_COLLECTION = 'live_feeds';
 

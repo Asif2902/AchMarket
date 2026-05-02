@@ -1,4 +1,4 @@
-import { searchCoinGeckoAssets } from './_coingecko';
+import { searchCoinGeckoAssets } from './_coingecko.js';
 
 const CORS_ALLOWED_ORIGINS = (process.env.CORS_ALLOWED_ORIGINS ?? '')
   .split(',')
