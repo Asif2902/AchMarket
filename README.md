@@ -143,6 +143,9 @@ We are not building an "order book with a fallback." We are building **an AMM th
 
 ### 🔧 Core Architecture
 - **MarketRouter (The Brain):** Single entry point for ALL trades. Owns execution.
+  - `getBestExecution(amount)`: View function utilized by the UI for trade simulation.
+  - `previewTrade()`: A dry-run of the router logic allowing safe simulation before execution.
+  - *Optimization:* Cache LMSR state locally during the execution loop to avoid repeated expensive storage reads.
 - **LMSRMarket:** Existing contract remains unchanged. Core math is not touched.
 - **OrderBook:** A basic CLOB utilizing `mapping(price => OrderQueue)` with FIFO ordering per price level.
 - **Atomic Execution:** Router executes Order Book first, falling back to LMSR in a single transaction.
@@ -150,33 +153,53 @@ We are not building an "order book with a fallback." We are building **an AMM th
 ### ⚙️ Routing Logic
 - **Compare:** Best OB price vs LMSR price.
 - **The Loop:** Take cheaper source -> Execute small chunk -> Update price -> Repeat.
+  - **Chunk Sizing:** Defined fixed chunk sizes (e.g., small share increments) initially.
+  - **Recalculation:** Always recalculate the LMSR price *after* each chunk is filled.
+- **Termination Conditions:** The loop ends when `amount filled` is reached OR `maxHops` is hit.
 - **Priority Rule:** If prices are equal, the Order Book is always preferred to encourage peer-to-peer liquidity.
-- **Hard Fallback:** If the Order Book fails or is empty, the LMSR must always execute. No trade should fail if the LMSR can fill it.
+- **Hard Fallback:** If the Order Book fails, is empty, or the loop becomes inefficient, the remaining amount immediately shortcuts to a direct LMSR fill. No trade should fail if the LMSR can fill it.
 
 ### 📦 Order Book (Phase 1 Simple)
 - **Functions:** `placeLimitOrder(price, amount)`, `cancelOrder(orderId)`.
+- **View Helpers:** `getBestBid()` and `getBestAsk()`.
+- **Tracking:** Maintain total liquidity metrics per price level.
+- **Safety:** Map `orderId -> owner` to prevent unauthorized cancellations.
 - **Enforcements:** Minimum order sizes (anti-dust) and strict Tick sizes (e.g., $0.01).
-- **Storage:** Price levels only. No complex sorting logic on-chain yet.
+- **Optimization:** Prevent duplicate storage reads to save gas early in the implementation.
 
 ### ⚠️ Safety & Edge Cases
 - **Loop Bounds:** Enforce `maxHops` to prevent gas limit explosions and infinite loops. Support partial fills.
 - **Dust Prevention:** Reject orders below a minimum threshold. Reject limit orders placed completely out of range of the current LMSR price.
+- **Circuit Breaker:** Implement an emergency pause for the Order Book in the event of an exploit, instantly defaulting all routing strictly to the LMSR.
+- **Price Bounds:** Enforce a maximum price deviation from the LMSR (e.g., ±X%) for limit orders.
+- **Order Expiry:** Support optional expiry timestamps for limit orders.
+- **Security:** Ensure strict Reentrancy protection on the Router contract.
 - **MEV Protection:** Enforce global `minSharesOut` and `maxSlippage` checks that calculate across *both* the OB and LMSR execution paths.
 
-### 💰 Liquidity & Arbitrage Strategy
+### 💰 Economic & Liquidity Controls
 - **Default State:** All markets launch with LMSR active. The OB sits on top as optional liquidity.
-- **Incentives:** Encourage OB usage via better prices and lower fees for limit orders.
-- **Arbitrage:** Allow natural arbitrage between the OB and LMSR (e.g., buy OB at $0.55, sell LMSR at $0.60). Do not try to eliminate it; control it via fees and tuning the LMSR `b` parameter.
+- **Fee Structure:** Define a distinct Maker fee (e.g., 0% or very low) and Taker fee.
+- **Fee Routing:** Implement specific fee split logic depending on the execution path (OB vs LMSR).
+- **Arbitrage Soft Limits:** Enforce maximum trade sizes per transaction to prevent arbitrageurs from entirely draining the LMSR in a single block.
+- **Tuning:** Actively monitor the OB ↔ LMSR spread and dynamically tune the LMSR `b` parameter (do not leave it static). If LMSR is being drained, increase `b`. If OB is unused, decrease `b`. Optionally, apply a small fee on the LMSR side to reduce pure extraction.
 
 ### 🖥️ UI Strategy
-- **Default View:** Hide the complexity. Users simply see "Best Price" and "You will receive X shares."
-- **Advanced Mode:** Expose order book depth, estimated output across routing paths, and slippage warnings.
+- **Default View:** Hide the complexity. Users simply see "Best Price" and "You will receive X shares." Include trade simulations before confirming.
+- **Advanced Mode:** Expose the "Price Source" (OB / LMSR / Mixed), order book depth, estimated output across routing paths, and slippage warnings.
+- **Transparency:** Clearly warn users when partial fills are a possibility.
 
 ### 🚀 Phased Implementation
-- **Phase 1 (MVP):** Deploy Router, Basic Order Book (limit/cancel), simple routing (OB -> LMSR). No fancy optimization yet.
-- **Phase 2 (Execution):** Loop execution (chunk-based), dynamic LMSR price recalculation, gas optimizations, and strict slippage enforcement.
-- **Phase 3 (Incentives):** Fee rebates for makers, improving OB liquidity depth, and tuning LMSR `b` parameters based on usage metrics.
-- **Phase 4 (Advanced):** Smart routing optimization (better chunk sizing, binary search), cross-market arbitrage tools, and advanced analytics UI.
+- **Phase 1 (MVP):** Deploy Router, Basic Order Book (limit/cancel), simple routing (OB -> LMSR). Add `previewTrade()` and best price getters.
+- **Phase 2 (Execution):** Loop execution (chunk-based), dynamic LMSR price recalculation, strict slippage enforcement. Add chunk size tuning config, gas usage tracking, and the fail-safe shortcut to LMSR-only if the loop fails.
+- **Phase 3 (Incentives):** Launch the Maker incentives dashboard, liquidity depth metrics, and active spread monitoring.
+- **Phase 4 (Advanced):** Implement binary search for optimal LMSR chunk sizing, off-chain indexing for lightning-fast OB UI, and explore optional off-chain matching with on-chain settlement.
+
+### ❗ Final Critical Rules
+1. **Router** is the only execution authority.
+2. **LMSR** must always succeed.
+3. **Order Book** must never block execution.
+4. **All trades** are atomic or safely partially filled.
+5. **Pricing** is always user-protected (slippage enforced globally).
 
 ## Recent Updates
 
