@@ -132,6 +132,52 @@ Bitcoin (BTC), Ethereum (ETH), Solana (SOL), Binance Coin (BNB), Ripple (XRP), D
 - Tailwind CSS
 - ethers.js
 
+## Roadmap: Next-Generation Hybrid Engine (AMM Optimized by Order Book)
+
+We are upgrading our trading engine to a **Permanent Hybrid Model**. Leveraging our L1's high TPS and sub-second block times (< 0.5s), we will introduce a fully on-chain Central Limit Order Book (CLOB) to run *alongside* our existing LMSR. 
+
+**The Core Mental Model:** 
+We are not building an "order book with a fallback." We are building **an AMM that opportunistically upgrades trades using an order book.**
+*   **LMSR (The Safety Net):** Provides our always-on baseline liquidity, continuous pricing, and instant execution.
+*   **CLOB (The Optimizer):** Sits in front of the LMSR to offer price improvement, tighter spreads, and better capital efficiency.
+
+### 🔧 Core Architecture
+- **MarketRouter (The Brain):** Single entry point for ALL trades. Owns execution.
+- **LMSRMarket:** Existing contract remains unchanged. Core math is not touched.
+- **OrderBook:** A basic CLOB utilizing `mapping(price => OrderQueue)` with FIFO ordering per price level.
+- **Atomic Execution:** Router executes Order Book first, falling back to LMSR in a single transaction.
+
+### ⚙️ Routing Logic
+- **Compare:** Best OB price vs LMSR price.
+- **The Loop:** Take cheaper source -> Execute small chunk -> Update price -> Repeat.
+- **Priority Rule:** If prices are equal, the Order Book is always preferred to encourage peer-to-peer liquidity.
+- **Hard Fallback:** If the Order Book fails or is empty, the LMSR must always execute. No trade should fail if the LMSR can fill it.
+
+### 📦 Order Book (Phase 1 Simple)
+- **Functions:** `placeLimitOrder(price, amount)`, `cancelOrder(orderId)`.
+- **Enforcements:** Minimum order sizes (anti-dust) and strict Tick sizes (e.g., $0.01).
+- **Storage:** Price levels only. No complex sorting logic on-chain yet.
+
+### ⚠️ Safety & Edge Cases
+- **Loop Bounds:** Enforce `maxHops` to prevent gas limit explosions and infinite loops. Support partial fills.
+- **Dust Prevention:** Reject orders below a minimum threshold. Reject limit orders placed completely out of range of the current LMSR price.
+- **MEV Protection:** Enforce global `minSharesOut` and `maxSlippage` checks that calculate across *both* the OB and LMSR execution paths.
+
+### 💰 Liquidity & Arbitrage Strategy
+- **Default State:** All markets launch with LMSR active. The OB sits on top as optional liquidity.
+- **Incentives:** Encourage OB usage via better prices and lower fees for limit orders.
+- **Arbitrage:** Allow natural arbitrage between the OB and LMSR (e.g., buy OB at $0.55, sell LMSR at $0.60). Do not try to eliminate it; control it via fees and tuning the LMSR `b` parameter.
+
+### 🖥️ UI Strategy
+- **Default View:** Hide the complexity. Users simply see "Best Price" and "You will receive X shares."
+- **Advanced Mode:** Expose order book depth, estimated output across routing paths, and slippage warnings.
+
+### 🚀 Phased Implementation
+- **Phase 1 (MVP):** Deploy Router, Basic Order Book (limit/cancel), simple routing (OB -> LMSR). No fancy optimization yet.
+- **Phase 2 (Execution):** Loop execution (chunk-based), dynamic LMSR price recalculation, gas optimizations, and strict slippage enforcement.
+- **Phase 3 (Incentives):** Fee rebates for makers, improving OB liquidity depth, and tuning LMSR `b` parameters based on usage metrics.
+- **Phase 4 (Advanced):** Smart routing optimization (better chunk sizing, binary search), cross-market arbitrage tools, and advanced analytics UI.
+
 ## Recent Updates
 
 - Added kind parity guard to cached snapshots in live-market to prevent serving incompatible payload types
