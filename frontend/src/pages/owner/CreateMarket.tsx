@@ -5,6 +5,7 @@ import { FACTORY_ADDRESS } from '../../config/network';
 import { FACTORY_ABI } from '../../config/abis';
 import ImageWithFallback from '../../components/ImageWithFallback';
 import ProbabilityBar from '../../components/ProbabilityBar';
+import CryptoAssetPicker from '../../components/CryptoAssetPicker';
 import { parseContractError, makeMarketSlug } from '../../utils/format';
 import { useDateTimePicker } from '../../hooks/useDateTimePicker';
 import { compressMarketImage } from '../../utils/marketImage';
@@ -17,6 +18,7 @@ import {
 } from '../../services/live';
 import type {
   LiveFeedConfigInput,
+  LiveCryptoSearchCandidate,
   LiveFeedSuggestionsResponse,
 } from '../../types/live';
 
@@ -270,6 +272,16 @@ export default function CreateMarket() {
     ? Boolean(feedCoingeckoId.trim() && feedBaseSymbol.trim() && feedQuoteSymbol.trim() && feedVsCurrency.trim())
     : Boolean(feedEventId.trim()));
 
+  const applyFeedCryptoCandidate = (candidate: LiveCryptoSearchCandidate) => {
+    setFeedKind('crypto-price');
+    setFeedCoingeckoId(candidate.id);
+    setFeedBaseSymbol(candidate.symbol.toUpperCase());
+    setFeedQuoteSymbol((feedQuoteSymbol.trim() || feedVsCurrency.trim() || 'usd').toUpperCase());
+    setFeedUserEdited(true);
+    setFeedDetectionHint(`Selected ${candidate.name} (${candidate.symbol.toUpperCase()}) from CoinGecko.`);
+    setFeedDetectionError('');
+  };
+
   const detectFeedFromDraft = async () => {
     if (!title.trim() || !actualCategory.trim()) return;
     if (feedUserEdited) return;
@@ -362,7 +374,7 @@ export default function CreateMarket() {
   }, [title, actualCategory, description, outcomes, feedUserEdited]);
 
   useEffect(() => {
-    if (feedKind !== 'crypto-price' || !feedCoingeckoId.trim()) {
+    if (feedKind !== 'crypto-price' || !feedCoingeckoId.trim() || !feedVsCurrency.trim()) {
       setCryptoPricePreview(null);
       setCryptoPriceError(null);
       return;
@@ -372,7 +384,9 @@ export default function CreateMarket() {
     setCryptoPriceLoading(true);
     setCryptoPriceError(null);
 
-    fetch(`https://api.coingecko.com/api/v3/simple/price?ids=${encodeURIComponent(feedCoingeckoId.trim())}&vs_currencies=usd`)
+    const normalizedVsCurrency = feedVsCurrency.trim().toLowerCase();
+
+    fetch(`https://api.coingecko.com/api/v3/simple/price?ids=${encodeURIComponent(feedCoingeckoId.trim())}&vs_currencies=${encodeURIComponent(normalizedVsCurrency)}`)
       .then(async (res) => {
         if (cancelled) return;
         if (res.status === 429) {
@@ -380,7 +394,7 @@ export default function CreateMarket() {
         }
         if (!res.ok) throw new Error('Failed to fetch price');
         const data = await res.json();
-        const price = data[feedCoingeckoId.trim()]?.usd;
+        const price = data[feedCoingeckoId.trim()]?.[normalizedVsCurrency];
         if (price === undefined) throw new Error('Price not found');
         setCryptoPricePreview(typeof price === 'number' ? price : null);
       })
@@ -396,7 +410,7 @@ export default function CreateMarket() {
     return () => {
       cancelled = true;
     };
-  }, [feedKind, feedCoingeckoId]);
+  }, [feedKind, feedCoingeckoId, feedVsCurrency]);
 
   useEffect(() => {
     if (feedKind !== 'sports-score') {
@@ -1106,6 +1120,13 @@ export default function CreateMarket() {
 
             {feedKind === 'crypto-price' ? (
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <CryptoAssetPicker
+                  selectedId={feedCoingeckoId}
+                  selectedSymbol={feedBaseSymbol}
+                  selectedQuoteSymbol={feedQuoteSymbol}
+                  onSelect={applyFeedCryptoCandidate}
+                  onChange={() => setFeedUserEdited(true)}
+                />
                 <select
                   value={feedCryptoMetric}
                   onChange={(e) => { setFeedCryptoMetric(e.target.value as 'price' | 'market-cap' | 'volume-24h'); setFeedUserEdited(true); }}
@@ -1390,7 +1411,9 @@ export default function CreateMarket() {
                     ) : cryptoPricePreview !== null ? (
                       <p className="text-xs text-dark-300">
                         <span className="text-dark-500">Current {feedBaseSymbol} Price: </span>
-                        <span className="text-emerald-400 font-semibold">${cryptoPricePreview.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                        <span className="text-emerald-400 font-semibold">
+                          {cryptoPricePreview.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 8 })} {feedQuoteSymbol || feedVsCurrency.toUpperCase()}
+                        </span>
                       </p>
                     ) : null}
                   </div>

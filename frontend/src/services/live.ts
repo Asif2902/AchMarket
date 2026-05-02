@@ -3,6 +3,7 @@ import type { Signer } from 'ethers';
 import type {
   LiveFeedConfig,
   LiveFeedConfigInput,
+  LiveCryptoSearchResponse,
   LiveMarketDataResponse,
   LiveFeedSuggestionInput,
   LiveFeedSuggestionsResponse,
@@ -13,6 +14,7 @@ const LIVE_FEED_CONFIG_API_PATH = '/api/live-feed-config';
 const LIVE_MARKET_API_PATH = '/api/live-market';
 const LIVE_FEED_SUGGEST_API_PATH = '/api/live-feed-suggest';
 const LIVE_FEED_SEARCH_API_PATH = '/api/live-feed-search';
+const LIVE_TOKEN_SEARCH_API_PATH = '/api/live-token-search';
 const LIVE_CONFIG_BATCH_SIZE = 50;
 
 function serializeLiveFeedPayload(payload: LiveFeedConfigInput): string {
@@ -226,4 +228,14 @@ export async function lookupSportsEventById(eventId: string) {
   const body = await parseApiResponse<LiveSportsSearchResponse>(response);
   const candidates = Array.isArray(body.candidates) ? body.candidates : [];
   return candidates.length > 0 ? candidates[0] : null;
+}
+
+export async function searchCryptoAssets(query: string): Promise<LiveCryptoSearchResponse> {
+  const trimmed = query.trim();
+  if (!trimmed) {
+    return { query: '', candidates: [] };
+  }
+
+  const response = await fetch(withCacheBust(`${LIVE_TOKEN_SEARCH_API_PATH}?query=${encodeURIComponent(trimmed)}`));
+  return parseApiResponse<LiveCryptoSearchResponse>(response);
 }

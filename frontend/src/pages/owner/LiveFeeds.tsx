@@ -3,6 +3,7 @@ import { STAGE, STAGE_LABELS, STAGE_COLORS } from '../../config/network';
 import { useWallet } from '../../context/WalletContext';
 import { PageLoader } from '../../components/LoadingSpinner';
 import EmptyState from '../../components/EmptyState';
+import CryptoAssetPicker from '../../components/CryptoAssetPicker';
 import { useOwnerMarkets } from './OwnerMarketUtils';
 import {
   fetchLiveFeedConfigs,
@@ -14,6 +15,7 @@ import {
 import type {
   LiveFeedConfig,
   LiveFeedConfigInput,
+  LiveCryptoSearchCandidate,
   LiveFeedSuggestionsResponse,
 } from '../../types/live';
 import { parseContractError } from '../../utils/format';
@@ -316,6 +318,13 @@ function LiveFeedModal({ isOpen, market, existing, onClose, onSaved }: LiveFeedM
     setCryptoMetric(suggestion.metric || 'price');
   };
 
+  const applyCryptoCandidate = (candidate: LiveCryptoSearchCandidate) => {
+    setKind('crypto-price');
+    setCoingeckoId(candidate.id);
+    setBaseSymbol(candidate.symbol.toUpperCase());
+    setQuoteSymbol((quoteSymbol.trim() || vsCurrency.trim() || 'usd').toUpperCase());
+  };
+
   const applySportsSuggestion = (suggestion: LiveFeedSuggestionsResponse['sports']) => {
     if (!suggestion.detected) return;
     setKind('sports-score');
@@ -543,6 +552,12 @@ function LiveFeedModal({ isOpen, market, existing, onClose, onSaved }: LiveFeedM
 
           {kind === 'crypto-price' ? (
             <>
+              <CryptoAssetPicker
+                selectedId={coingeckoId}
+                selectedSymbol={baseSymbol}
+                selectedQuoteSymbol={quoteSymbol}
+                onSelect={applyCryptoCandidate}
+              />
               <div>
                 <label className="label">Metric</label>
                 <select

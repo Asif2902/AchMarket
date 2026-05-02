@@ -110,6 +110,20 @@ export interface LiveCryptoSuggestion {
   metric: LiveCryptoMetric;
 }
 
+export interface LiveCryptoSearchCandidate {
+  id: string;
+  symbol: string;
+  name: string;
+  thumb: string | null;
+  large?: string | null;
+  marketCapRank: number | null;
+}
+
+export interface LiveCryptoSearchResponse {
+  query: string;
+  candidates: LiveCryptoSearchCandidate[];
+}
+
 export interface LiveSportsSuggestionCandidate {
   eventId: string;
   leagueName: string;

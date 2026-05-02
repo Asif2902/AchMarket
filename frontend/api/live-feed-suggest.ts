@@ -1,6 +1,7 @@
 import { sportsDbUrl, teamsMatch } from './_sportsdb.js';
 import { extractSignedHeaders, verifySignedMessage } from './_signature';
 import { normalizeSportsStatus } from './_sports-status.js';
+import { searchCoinGeckoAssets, type CoinGeckoSearchCandidate } from './_coingecko';
 
 const CORS_ALLOWED_ORIGINS = (process.env.CORS_ALLOWED_ORIGINS ?? '')
   .split(',')
@@ -99,6 +100,46 @@ const SPORTS_STOP_WORDS = new Set([
   'team',
 ]);
 
+const CRYPTO_STOP_WORDS = new Set([
+  'will',
+  'the',
+  'and',
+  'for',
+  'with',
+  'from',
+  'have',
+  'has',
+  'had',
+  'this',
+  'that',
+  'what',
+  'when',
+  'where',
+  'price',
+  'market',
+  'crypto',
+  'altcoin',
+  'defi',
+  'token',
+  'coin',
+  'reach',
+  'hit',
+  'above',
+  'below',
+  'under',
+  'over',
+  'before',
+  'after',
+  'end',
+  'year',
+  'month',
+  'week',
+  'today',
+  'tomorrow',
+  'yes',
+  'no',
+]);
+
 function normalizeText(value: string): string {
   return value
     .toLowerCase()
@@ -176,7 +217,73 @@ function parseRequestBody(raw: unknown): SuggestRequest {
   return { title, category, description, outcomeLabels: trimmedLabels };
 }
 
-function detectCrypto(input: SuggestRequest) {
+function extractCryptoSearchTerms(input: SuggestRequest): string[] {
+  const out: string[] = [];
+  const push = (value: string) => {
+    const trimmed = value.trim();
+    if (!trimmed) return;
+    if (trimmed.length < 2 || trimmed.length > 40) return;
+    out.push(trimmed);
+  };
+
+  const rawSources = [input.title, ...input.outcomeLabels];
+  const combined = rawSources.join(' ');
+
+  for (const match of combined.matchAll(/\$([a-zA-Z0-9][a-zA-Z0-9-]{1,19})/g)) {
+    push(match[1]);
+  }
+
+  for (const match of combined.matchAll(/\b([A-Z][A-Z0-9]{1,9})\b/g)) {
+    push(match[1]);
+  }
+
+  const normalizedWords = combined
+    .toLowerCase()
+    .replace(/[^a-z0-9\s-]/g, ' ')
+    .split(/\s+/)
+    .map((word) => word.trim())
+    .filter((word) => word.length >= 3 && word.length <= 20 && !CRYPTO_STOP_WORDS.has(word) && !/^\d+$/.test(word));
+
+  for (const word of normalizedWords) {
+    push(word);
+  }
+
+  const deduped: string[] = [];
+  const seen = new Set<string>();
+  for (const item of out) {
+    const key = item.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    deduped.push(item);
+  }
+  return deduped.slice(0, 6);
+}
+
+function scoreDynamicCryptoCandidate(term: string, candidate: CoinGeckoSearchCandidate, categoryHint: boolean): number {
+  const normalizedTerm = term.trim().toLowerCase();
+  const normalizedSymbol = candidate.symbol.trim().toLowerCase();
+  const normalizedName = candidate.name.trim().toLowerCase();
+  const normalizedId = candidate.id.trim().toLowerCase();
+
+  let confidence = 0.52;
+  if (normalizedSymbol === normalizedTerm) confidence = 0.84;
+  else if (normalizedName === normalizedTerm) confidence = 0.78;
+  else if (normalizedId === normalizedTerm) confidence = 0.74;
+  else if (normalizedSymbol.startsWith(normalizedTerm)) confidence = 0.7;
+  else if (normalizedName.startsWith(normalizedTerm) || normalizedId.startsWith(normalizedTerm)) confidence = 0.66;
+  else if (normalizedName.includes(normalizedTerm) || normalizedId.includes(normalizedTerm)) confidence = 0.61;
+
+  if (candidate.marketCapRank !== null && candidate.marketCapRank <= 100) {
+    confidence += 0.03;
+  }
+  if (categoryHint) {
+    confidence += 0.04;
+  }
+
+  return Math.min(0.95, confidence);
+}
+
+async function detectCrypto(input: SuggestRequest) {
   const title = normalizeText(input.title);
   const category = normalizeText(input.category);
   const description = normalizeText(input.description);
@@ -259,10 +366,49 @@ function detectCrypto(input: SuggestRequest) {
         ? 'volume-24h'
         : 'price';
 
-  if (!best || best.confidence < 0.55) {
+  if (best && best.confidence >= 0.55) {
+    return {
+      detected: true,
+      confidence: best.confidence,
+      reason: best.reason,
+      coingeckoId: best.asset.id,
+      baseSymbol: best.asset.symbol,
+      quoteSymbol: 'USD',
+      vsCurrency: 'usd',
+      metric,
+    };
+  }
+
+  const searchTerms = extractCryptoSearchTerms(input);
+  let dynamicBest: {
+    candidate: CoinGeckoSearchCandidate;
+    confidence: number;
+    reason: string;
+  } | null = null;
+
+  for (const term of searchTerms) {
+    try {
+      const result = await searchCoinGeckoAssets(term, 5);
+      const candidate = result.candidates[0];
+      if (!candidate) continue;
+
+      const confidence = scoreDynamicCryptoCandidate(term, candidate, categoryHint);
+      if (!dynamicBest || confidence > dynamicBest.confidence) {
+        dynamicBest = {
+          candidate,
+          confidence,
+          reason: `Resolved ${candidate.symbol} from CoinGecko search for "${term}"`,
+        };
+      }
+    } catch {
+      continue;
+    }
+  }
+
+  if (!dynamicBest || dynamicBest.confidence < 0.6) {
     return {
       detected: false,
-      confidence: best?.confidence ?? 0,
+      confidence: Math.max(best?.confidence ?? 0, dynamicBest?.confidence ?? 0),
       reason: 'No strong crypto pair detected from market text.',
       coingeckoId: null,
       baseSymbol: null,
@@ -274,10 +420,10 @@ function detectCrypto(input: SuggestRequest) {
 
   return {
     detected: true,
-    confidence: best.confidence,
-    reason: best.reason,
-    coingeckoId: best.asset.id,
-    baseSymbol: best.asset.symbol,
+    confidence: dynamicBest.confidence,
+    reason: dynamicBest.reason,
+    coingeckoId: dynamicBest.candidate.id,
+    baseSymbol: dynamicBest.candidate.symbol,
     quoteSymbol: 'USD',
     vsCurrency: 'usd',
     metric,
@@ -815,10 +961,7 @@ export default async function handler(req: any, res: any) {
       return res.status(400).json({ error: 'title is required' });
     }
 
-    const [crypto, sports] = await Promise.all([
-      Promise.resolve(detectCrypto(input)),
-      detectSports(input),
-    ]);
+    const [crypto, sports] = await Promise.all([detectCrypto(input), detectSports(input)]);
 
     return res.status(200).json({ crypto, sports });
   } catch (err: any) {
