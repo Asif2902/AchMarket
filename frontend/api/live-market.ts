@@ -2,6 +2,20 @@ import { getAddress, Contract, JsonRpcProvider } from 'ethers';
 import { MongoClient, type Collection } from 'mongodb';
 import { sportsDbUrl, teamsMatch } from './_sportsdb.js';
 import { normalizeSportsStatus } from './_sports-status.js';
+import type {
+  CachedLiveSnapshot,
+  EffectiveStatus,
+  LiveConfiguredResponse,
+  LiveCryptoData,
+  LiveCryptoDoc,
+  LiveCryptoMetric,
+  LiveFeedDoc,
+  LiveFeedKind,
+  LiveMarketData,
+  LiveSportsData,
+  LiveSportsDoc,
+  LiveUnconfiguredResponse,
+} from '../src/types/live';
 
 const LIVE_FEEDS_COLLECTION = 'live_feeds';
 const MONGO_URI = process.env.MONGO_URI;
@@ -36,94 +50,6 @@ const STAGE_RESOLVED = 2;
 const STAGE_CANCELLED = 3;
 const STAGE_EXPIRED = 4;
 const MARKET_STAGE_CACHE_MS = 15_000;
-
-type LiveFeedKind = 'crypto-price' | 'sports-score';
-type LiveCryptoMetric = 'price' | 'market-cap' | 'volume-24h';
-type EffectiveStatus = 'upcoming' | 'live' | 'finished' | 'postponed' | 'cancelled' | 'unknown';
-
-interface LiveCryptoDoc {
-  coingeckoId: string;
-  baseSymbol: string;
-  quoteSymbol: string;
-  vsCurrency: string;
-  metric?: LiveCryptoMetric;
-}
-
-interface LiveSportsDoc {
-  eventId: string;
-  leagueName: string;
-  homeTeam?: string;
-  awayTeam?: string;
-  forceUpcoming?: boolean;
-}
-
-interface LiveFeedDoc {
-  marketAddress: string;
-  enabled: boolean;
-  kind: LiveFeedKind;
-  crypto: LiveCryptoDoc | null;
-  sports: LiveSportsDoc | null;
-  createdAt?: Date;
-  lastSnapshot?: CachedLiveSnapshot | null;
-  lastSnapshotAt?: Date | null;
-  updatedAt: Date;
-  updatedBy: string;
-}
-
-interface LiveCryptoData {
-  kind: 'crypto-price';
-  provider: string;
-  providerRef: string;
-  baseSymbol: string;
-  quoteSymbol: string;
-  metric: LiveCryptoMetric;
-  price: number;
-  change24h: number | null;
-  marketCap: number | null;
-  volume24h: number | null;
-  config?: LiveCryptoDoc;
-}
-
-interface LiveSportsData {
-  kind: 'sports-score';
-  provider: string;
-  providerRef: string;
-  leagueName: string;
-  homeTeam: string;
-  awayTeam: string;
-  homeScore: number | null;
-  awayScore: number | null;
-  status: string;
-  statusLabel: string;
-  kickoffAt: string | null;
-  config?: LiveSportsDoc;
-}
-
-type LiveMarketData = LiveCryptoData | LiveSportsData;
-
-interface CachedLiveSnapshot {
-  asOf: string;
-  fetchedAt: string;
-  nextSuggestedPollSeconds: number;
-  data: LiveMarketData;
-  effectiveStatus?: EffectiveStatus;
-}
-
-interface LiveConfiguredResponse {
-  configured: true;
-  stale: boolean;
-  asOf: string;
-  fetchedAt: string;
-  nextSuggestedPollSeconds: number;
-  data: LiveMarketData;
-  effectiveStatus?: EffectiveStatus;
-  refreshFailed?: boolean;
-}
-
-interface LiveUnconfiguredResponse {
-  configured: false;
-  reason?: string;
-}
 
 let indexesReady = false;
 let cachedClient: MongoClient | null = null;

@@ -990,10 +990,10 @@ export default function MarketDetail() {
                 </div>
                 {!liveConfigured ? (
                   <span className="badge bg-dark-750/80 text-dark-300 border-white/[0.08]">No Feed</span>
-                ) : liveConfigured?.effectiveStatus === 'upcoming' ? (
-                  <span className="badge bg-purple-500/15 text-purple-400 border-purple-500/25">Upcoming</span>
                 ) : (detail.stage === STAGE.Resolved || detail.stage === STAGE.Cancelled || detail.stage === STAGE.Expired) ? (
                   <span className="badge bg-cyan-500/15 text-cyan-300 border-cyan-500/25">Final Snapshot</span>
+                ) : liveConfigured?.effectiveStatus === 'upcoming' ? (
+                  <span className="badge bg-purple-500/15 text-purple-400 border-purple-500/25">Upcoming</span>
                 ) : liveConfigured?.stale ? (
                   <span className="badge bg-amber-500/15 text-amber-400 border-amber-500/25">Delayed</span>
                 ) : (

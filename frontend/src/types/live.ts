@@ -7,7 +7,7 @@ export interface LiveCryptoFeedConfig {
   baseSymbol: string;
   quoteSymbol: string;
   vsCurrency: string;
-  metric: LiveCryptoMetric;
+  metric?: LiveCryptoMetric;
 }
 
 export interface LiveSportsFeedConfig {
@@ -75,6 +75,33 @@ export interface LiveSportsMarketData {
 
 export type LiveMarketData = LiveCryptoMarketData | LiveSportsMarketData;
 
+export type LiveCryptoDoc = LiveCryptoFeedConfig;
+export type LiveSportsDoc = LiveSportsFeedConfig;
+
+export interface LiveFeedDoc {
+  marketAddress: string;
+  enabled: boolean;
+  kind: LiveFeedKind;
+  crypto: LiveCryptoDoc | null;
+  sports: LiveSportsDoc | null;
+  createdAt?: Date;
+  lastSnapshot?: CachedLiveSnapshot | null;
+  lastSnapshotAt?: Date | null;
+  updatedAt: Date;
+  updatedBy: string;
+}
+
+export type LiveCryptoData = LiveCryptoMarketData;
+export type LiveSportsData = LiveSportsMarketData;
+
+export interface CachedLiveSnapshot {
+  asOf: string;
+  fetchedAt: string;
+  nextSuggestedPollSeconds: number;
+  data: LiveMarketData;
+  effectiveStatus?: EffectiveStatus;
+}
+
 export interface LiveMarketDataConfiguredResponse {
   configured: true;
   stale: boolean;
@@ -90,6 +117,9 @@ export interface LiveMarketDataUnconfiguredResponse {
   configured: false;
   reason?: string;
 }
+
+export type LiveConfiguredResponse = LiveMarketDataConfiguredResponse;
+export type LiveUnconfiguredResponse = LiveMarketDataUnconfiguredResponse;
 
 export type LiveMarketDataResponse =
   | LiveMarketDataConfiguredResponse
