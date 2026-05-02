@@ -459,7 +459,10 @@ function normalizeMarketAddressInput(raw: unknown): string {
   }
 }
 
-async function resolveLiveData(marketAddress: string): Promise<LiveConfiguredResponse | LiveUnconfiguredResponse> {
+async function resolveLiveData(
+  marketAddress: string,
+  allowConfigRefreshRetry = true,
+): Promise<LiveConfiguredResponse | LiveUnconfiguredResponse> {
   const config = await getFeedConfig(marketAddress);
   if (!config) {
     return { configured: false, reason: 'This market does not use an external reference feed.' };
@@ -510,7 +513,7 @@ async function resolveLiveData(marketAddress: string): Promise<LiveConfiguredRes
     const fresh = await fetchSharedFreshSnapshot(config);
 
     const collection = await getCollection();
-    await collection.updateOne(
+    const updateResult = await collection.updateOne(
       { marketAddress, updatedAt: config.updatedAt },
       {
         $set: {
@@ -520,12 +523,22 @@ async function resolveLiveData(marketAddress: string): Promise<LiveConfiguredRes
       },
     );
 
+    if (updateResult.matchedCount === 0) {
+      if (!allowConfigRefreshRetry) {
+        const conflictErr: any = new Error('Live feed configuration changed during refresh. Retry request.');
+        conflictErr.statusCode = 409;
+        throw conflictErr;
+      }
+      return await resolveLiveData(marketAddress, false);
+    }
+
     return buildConfiguredResponse(fresh, false);
   } catch (fetchErr: any) {
     const errMsg = fetchErr?.message || '';
     // Don't fall back to cache for validation errors (wrong event data)
     const isValidationError = errMsg.includes('Event data mismatch') || errMsg.includes('eventId may be incorrect') || errMsg.includes('Sports event mismatch');
-    if (cachedSnapshot && !isValidationError) {
+    const isConfigRaceError = fetchErr?.statusCode === 409;
+    if (cachedSnapshot && !isValidationError && !isConfigRaceError) {
       return buildConfiguredResponse(cachedSnapshot, true);
     }
     throw fetchErr;
@@ -588,6 +601,10 @@ export default async function handler(req: any, res: any) {
     }
     // Note: Generic "invalid" phrases like "RPC_URL is invalid" will correctly get 500
 
+    console.error('live-market handler error', { code, message: msg, err });
+    if (code >= 500) {
+      return res.status(code).json({ error: 'Internal server error' });
+    }
     return res.status(code).json({ error: msg });
   }
 }

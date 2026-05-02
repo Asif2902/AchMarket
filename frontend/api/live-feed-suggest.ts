@@ -386,22 +386,24 @@ async function detectCrypto(input: SuggestRequest) {
     reason: string;
   } | null = null;
 
-  for (const term of searchTerms) {
-    try {
-      const result = await searchCoinGeckoAssets(term, 5);
-      const candidate = result.candidates[0];
-      if (!candidate) continue;
+  const searchResults = await Promise.allSettled(
+    searchTerms.map((term) => searchCoinGeckoAssets(term, 5)),
+  );
 
-      const confidence = scoreDynamicCryptoCandidate(term, candidate, categoryHint);
-      if (!dynamicBest || confidence > dynamicBest.confidence) {
-        dynamicBest = {
-          candidate,
-          confidence,
-          reason: `Resolved ${candidate.symbol} from CoinGecko search for "${term}"`,
-        };
-      }
-    } catch {
-      continue;
+  for (const [index, result] of searchResults.entries()) {
+    if (result.status !== 'fulfilled') continue;
+
+    const term = searchTerms[index];
+    const candidate = result.value.candidates[0];
+    if (!candidate) continue;
+
+    const confidence = scoreDynamicCryptoCandidate(term, candidate, categoryHint);
+    if (!dynamicBest || confidence > dynamicBest.confidence) {
+      dynamicBest = {
+        candidate,
+        confidence,
+        reason: `Resolved ${candidate.symbol} from CoinGecko search for "${term}"`,
+      };
     }
   }
 

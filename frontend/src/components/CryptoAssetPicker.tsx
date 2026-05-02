@@ -59,7 +59,10 @@ export default function CryptoAssetPicker({
         });
     }, 250);
 
-    return () => clearTimeout(timer);
+    return () => {
+      requestIdRef.current += 1;
+      clearTimeout(timer);
+    };
   }, [query]);
 
   return (
