@@ -23,6 +23,8 @@ export default function CryptoAssetPicker({
   const [candidates, setCandidates] = useState<LiveCryptoSearchCandidate[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [highlightedIndex, setHighlightedIndex] = useState(-1);
+  const listboxId = useId();
 
   useEffect(() => {
     const trimmed = query.trim();
@@ -43,6 +45,7 @@ export default function CryptoAssetPicker({
         .then((result) => {
           if (requestId !== requestIdRef.current) return;
           setCandidates(result.candidates);
+          setHighlightedIndex(-1);
           if (result.candidates.length === 0) {
             setError('No CoinGecko matches found for this search.');
           }
@@ -50,6 +53,7 @@ export default function CryptoAssetPicker({
         .catch((err) => {
           if (requestId !== requestIdRef.current) return;
           setCandidates([]);
+          setHighlightedIndex(-1);
           setError(err instanceof Error ? err.message : 'Failed to search CoinGecko tokens.');
         })
         .finally(() => {
@@ -71,10 +75,36 @@ export default function CryptoAssetPicker({
       <input
         id={inputId}
         type="text"
+        role="combobox"
+        aria-expanded={candidates.length > 0}
+        aria-controls={candidates.length > 0 ? listboxId : undefined}
+        aria-activedescendant={
+          highlightedIndex >= 0 && candidates[highlightedIndex]
+            ? `candidate-${candidates[highlightedIndex].id}`
+            : undefined
+        }
         value={query}
         onChange={(e) => {
           setQuery(e.target.value);
           onChange?.();
+        }}
+        onKeyDown={(e) => {
+          if (candidates.length === 0) return;
+          if (e.key === 'ArrowDown') {
+            e.preventDefault();
+            setHighlightedIndex((prev) => (prev < candidates.length - 1 ? prev + 1 : prev));
+          } else if (e.key === 'ArrowUp') {
+            e.preventDefault();
+            setHighlightedIndex((prev) => (prev > 0 ? prev - 1 : 0));
+          } else if (e.key === 'Enter' && highlightedIndex >= 0) {
+            e.preventDefault();
+            const selected = candidates[highlightedIndex];
+            onSelect(selected);
+            setQuery('');
+            setCandidates([]);
+            setHighlightedIndex(-1);
+            setError('');
+          }
         }}
         placeholder="Search by token name or symbol"
         className="input-field"
@@ -91,19 +121,33 @@ export default function CryptoAssetPicker({
         ) : error ? (
           <p className="px-3 py-3 text-xs text-amber-400">{error}</p>
         ) : candidates.length > 0 ? (
-          <div className="max-h-56 overflow-y-auto">
-            {candidates.map((candidate) => (
-              <button
-                key={candidate.id}
-                type="button"
-                onClick={() => {
-                  onSelect(candidate);
-                  setQuery('');
-                  setCandidates([]);
-                  setError('');
-                }}
-                className="flex w-full items-center gap-3 px-3 py-2 text-left hover:bg-white/[0.04] transition-colors"
-              >
+          <div
+            id={listboxId}
+            role="listbox"
+            aria-label="Crypto Asset Candidates"
+            className="max-h-56 overflow-y-auto"
+          >
+            {candidates.map((candidate, index) => {
+              const isSelected = index === highlightedIndex;
+              return (
+                <button
+                  key={candidate.id}
+                  id={`candidate-${candidate.id}`}
+                  role="option"
+                  aria-selected={isSelected}
+                  type="button"
+                  onClick={() => {
+                    onSelect(candidate);
+                    setQuery('');
+                    setCandidates([]);
+                    setHighlightedIndex(-1);
+                    setError('');
+                  }}
+                  onMouseEnter={() => setHighlightedIndex(index)}
+                  className={`flex w-full items-center gap-3 px-3 py-2 text-left transition-colors ${
+                    isSelected ? 'bg-white/[0.08]' : 'hover:bg-white/[0.04]'
+                  }`}
+                >
                 {candidate.thumb ? (
                   <img src={candidate.thumb} alt="" className="h-7 w-7 rounded-full bg-white/5 object-cover" />
                 ) : (
@@ -119,7 +163,8 @@ export default function CryptoAssetPicker({
                   {candidate.marketCapRank !== null ? `#${candidate.marketCapRank}` : 'Unranked'}
                 </span>
               </button>
-            ))}
+            );
+          })}
           </div>
         ) : (
           <p className="px-3 py-3 text-xs text-dark-500">

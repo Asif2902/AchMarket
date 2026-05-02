@@ -477,9 +477,10 @@ async function resolveLiveData(
 
   const cachedSnapshot = config.lastSnapshot || null;
   const cachedAt = config.lastSnapshotAt instanceof Date ? config.lastSnapshotAt : null;
+  const isParityMatch = cachedSnapshot ? cachedSnapshot.data.kind === config.kind : false;
 
   if (marketIsClosed) {
-    if (cachedSnapshot) {
+    if (cachedSnapshot && isParityMatch) {
       const frozenSnapshot: CachedLiveSnapshot = {
         ...cachedSnapshot,
         nextSuggestedPollSeconds: CLOSED_MARKET_POLL_SECONDS,
@@ -492,7 +493,7 @@ async function resolveLiveData(
     };
   }
 
-  if (cachedSnapshot && cachedAt) {
+  if (cachedSnapshot && cachedAt && isParityMatch) {
     const ageSeconds = (Date.now() - cachedAt.getTime()) / 1000;
     if (ageSeconds < getMinRefreshSeconds(config.kind) && !isSnapshotStale(cachedSnapshot)) {
       return buildConfiguredResponse(cachedSnapshot, false);
@@ -500,7 +501,7 @@ async function resolveLiveData(
   }
 
   if (!marketIsLiveOrUnknown) {
-    if (cachedSnapshot) {
+    if (cachedSnapshot && isParityMatch) {
       return buildConfiguredResponse(cachedSnapshot, true);
     }
     return {
@@ -538,7 +539,7 @@ async function resolveLiveData(
     // Don't fall back to cache for validation errors (wrong event data)
     const isValidationError = errMsg.includes('Event data mismatch') || errMsg.includes('eventId may be incorrect') || errMsg.includes('Sports event mismatch');
     const isConfigRaceError = fetchErr?.statusCode === 409;
-    if (cachedSnapshot && !isValidationError && !isConfigRaceError) {
+    if (cachedSnapshot && isParityMatch && !isValidationError && !isConfigRaceError) {
       return buildConfiguredResponse(cachedSnapshot, true);
     }
     throw fetchErr;

@@ -844,18 +844,6 @@ async function detectSports(input: SuggestRequest) {
     };
   }
 
-  if (!teamPair) {
-    return {
-      detected: false,
-      confidence: 0,
-      reason: 'Could not determine teams from this market text.',
-      homeTeam: null,
-      awayTeam: null,
-      selectedEventId: null,
-      selectedLeagueName: null,
-      candidates,
-    };
-  }
 
   let confidence = titleTeams ? 0.82 : 0.66;
   if (categoryHint) confidence += 0.06;
