@@ -81,6 +81,7 @@ interface LiveCryptoData {
   change24h: number | null;
   marketCap: number | null;
   volume24h: number | null;
+  config?: LiveCryptoDoc;
 }
 
 interface LiveSportsData {
@@ -95,6 +96,7 @@ interface LiveSportsData {
   status: string;
   statusLabel: string;
   kickoffAt: string | null;
+  config?: LiveSportsDoc;
 }
 
 type LiveMarketData = LiveCryptoData | LiveSportsData;
@@ -362,6 +364,7 @@ async function fetchCryptoSnapshot(config: LiveFeedDoc): Promise<CachedLiveSnaps
       change24h,
       marketCap,
       volume24h,
+      config: config.crypto,
     },
   };
 }
@@ -439,6 +442,7 @@ async function fetchSportsSnapshot(config: LiveFeedDoc): Promise<CachedLiveSnaps
       status: status.status,
       statusLabel: status.statusLabel,
       kickoffAt,
+      config: config.sports,
     },
   };
 }
@@ -494,7 +498,41 @@ async function resolveLiveData(
 
   const cachedSnapshot = config.lastSnapshot || null;
   const cachedAt = config.lastSnapshotAt instanceof Date ? config.lastSnapshotAt : null;
-  const isParityMatch = cachedSnapshot ? cachedSnapshot.data.kind === config.kind : false;
+  
+  const isParityMatch = (() => {
+    if (!cachedSnapshot || cachedSnapshot.data.kind !== config.kind) return false;
+    
+    if (config.kind === 'crypto-price' && config.crypto && cachedSnapshot.data.kind === 'crypto-price') {
+      const c = config.crypto;
+      const dConfig = cachedSnapshot.data.config as typeof c | undefined;
+      if (dConfig) {
+        return c.coingeckoId === dConfig.coingeckoId &&
+               c.baseSymbol === dConfig.baseSymbol &&
+               c.quoteSymbol === dConfig.quoteSymbol &&
+               c.vsCurrency === dConfig.vsCurrency &&
+               (c.metric || 'price') === (dConfig.metric || 'price');
+      }
+      return c.coingeckoId === cachedSnapshot.data.providerRef && 
+             c.baseSymbol === cachedSnapshot.data.baseSymbol && 
+             c.quoteSymbol === cachedSnapshot.data.quoteSymbol && 
+             (c.metric || 'price') === cachedSnapshot.data.metric;
+    }
+    
+    if (config.kind === 'sports-score' && config.sports && cachedSnapshot.data.kind === 'sports-score') {
+      const c = config.sports;
+      const dConfig = cachedSnapshot.data.config as typeof c | undefined;
+      if (dConfig) {
+        return c.eventId === dConfig.eventId &&
+               c.leagueName === dConfig.leagueName &&
+               c.homeTeam === dConfig.homeTeam &&
+               c.awayTeam === dConfig.awayTeam &&
+               !!c.forceUpcoming === !!dConfig.forceUpcoming;
+      }
+      return c.eventId === cachedSnapshot.data.providerRef;
+    }
+    
+    return false;
+  })();
 
   if (marketIsClosed) {
     if (cachedSnapshot && isParityMatch) {

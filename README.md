@@ -121,7 +121,7 @@ Bitcoin (BTC), Ethereum (ETH), Solana (SOL), Binance Coin (BNB), Ripple (XRP), D
 ## Technology Stack
 
 ### Smart Contracts
-- Sol
+- Solidity
 - Hardhat
 - OpenZeppelin
 

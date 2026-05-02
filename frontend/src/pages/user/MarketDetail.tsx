@@ -550,7 +550,9 @@ export default function MarketDetail() {
         setLiveData(data);
         setLiveError(null);
         if (!isClosedStage) {
-          const next = data.configured ? Math.max(5, data.nextSuggestedPollSeconds || 15) : 30;
+          const next = data.configured 
+            ? (data.refreshFailed ? 30 : Math.max(5, data.nextSuggestedPollSeconds || 15)) 
+            : 30;
           schedule(next);
         }
       } catch (err) {

@@ -55,6 +55,7 @@ export interface LiveCryptoMarketData {
   change24h: number | null;
   marketCap: number | null;
   volume24h: number | null;
+  config?: LiveCryptoFeedConfig;
 }
 
 export interface LiveSportsMarketData {
@@ -69,6 +70,7 @@ export interface LiveSportsMarketData {
   status: string;
   statusLabel: string;
   kickoffAt: string | null;
+  config?: LiveSportsFeedConfig & { homeTeam?: string; awayTeam?: string; forceUpcoming?: boolean };
 }
 
 export type LiveMarketData = LiveCryptoMarketData | LiveSportsMarketData;
@@ -81,6 +83,7 @@ export interface LiveMarketDataConfiguredResponse {
   nextSuggestedPollSeconds: number;
   data: LiveMarketData;
   effectiveStatus?: EffectiveStatus;
+  refreshFailed?: boolean;
 }
 
 export interface LiveMarketDataUnconfiguredResponse {
