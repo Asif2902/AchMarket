@@ -134,6 +134,9 @@ Bitcoin (BTC), Ethereum (ETH), Solana (SOL), Binance Coin (BNB), Ripple (XRP), D
 
 ## Recent Updates
 
+- Added kind parity guard to cached snapshots in live-market to prevent serving incompatible payload types
+- Cleaned up unreachable code in live-feed-suggest team detection logic
+- Enhanced accessibility in CryptoAssetPicker with proper ARIA listbox semantics and keyboard navigation
 - Fixed error-to-HTTP mapping in live-feed-config to not misclassify server errors as 400
 - Replaced Promise.all with Promise.allSettled in live-feed-suggest for resilient fan-out
 - Fixed !teamPair branch to not auto-bind selectedEventId (review-only mode)
