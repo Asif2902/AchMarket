@@ -115,6 +115,7 @@ interface LiveConfiguredResponse {
   nextSuggestedPollSeconds: number;
   data: LiveMarketData;
   effectiveStatus?: EffectiveStatus;
+  refreshFailed?: boolean;
 }
 
 interface LiveUnconfiguredResponse {
@@ -124,6 +125,7 @@ interface LiveUnconfiguredResponse {
 
 let indexesReady = false;
 let cachedClient: MongoClient | null = null;
+let cachedClientPromise: Promise<MongoClient> | null = null;
 let cachedReadProvider: JsonRpcProvider | null = null;
 const marketStageCache = new Map<string, { stage: number; expiresAt: number }>();
 const inFlight = new Map<string, Promise<CachedLiveSnapshot>>();
@@ -212,23 +214,37 @@ async function getMongoClient(): Promise<MongoClient> {
       return cachedClient;
     } catch {
       try {
-        await cachedClient.close();
+        await cachedClient?.close();
       } catch {
         // ignore close errors
       }
       cachedClient = null;
+      cachedClientPromise = null;
       indexesReady = false;
     }
   }
 
-  cachedClient = new MongoClient(MONGO_URI, {
-    maxPoolSize: 4,
-    serverSelectionTimeoutMS: 10000,
-    connectTimeoutMS: 10000,
-  });
+  if (cachedClientPromise) {
+    return cachedClientPromise;
+  }
 
-  await cachedClient.connect();
-  return cachedClient;
+  cachedClientPromise = (async () => {
+    try {
+      const client = new MongoClient(MONGO_URI!, {
+        maxPoolSize: 4,
+        serverSelectionTimeoutMS: 10000,
+        connectTimeoutMS: 10000,
+      });
+      await client.connect();
+      cachedClient = client;
+      return client;
+    } catch (err) {
+      cachedClientPromise = null;
+      throw err;
+    }
+  })();
+
+  return cachedClientPromise;
 }
 
 async function getFeedConfig(marketAddress: string): Promise<LiveFeedDoc | null> {
@@ -297,7 +313,7 @@ function isSnapshotStale(snapshot: CachedLiveSnapshot): boolean {
   return ageSeconds > threshold;
 }
 
-function buildConfiguredResponse(snapshot: CachedLiveSnapshot, stale: boolean): LiveConfiguredResponse {
+function buildConfiguredResponse(snapshot: CachedLiveSnapshot, stale: boolean, refreshFailed?: boolean): LiveConfiguredResponse {
   return {
     configured: true,
     stale,
@@ -306,6 +322,7 @@ function buildConfiguredResponse(snapshot: CachedLiveSnapshot, stale: boolean): 
     nextSuggestedPollSeconds: snapshot.nextSuggestedPollSeconds,
     data: snapshot.data,
     effectiveStatus: snapshot.effectiveStatus,
+    ...(refreshFailed !== undefined ? { refreshFailed } : {}),
   };
 }
 
@@ -540,7 +557,7 @@ async function resolveLiveData(
     const isValidationError = errMsg.includes('Event data mismatch') || errMsg.includes('eventId may be incorrect') || errMsg.includes('Sports event mismatch');
     const isConfigRaceError = fetchErr?.statusCode === 409;
     if (cachedSnapshot && isParityMatch && !isValidationError && !isConfigRaceError) {
-      return buildConfiguredResponse(cachedSnapshot, true);
+      return buildConfiguredResponse(cachedSnapshot, true, true);
     }
     throw fetchErr;
   }
