@@ -345,23 +345,48 @@ function extractTeamsFromTitle(title: string): { home: string; away: string } | 
     /(.+?)\s*@\s*(.+)/i,
   ];
 
-  for (const pattern of patterns) {
-    const match = compact.match(pattern);
-    if (!match) continue;
-    let home, away;
-    if (pattern.source.includes('@')) {
-      home = cleanTeamName(match[2]);
-      away = cleanTeamName(match[1]);
-    } else {
-      home = cleanTeamName(match[1]);
-      away = cleanTeamName(match[2]);
-    }
-    if (home && away && home.toLowerCase() !== away.toLowerCase()) {
-      return { home, away };
+  const segments = splitTitleSegments(compact);
+
+  // First, try matching patterns on segments
+  for (const segment of segments) {
+    for (const pattern of patterns) {
+      const match = segment.match(pattern);
+      if (!match) continue;
+      let home, away;
+      if (pattern.source.includes('@')) {
+        home = cleanTeamName(match[2]);
+        away = cleanTeamName(match[1]);
+      } else {
+        home = cleanTeamName(match[1]);
+        away = cleanTeamName(match[2]);
+      }
+      if (home && away && home.toLowerCase() !== away.toLowerCase()) {
+        return { home, away };
+      }
     }
   }
 
-  const segments = splitTitleSegments(compact);
+  // If no match on segments, try on compact with leading qualifiers stripped
+  const stripped = compact.replace(/^[^:]+:\s*/, '');
+  if (stripped !== compact) {
+    for (const pattern of patterns) {
+      const match = stripped.match(pattern);
+      if (!match) continue;
+      let home, away;
+      if (pattern.source.includes('@')) {
+        home = cleanTeamName(match[2]);
+        away = cleanTeamName(match[1]);
+      } else {
+        home = cleanTeamName(match[1]);
+        away = cleanTeamName(match[2]);
+      }
+      if (home && away && home.toLowerCase() !== away.toLowerCase()) {
+        return { home, away };
+      }
+    }
+  }
+
+  // Fall back to the segment combination approach
   if (segments.length >= 2) {
     const first = pickBestTeamPhrase(segments[0]);
     const second = pickBestTeamPhrase(segments[1]);
@@ -606,19 +631,25 @@ async function detectSports(input: SuggestRequest) {
   if (teamPair) {
     const queries = buildSportsQueryVariants(input.title.trim(), teamPair);
 
-    const fetchedGroups = await Promise.all(
+    const settled = await Promise.allSettled(
       queries.map((query) => fetchSportsCandidatesByQuery(query, input, teamPair)),
     );
+    const fetchedGroups = settled
+      .filter((r): r is PromiseFulfilledResult<SportsCandidate[]> => r.status === 'fulfilled')
+      .map((r) => r.value);
 
     candidates = dedupeSportsCandidates(fetchedGroups.flat())
       .sort((a, b) => enrichSportsCandidateScore(b, teamPair) - enrichSportsCandidateScore(a, teamPair))
       .slice(0, 5);
   } else if (categoryHint && input.title.trim()) {
     const queries = buildSportsQueryVariants(input.title.trim(), null);
-    const fetchedGroups = await Promise.all(
+    const settled = await Promise.allSettled(
       queries.map((query) => fetchSportsCandidatesByQuery(query, input, null)),
     );
-    const titleOnlyCandidates = fetchedGroups.flat();
+    const titleOnlyCandidates = settled
+      .filter((r): r is PromiseFulfilledResult<SportsCandidate[]> => r.status === 'fulfilled')
+      .map((r) => r.value)
+      .flat();
     candidates = dedupeSportsCandidates(titleOnlyCandidates)
       .sort((a, b) => scoreSportsCandidate(b) - scoreSportsCandidate(a))
       .slice(0, 5);
@@ -653,15 +684,14 @@ async function detectSports(input: SuggestRequest) {
   }
 
   if (!teamPair && candidates.length > 0) {
-    const first = candidates[0];
     return {
       detected: true,
-      confidence: 0.58,
+      confidence: 0.3,
       reason: 'Found sports event candidates from market title. Review and confirm before saving.',
-      homeTeam: first.homeTeam,
-      awayTeam: first.awayTeam,
-      selectedEventId: first.eventId,
-      selectedLeagueName: first.leagueName,
+      homeTeam: null,
+      awayTeam: null,
+      selectedEventId: null,
+      selectedLeagueName: null,
       candidates,
     };
   }

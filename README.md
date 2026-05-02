@@ -134,6 +134,11 @@ Bitcoin (BTC), Ethereum (ETH), Solana (SOL), Binance Coin (BNB), Ripple (XRP), D
 
 ## Recent Updates
 
+- Fixed error-to-HTTP mapping in live-feed-config to not misclassify server errors as 400
+- Replaced Promise.all with Promise.allSettled in live-feed-suggest for resilient fan-out
+- Fixed !teamPair branch to not auto-bind selectedEventId (review-only mode)
+- Fixed extractTeamsFromTitle to try segments first and strip leading qualifiers
+- Expanded 503 error check in live-market to catch RPC/provider/network failures
 - Fixed live-feed-suggest to parse JSON body before extractSignedHeaders to read timestamp correctly
 - Fixed getMarketStage in live-market to propagate RPC/provider errors instead of swallowing them
 - Extracted normalizeSportsStatus to shared _sports-status.ts module to eliminate duplication

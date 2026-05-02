@@ -573,7 +573,17 @@ export default async function handler(req: any, res: any) {
       code = 404;
     } else if (lower.includes('timed out')) {
       code = 504;
-    } else if (lower.includes('mongo_uri') || lower.includes('enotfound')) {
+    } else if (
+      lower.includes('mongo_uri') ||
+      lower.includes('rpc_url') ||
+      lower.includes('provider') ||
+      lower.includes('connection') ||
+      lower.includes('network') ||
+      lower.includes('timeout') ||
+      lower.includes('econnrefused') ||
+      lower.includes('econnreset') ||
+      lower.includes('enotfound')
+    ) {
       code = 503;
     }
     // Note: Generic "invalid" phrases like "RPC_URL is invalid" will correctly get 500

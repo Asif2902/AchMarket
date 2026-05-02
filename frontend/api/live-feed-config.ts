@@ -365,8 +365,8 @@ export default async function handler(req: any, res: any) {
     if (lower.includes('expired') || lower.includes('signature')) code = 401;
     else if (lower.includes('owner')) code = 403;
     else if (lower.includes('unknown market')) code = 404;
-    else if (lower.includes('required') || lower.includes('invalid') || lower.includes('timestamp') || lower.includes('rpc_url')) code = 400;
-    else if (lower.includes('mongo_uri') || lower.includes('timeout') || lower.includes('enotfound')) code = 503;
+    else     if (lower.includes('required') || lower.includes('timestamp')) code = 400;
+    else if (lower.includes('mongo_uri') || lower.includes('rpc_url') || lower.includes('timeout') || lower.includes('enotfound')) code = 503;
     return res.status(code).json({ error: msg });
   }
 }
