@@ -557,6 +557,14 @@ export default function MarketDetail() {
         }
       } catch (err) {
         if (cancelled) return;
+        setLiveData((prev) => {
+          if (!prev?.configured) return prev;
+          return {
+            ...prev,
+            stale: true,
+            refreshFailed: true,
+          };
+        });
         const message = err instanceof Error ? err.message : 'Failed to load live reference data.';
         setLiveError(message);
         if (!isClosedStage) {
