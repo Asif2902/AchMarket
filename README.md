@@ -134,7 +134,7 @@ This list is sourced from the live feed asset mapping used by the app. The autho
 
 ## Roadmap: Next-Generation Hybrid Engine (AMM Optimized by Order Book)
 
-We are upgrading our trading engine to a **Permanent Hybrid Model**. Leveraging our L1's high TPS and sub-second block times (< 0.5s), we will introduce a fully on-chain Central Limit Order Book (CLOB) to run *alongside* our existing LMSR. 
+We will upgrading our trading engine to a **Permanent Hybrid Model**. Leveraging our L1's high TPS and sub-second block times (< 0.5s), we will introduce a fully on-chain Central Limit Order Book (CLOB) to run *alongside* our existing LMSR. 
 
 **The Core Mental Model:** 
 We are not building an "order book with a fallback." We are building **an AMM that opportunistically upgrades trades using an order book.**
