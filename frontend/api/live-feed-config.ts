@@ -72,7 +72,7 @@ export const CORS_ALLOWED_ORIGINS: string[] = (process.env.CORS_ALLOWED_ORIGINS 
 export const MONGO_URI: string = process.env.MONGO_URI || '';
 export const MONGO_DB_NAME: string = process.env.MONGO_DB_NAME || 'achmarket';
 export const RPC_URL: string = process.env.RPC_URL || 'https://arc-testnet.drpc.org/';
-export const FACTORY_ADDRESS: string = process.env.FACTORY_ADDRESS || '';
+export const FACTORY_ADDRESS: string = process.env.FACTORY_ADDRESS || '0xd7b122B12caCB299249f89be7F241a47f762f283';
 
 if (process.env.NODE_ENV === 'production') {
   if (!process.env.RPC_URL) console.error('RPC_URL is required in production.');
