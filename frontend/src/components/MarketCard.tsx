@@ -33,7 +33,7 @@ export default function MarketCard({ data, effectiveStatus }: Props) {
   const isResolved = data.stage === STAGE.Resolved;
   const isCancelled = data.stage === STAGE.Cancelled || data.stage === STAGE.Expired;
   const showUpcoming = effectiveStatus === 'upcoming';
-  const isTradingAllowed = !showUpcoming && (isActive || isSuspended);
+  const isTradingAllowed = isActive || isSuspended;
 
   const hasOutcomes = data.impliedProbabilitiesWad.length > 0;
   const rawLabel = hasOutcomes ? (data.outcomeLabels[0] ?? '') : '';
@@ -143,7 +143,9 @@ export default function MarketCard({ data, effectiveStatus }: Props) {
               <span className="font-medium">{data.participants}</span>
             </div>
             <div className="flex items-center gap-1.5 text-[11px]">
-              {isTradingAllowed ? (
+              {showUpcoming ? (
+                <span className="text-purple-400">Upcoming</span>
+              ) : isTradingAllowed ? (
                 <>
                   <svg className="w-2.5 h-2.5 text-white/60" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />

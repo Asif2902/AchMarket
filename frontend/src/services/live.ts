@@ -179,7 +179,7 @@ export async function saveLiveFeedConfig(
       address: walletAddress,
       timestamp,
       signature,
-      payload: sanitizedPayload,
+      serializedPayload: serializeLiveFeedPayload(sanitizedPayload),
     }),
   });
 

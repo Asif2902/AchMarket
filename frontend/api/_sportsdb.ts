@@ -1,4 +1,11 @@
-const SPORTSDB_API_KEY = process.env.THE_SPORTS_DB_API_KEY?.trim() || '123';
+const SPORTSDB_API_KEY = (() => {
+  const raw = process.env.THE_SPORTS_DB_API_KEY?.trim() || '';
+  if (raw) return raw;
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error('THE_SPORTS_DB_API_KEY is required in production. Configure a non-demo SportsDB API key.');
+  }
+  return '123';
+})();
 const SPORTSDB_BASE_URL = `https://www.thesportsdb.com/api/v1/json/${SPORTSDB_API_KEY}`;
 
 export function sportsDbUrl(path: string): string {

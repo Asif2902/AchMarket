@@ -107,7 +107,7 @@ export default function CreateMarket() {
   const [showConfirmDialog, setShowConfirmDialog] = useState(false);
 
   const [submitting, setSubmitting] = useState(false);
-  const [txResult, setTxResult] = useState<{ type: 'success' | 'error'; text: string; market?: string; marketId?: string } | null>(null);
+  const [txResult, setTxResult] = useState<{ type: 'success' | 'error'; text: string; market?: string; marketId?: string; marketTitle?: string } | null>(null);
   const imageFileInputRef = useRef<HTMLInputElement | null>(null);
   const latestImagePreviewRef = useRef<string | null>(null);
   const latestImageUploadKeyRef = useRef('');
@@ -115,6 +115,7 @@ export default function CreateMarket() {
   const signerRef = useRef(signer);
   const keepUploadedImageOnCloseRef = useRef(false);
   const feedDetectRequestIdRef = useRef(0);
+  const feedSearchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const submittingRef = useRef(false);
 
   latestImageUploadKeyRef.current = imageUploadKey;
@@ -284,7 +285,6 @@ export default function CreateMarket() {
 
   const detectFeedFromDraft = async () => {
     if (!title.trim() || !actualCategory.trim()) return;
-    if (feedUserEdited) return;
 
     feedDetectRequestIdRef.current += 1;
     const requestId = feedDetectRequestIdRef.current;
@@ -364,6 +364,7 @@ export default function CreateMarket() {
   useEffect(() => {
     const timer = setTimeout(() => {
       if (!title.trim() || !actualCategory.trim()) return;
+      if (feedUserEdited) return;
       void detectFeedFromDraft();
     }, 500);
     return () => {
@@ -435,32 +436,42 @@ export default function CreateMarket() {
     }
 
     let cancelled = false;
+    if (feedSearchTimerRef.current) {
+      clearTimeout(feedSearchTimerRef.current);
+      feedSearchTimerRef.current = null;
+    }
     setFeedSportsSearchLoading(true);
     setFeedSportsSearchError('');
 
-    searchSportsEvents(query)
-      .then((result) => {
-        if (cancelled) return;
-        setFeedCandidates(result.candidates);
-        if (!feedEventIdRef.current && result.candidates[0]) {
-          setFeedEventId(result.candidates[0].eventId);
-          feedEventIdRef.current = result.candidates[0].eventId;
-          setFeedLeagueName(result.candidates[0].leagueName);
-          setFeedHomeTeam(result.candidates[0].homeTeam || '');
-          setFeedAwayTeam(result.candidates[0].awayTeam || '');
-        }
-      })
-      .catch((err) => {
-        if (cancelled) return;
-        const msg = err instanceof Error ? err.message : 'Failed to search sports events.';
-        setFeedSportsSearchError(msg);
-      })
-      .finally(() => {
-        if (!cancelled) setFeedSportsSearchLoading(false);
-      });
+    feedSearchTimerRef.current = setTimeout(() => {
+      searchSportsEvents(query)
+        .then((result) => {
+          if (cancelled) return;
+          setFeedCandidates(result.candidates);
+          if (!feedEventIdRef.current && result.candidates[0]) {
+            setFeedEventId(result.candidates[0].eventId);
+            feedEventIdRef.current = result.candidates[0].eventId;
+            setFeedLeagueName(result.candidates[0].leagueName);
+            setFeedHomeTeam(result.candidates[0].homeTeam || '');
+            setFeedAwayTeam(result.candidates[0].awayTeam || '');
+          }
+        })
+        .catch((err) => {
+          if (cancelled) return;
+          const msg = err instanceof Error ? err.message : 'Failed to search sports events.';
+          setFeedSportsSearchError(msg);
+        })
+        .finally(() => {
+          if (!cancelled) setFeedSportsSearchLoading(false);
+        });
+    }, 300);
 
     return () => {
       cancelled = true;
+      if (feedSearchTimerRef.current) {
+        clearTimeout(feedSearchTimerRef.current);
+        feedSearchTimerRef.current = null;
+      }
     };
   }, [feedSportsSearchQuery, feedKind]);
 
@@ -561,6 +572,7 @@ export default function CreateMarket() {
         text: 'Market created successfully!',
         market: marketAddr,
         marketId,
+        marketTitle: title.trim(),
       });
 
       if (marketAddr && feedEnabled && feedCanSave) {
@@ -605,6 +617,7 @@ export default function CreateMarket() {
             text: 'Market created and live feed attached successfully!',
             market: marketAddr,
             marketId,
+            marketTitle: title.trim(),
           });
         } catch (feedErr) {
           const feedMsg = parseContractError(feedErr);
@@ -613,6 +626,7 @@ export default function CreateMarket() {
             text: `Market created, but feed setup failed: ${feedMsg}`,
             market: marketAddr,
             marketId,
+            marketTitle: title.trim(),
           });
         } finally {
           setFeedSaving(false);
@@ -1343,7 +1357,7 @@ export default function CreateMarket() {
                   </p>
                   {txResult.marketId && (
                     <a
-                      href={`/market/${makeMarketSlug(Number(txResult.marketId), title)}`}
+                      href={`/market/${makeMarketSlug(Number(txResult.marketId), txResult.marketTitle || 'market')}`}
                       className="mt-2 inline-flex items-center gap-1 text-sm text-primary-400 hover:text-primary-300 font-medium"
                     >
                       View Market

@@ -241,7 +241,7 @@ function isSnapshotStale(snapshot: CachedLiveSnapshot): boolean {
   return ageSeconds > threshold;
 }
 
-function buildConfiguredResponse(snapshot: CachedLiveSnapshot, stale: boolean, refreshFailed?: boolean): LiveConfiguredResponse {
+function buildConfiguredResponse(snapshot: CachedLiveSnapshot, stale: boolean, refreshFailed?: boolean, finalSnapshot?: boolean): LiveConfiguredResponse {
   return {
     configured: true,
     stale,
@@ -251,6 +251,7 @@ function buildConfiguredResponse(snapshot: CachedLiveSnapshot, stale: boolean, r
     data: snapshot.data,
     effectiveStatus: snapshot.effectiveStatus,
     ...(refreshFailed !== undefined ? { refreshFailed } : {}),
+    ...(finalSnapshot !== undefined ? { finalSnapshot } : {}),
   };
 }
 
@@ -348,15 +349,8 @@ async function fetchSportsSnapshot(config: LiveFeedDoc): Promise<CachedLiveSnaps
 
   let effectiveStatus: EffectiveStatus | undefined;
 
-  // If forceUpcoming is set, show as upcoming only if match hasn't started yet
-  if (config.sports.forceUpcoming && status.status === 'scheduled' && kickoffAt) {
-    const kickoffTime = new Date(kickoffAt).getTime();
-    const now = Date.now();
-    effectiveStatus = kickoffTime > now ? 'upcoming' : 'live';
-  } else if (config.sports.forceUpcoming) {
-    // forceUpcoming is set but match is no longer scheduled (live/finished/etc.) - use actual status
-    // Map 'scheduled' to 'upcoming' since it's not a valid EffectiveStatus
-    effectiveStatus = status.status === 'scheduled' ? 'upcoming' : status.status as EffectiveStatus;
+  if (config.sports.forceUpcoming) {
+    effectiveStatus = 'upcoming';
   } else if (status.status === 'scheduled') {
     if (kickoffAt) {
       const kickoffTime = new Date(kickoffAt).getTime();
@@ -487,7 +481,7 @@ async function resolveLiveData(
         ...cachedSnapshot,
         nextSuggestedPollSeconds: CLOSED_MARKET_POLL_SECONDS,
       };
-      return buildConfiguredResponse(frozenSnapshot, true);
+      return buildConfiguredResponse(frozenSnapshot, true, undefined, true);
     }
     return {
       configured: false,

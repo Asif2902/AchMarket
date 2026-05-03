@@ -203,21 +203,31 @@ async function fetchTeamEvents(teamId: string): Promise<SportsCandidate[]> {
     sportsDbUrl(`eventslast.php?id=${encodeURIComponent(teamId)}`),
   ];
 
-  const responses = await Promise.all(
+  const settled = await Promise.allSettled(
     endpoints.map(async (endpoint) => {
-      try {
-        const json = await fetchJsonWithTimeout(endpoint);
-        const events = Array.isArray(json?.events)
-          ? json.events
-          : Array.isArray(json?.results)
-            ? json.results
-            : [];
-        return events;
-      } catch {
-        return [];
-      }
+      const json = await fetchJsonWithTimeout(endpoint);
+      const events = Array.isArray(json?.events)
+        ? json.events
+        : Array.isArray(json?.results)
+          ? json.results
+          : [];
+      return events;
     }),
   );
+
+  if (settled.every((result) => result.status === 'rejected')) {
+    const details = settled
+      .map((result, index) => result.status === 'rejected'
+        ? `${endpoints[index]}: ${result.reason instanceof Error ? result.reason.message : String(result.reason)}`
+        : null)
+      .filter(Boolean)
+      .join(' | ');
+    throw new Error(`SportsDB team event lookup failed for team ${teamId}. ${details}`);
+  }
+
+  const responses = settled
+    .filter((result): result is PromiseFulfilledResult<any[]> => result.status === 'fulfilled')
+    .map((result) => result.value);
 
   return responses.flat().map((event: any) => mapEventToCandidate(event, null)).filter((c): c is SportsCandidate => c !== null);
 }
@@ -353,11 +363,23 @@ export default async function handler(req: any, res: any) {
           .map((event: any) => mapEventToCandidate(event, expectedPair))
           .filter((item: SportsCandidate | null): item is SportsCandidate => item !== null);
       }),
-    ).then(results =>
-      results
+    ).then((results) => {
+      if (results.every((result) => result.status === 'rejected')) {
+        const endpoints = variants.slice(0, 3)
+          .map((variant) => sportsDbUrl(`searchevents.php?e=${encodeURIComponent(variant.replace(/\s+/g, '_'))}`));
+        const details = results
+          .map((result, index) => result.status === 'rejected'
+            ? `${endpoints[index]}: ${result.reason instanceof Error ? result.reason.message : String(result.reason)}`
+            : null)
+          .filter(Boolean)
+          .join(' | ');
+        throw new Error(`SportsDB event search failed. ${details}`);
+      }
+
+      return results
         .filter((r): r is PromiseFulfilledResult<SportsCandidate[]> => r.status === 'fulfilled')
-        .map(r => r.value)
-    );
+        .map(r => r.value);
+    });
 
     // Search by team IDs (more reliable)
     let teamGroupsPromise: Promise<SportsCandidate[]> | null = null;

@@ -114,9 +114,9 @@ npm run typecheck
 | `/api/live-feed-config` | GET/POST | Manage live feed configuration |
 | `/api/live-market` | GET | Get live market data and status |
 
-### Supported Crypto Assets
+### Currently Supported Crypto Assets
 
-Bitcoin (BTC), Ethereum (ETH), Solana (SOL), Binance Coin (BNB), Ripple (XRP), Dogecoin (DOGE), Cardano (ADA), Avalanche (AVAX), Toncoin (TON), Chainlink (LINK), Sui (SUI), Polkadot (DOT), Tron (TRX), Arbitrum (ARB), Optimism (OP)
+This list is sourced from the live feed asset mapping used by the app. The authoritative source is `frontend/src/config/liveCryptoAssets.ts`.
 
 ## Technology Stack
 

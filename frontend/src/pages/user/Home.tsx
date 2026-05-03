@@ -217,11 +217,13 @@ export default function Home() {
   }, [categoryFilter, markets, readProvider]);
 
   useEffect(() => {
+    let cancelled = false;
+
     const fetchLiveStatuses = async () => {
       const statuses: Record<string, EffectiveStatus> = {};
       const batchSize = 5;
-      for (let i = 0; i < markets.length; i += batchSize) {
-        const batch = markets.slice(i, i + batchSize);
+      for (let i = 0; i < paginated.length; i += batchSize) {
+        const batch = paginated.slice(i, i + batchSize);
         const promises = batch.map(async (market) => {
           try {
             const res = await fetch(`/api/live-market?marketAddress=${market.market}`);
@@ -235,13 +237,21 @@ export default function Home() {
         });
         await Promise.all(promises);
       }
-      setLiveStatuses(statuses);
+      if (!cancelled) {
+        setLiveStatuses(statuses);
+      }
     };
 
-    if (markets.length > 0 && !loading) {
-      fetchLiveStatuses();
+    if (paginated.length > 0 && !loading) {
+      void fetchLiveStatuses();
+    } else if (!loading) {
+      setLiveStatuses({});
     }
-  }, [markets, loading]);
+
+    return () => {
+      cancelled = true;
+    };
+  }, [paginated, loading]);
 
   const categories = getCategories(markets);
   const categoryCounts = useMemo(() => categories.map((cat) => ({
@@ -597,11 +607,13 @@ export default function Home() {
 }
 
 function MarketListItem({ data, effectiveStatus }: { data: MarketSummaryData; effectiveStatus?: EffectiveStatus }) {
-  const isActive = data.stage === STAGE.Active;
-  const isSuspended = data.stage === STAGE.Suspended;
-  const isTradingAllowed = isActive || isSuspended;
-  const isResolved = data.stage === STAGE.Resolved;
-  const isCancelled = data.stage === STAGE.Cancelled || data.stage === STAGE.Expired;
+  const showUpcoming = effectiveStatus === 'upcoming';
+  const stageSource = showUpcoming ? null : data.stage;
+  const isActive = stageSource === STAGE.Active;
+  const isSuspended = stageSource === STAGE.Suspended;
+  const isTradingAllowed = !showUpcoming && (isActive || isSuspended);
+  const isResolved = stageSource === STAGE.Resolved;
+  const isCancelled = stageSource === STAGE.Cancelled || stageSource === STAGE.Expired;
 
   return (
     <Link
@@ -623,11 +635,11 @@ function MarketListItem({ data, effectiveStatus }: { data: MarketSummaryData; ef
           />
           <div className="absolute top-1.5 left-1.5">
             <span className={`badge-sm ${
-              effectiveStatus === 'upcoming'
+              showUpcoming
                 ? 'bg-purple-500/20 text-purple-400 border-purple-500/30'
                 : STAGE_COLORS[data.stage]
             }`}>
-              {effectiveStatus === 'upcoming' ? 'Upcoming' : STAGE_LABELS[data.stage]}
+              {showUpcoming ? 'Upcoming' : STAGE_LABELS[data.stage]}
             </span>
           </div>
         </div>
@@ -654,7 +666,14 @@ function MarketListItem({ data, effectiveStatus }: { data: MarketSummaryData; ef
               <span className="font-medium">{data.participants}</span>
             </span>
             <span className="flex items-center gap-1">
-              {isTradingAllowed ? (
+              {showUpcoming ? (
+                <>
+                  <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                  </svg>
+                  <span>Upcoming</span>
+                </>
+              ) : isTradingAllowed ? (
                 <>
                   <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />

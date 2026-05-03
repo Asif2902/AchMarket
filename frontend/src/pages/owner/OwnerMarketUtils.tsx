@@ -79,10 +79,11 @@ export function useOwnerMarkets() {
   const { readProvider, address } = useWallet();
 
   const getCacheKey = useCallback(async () => {
+    if (!address) return null;
     const network = await readProvider.getNetwork();
     const chainId = network.chainId.toString();
     const rpcUrl = NETWORK.rpcUrl;
-    const normalizedOwner = address ? ethers.getAddress(address) : 'no-owner';
+    const normalizedOwner = ethers.getAddress(address);
     return `${chainId}:${rpcUrl}:${normalizedOwner}`;
   }, [readProvider, address]);
 
@@ -93,6 +94,12 @@ export function useOwnerMarkets() {
   const fetchAll = useCallback(async (force = false) => {
     try {
       const cacheKey = await getCacheKey();
+      if (!cacheKey) {
+        latestFetchKeyRef.current = '';
+        setMarkets([]);
+        setLoading(false);
+        return;
+      }
       latestFetchKeyRef.current = cacheKey;
       const now = Date.now();
       const cached = ownerMarketsCache.get(cacheKey);

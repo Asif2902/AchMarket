@@ -108,6 +108,7 @@ export interface CachedLiveSnapshot {
 export interface LiveMarketDataConfiguredResponse {
   configured: true;
   stale: boolean;
+  finalSnapshot?: boolean;
   asOf: string;
   fetchedAt: string;
   nextSuggestedPollSeconds: number;

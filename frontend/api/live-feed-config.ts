@@ -1,6 +1,6 @@
-import { hashMessage, getAddress, Contract, JsonRpcProvider } from 'ethers';
+import { getAddress, Contract, JsonRpcProvider } from 'ethers';
 import { MongoClient, type Collection } from 'mongodb';
-import { extractSignedHeaders, verifySignedMessage, SIG_VALIDITY_MS, serializeLiveFeedPayload } from './_signature.js';
+import { extractSignedHeaders, verifySignedMessage } from './_signature.js';
 
 const LIVE_FEEDS_COLLECTION = 'live_feeds';
 
@@ -340,16 +340,28 @@ export default async function handler(req: any, res: any) {
       }
 
       const { address, timestamp, signature } = extractSignedHeaders(req);
-      const payload = req.body?.payload;
+      const serializedPayload = typeof req.body?.serializedPayload === 'string'
+        ? req.body.serializedPayload
+        : (typeof req.body?.signedPayload === 'string' ? req.body.signedPayload : '');
+      if (!serializedPayload.trim()) {
+        throw new Error('serializedPayload is required.');
+      }
       const message = [
         'AchMarket Live Feed Config',
         `Address: ${address}`,
         `Timestamp: ${timestamp}`,
-        `Payload: ${serializeLiveFeedPayload(payload)}`,
+        `Payload: ${serializedPayload}`,
         'No gas fee. Sign only if you trust this request.',
       ].join('\n');
 
       verifySignedMessage(address, timestamp, signature, message);
+
+      let payload: LiveFeedPayload;
+      try {
+        payload = JSON.parse(serializedPayload) as LiveFeedPayload;
+      } catch {
+        throw new Error('serializedPayload must be valid JSON.');
+      }
 
       const config = await upsertConfig(address, payload);
       return res.status(200).json({ config });
@@ -360,7 +372,12 @@ export default async function handler(req: any, res: any) {
     const msg = err?.message || 'Unexpected error';
     const lower = msg.toLowerCase();
     let code = 500;
-    if (lower.includes('expired') || lower.includes('signature')) code = 401;
+    if (
+      (lower.includes('invalid') && lower.includes('address'))
+      || lower.includes('malformed')
+      || lower.includes('market address')
+    ) code = 400;
+    else if (lower.includes('expired') || lower.includes('signature')) code = 401;
     else if (lower.includes('owner')) code = 403;
     else if (lower.includes('unknown market')) code = 404;
     else     if (lower.includes('required') || lower.includes('timestamp')) code = 400;

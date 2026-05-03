@@ -518,13 +518,10 @@ export default function MarketDetail() {
     let scheduleTimeoutId: ReturnType<typeof setTimeout> | undefined;
     let abortTimeoutId: ReturnType<typeof setTimeout> | undefined;
     let controller: AbortController | undefined;
-
-    const isClosedStage = detail
-      ? detail.stage === STAGE.Resolved || detail.stage === STAGE.Cancelled || detail.stage === STAGE.Expired
-      : false;
+    let hasRequestedStageRefresh = false;
 
     const schedule = (seconds: number) => {
-      if (cancelled || isClosedStage) return;
+      if (cancelled) return;
       scheduleTimeoutId = setTimeout(() => {
         void poll(false);
       }, Math.max(5, seconds) * 1000);
@@ -549,9 +546,13 @@ export default function MarketDetail() {
         if (cancelled) return;
         setLiveData(data);
         setLiveError(null);
-        if (!isClosedStage) {
-          const next = data.configured 
-            ? (data.refreshFailed ? 30 : Math.max(5, data.nextSuggestedPollSeconds || 15)) 
+        if (data.configured && data.finalSnapshot && !hasRequestedStageRefresh) {
+          hasRequestedStageRefresh = true;
+          void refreshData();
+        }
+        if (!data.configured || !data.finalSnapshot) {
+          const next = data.configured
+            ? (data.refreshFailed ? 30 : Math.max(5, data.nextSuggestedPollSeconds || 15))
             : 30;
           schedule(next);
         }
@@ -567,9 +568,7 @@ export default function MarketDetail() {
         });
         const message = err instanceof Error ? err.message : 'Failed to load live reference data.';
         setLiveError(message);
-        if (!isClosedStage) {
-          schedule(30);
-        }
+        schedule(30);
       } finally {
         if (abortTimeoutId !== undefined) {
           clearTimeout(abortTimeoutId);
@@ -595,7 +594,7 @@ export default function MarketDetail() {
         controller.abort();
       }
     };
-  }, [marketAddress, detail?.stage]);
+  }, [marketAddress, refreshData]);
 
   useEffect(() => {
     if (!userAddress || !isConnected) { setUserBalance(null); setHasProfile(false); return; }
@@ -1006,7 +1005,7 @@ export default function MarketDetail() {
                   <span className="badge bg-red-500/15 text-red-400 border-red-500/25">Error</span>
                 ) : !liveConfigured ? (
                   <span className="badge bg-dark-750/80 text-dark-400 border-white/[0.08]">Loading</span>
-                ) : (detail.stage === STAGE.Resolved || detail.stage === STAGE.Cancelled || detail.stage === STAGE.Expired) ? (
+                ) : liveConfigured.finalSnapshot ? (
                   <span className="badge bg-cyan-500/15 text-cyan-300 border-cyan-500/25">Final Snapshot</span>
                 ) : liveConfigured.effectiveStatus === 'upcoming' ? (
                   <span className="badge bg-purple-500/15 text-purple-400 border-purple-500/25">Upcoming</span>
