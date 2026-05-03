@@ -55,6 +55,7 @@ export interface LiveCryptoMarketData {
   change24h: number | null;
   marketCap: number | null;
   volume24h: number | null;
+  sparkline: number[] | null;
   config?: LiveCryptoFeedConfig;
 }
 
@@ -65,6 +66,8 @@ export interface LiveSportsMarketData {
   leagueName: string;
   homeTeam: string;
   awayTeam: string;
+  homeLogo: string | null;
+  awayLogo: string | null;
   homeScore: number | null;
   awayScore: number | null;
   status: string;

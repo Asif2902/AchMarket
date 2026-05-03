@@ -262,14 +262,17 @@ async function fetchCryptoSnapshot(config: LiveFeedDoc): Promise<CachedLiveSnaps
   const id = config.crypto.coingeckoId.trim().toLowerCase();
   const vs = config.crypto.vsCurrency.trim().toLowerCase();
   const metric: LiveCryptoMetric = config.crypto.metric || 'price';
-  const endpoint = `https://api.coingecko.com/api/v3/simple/price?ids=${encodeURIComponent(id)}&vs_currencies=${encodeURIComponent(vs)}&include_24hr_change=true&include_market_cap=true&include_24hr_vol=true`;
+  
+  const endpoint = `https://api.coingecko.com/api/v3/coins/markets?vs_currency=${encodeURIComponent(vs)}&ids=${encodeURIComponent(id)}&sparkline=true`;
   const json = await fetchJsonWithTimeout(endpoint);
 
-  const coin = json?.[id];
-  const price = toFiniteNumber(coin?.[vs]);
-  const change24h = toFiniteNumber(coin?.[`${vs}_24h_change`]);
-  const marketCap = toFiniteNumber(coin?.[`${vs}_market_cap`]);
-  const volume24h = toFiniteNumber(coin?.[`${vs}_24h_vol`]);
+  const coin = Array.isArray(json) ? json.find((c: any) => c.id === id) : null;
+  const price = toFiniteNumber(coin?.current_price);
+  const change24h = toFiniteNumber(coin?.price_change_percentage_24h);
+  const marketCap = toFiniteNumber(coin?.market_cap);
+  const volume24h = toFiniteNumber(coin?.total_volume);
+  const sparkline = Array.isArray(coin?.sparkline_in_7d?.price) ? coin.sparkline_in_7d.price : null;
+
   if (price === null) {
     throw new Error('CoinGecko returned no price for this pair.');
   }
@@ -290,6 +293,7 @@ async function fetchCryptoSnapshot(config: LiveFeedDoc): Promise<CachedLiveSnaps
       change24h,
       marketCap,
       volume24h,
+      sparkline,
       config: config.crypto,
     },
   };
@@ -363,6 +367,8 @@ async function fetchSportsSnapshot(config: LiveFeedDoc): Promise<CachedLiveSnaps
       leagueName: config.sports.leagueName || (typeof event.strLeague === 'string' ? event.strLeague : ''),
       homeTeam: returnedHome || 'Home',
       awayTeam: returnedAway || 'Away',
+      homeLogo: typeof event.strHomeTeamBadge === 'string' ? event.strHomeTeamBadge : null,
+      awayLogo: typeof event.strAwayTeamBadge === 'string' ? event.strAwayTeamBadge : null,
       homeScore: parseOptionalScore(event.intHomeScore),
       awayScore: parseOptionalScore(event.intAwayScore),
       status: status.status,

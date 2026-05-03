@@ -1065,6 +1065,43 @@ export default function MarketDetail() {
                       </p>
                     </div>
                   </div>
+                  {liveConfigured.data.sparkline && liveConfigured.data.sparkline.length > 0 && (
+                    <div className="h-24 w-full mt-4 -mx-1">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <AreaChart data={liveConfigured.data.sparkline.map((price, index) => ({ index, price }))}>
+                          <defs>
+                            <linearGradient id="colorSparkline" x1="0" y1="0" x2="0" y2="1">
+                              <stop offset="5%" stopColor={liveConfigured.data.sparkline[0] <= liveConfigured.data.sparkline[liveConfigured.data.sparkline.length - 1] ? '#10b981' : '#ef4444'} stopOpacity={0.3}/>
+                              <stop offset="95%" stopColor={liveConfigured.data.sparkline[0] <= liveConfigured.data.sparkline[liveConfigured.data.sparkline.length - 1] ? '#10b981' : '#ef4444'} stopOpacity={0}/>
+                            </linearGradient>
+                          </defs>
+                          <Area 
+                            type="monotone" 
+                            dataKey="price" 
+                            stroke={liveConfigured.data.sparkline[0] <= liveConfigured.data.sparkline[liveConfigured.data.sparkline.length - 1] ? '#10b981' : '#ef4444'} 
+                            strokeWidth={2}
+                            fillOpacity={1} 
+                            fill="url(#colorSparkline)" 
+                            isAnimationActive={false}
+                          />
+                          <YAxis domain={['dataMin', 'dataMax']} hide />
+                          <Tooltip 
+                            content={({ active, payload }) => {
+                              if (active && payload && payload.length) {
+                                return (
+                                  <div className="bg-dark-800 border border-white/[0.1] px-2 py-1 rounded text-xs text-white tabular-nums shadow-xl">
+                                    {Number(payload[0].value).toLocaleString(undefined, { maximumFractionDigits: 6 })}
+                                  </div>
+                                );
+                              }
+                              return null;
+                            }}
+                            cursor={{ stroke: 'rgba(255,255,255,0.1)', strokeWidth: 1, strokeDasharray: '4 4' }}
+                          />
+                        </AreaChart>
+                      </ResponsiveContainer>
+                    </div>
+                  )}
                   <div className="flex items-center justify-between text-2xs text-dark-500 pt-2 border-t border-white/[0.08]">
                     <span>Source: {liveConfigured.data.provider}</span>
                     <span>Updated {formatLiveAge(liveConfigured.fetchedAt)}</span>
@@ -1086,11 +1123,14 @@ export default function MarketDetail() {
                     </div>
                   )}
                   <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2">
-                    <div className="min-w-0 text-left">
-                      <p className="text-xs text-dark-400 uppercase tracking-wider">Home</p>
-                      <p className="text-sm sm:text-base font-semibold text-white truncate">{liveConfigured.data.homeTeam}</p>
+                    <div className="min-w-0 text-left flex flex-col items-start">
+                      <p className="text-xs text-dark-400 uppercase tracking-wider mb-1">Home</p>
+                      {liveConfigured.data.homeLogo ? (
+                        <img src={liveConfigured.data.homeLogo} alt={liveConfigured.data.homeTeam} className="w-10 h-10 object-contain mb-1" />
+                      ) : null}
+                      <p className="text-sm sm:text-base font-semibold text-white truncate w-full">{liveConfigured.data.homeTeam}</p>
                     </div>
-                    <div className="text-center px-2">
+                    <div className="text-center px-2 flex flex-col items-center justify-center">
                       <p className="text-2xl sm:text-3xl font-bold text-white tabular-nums leading-none">
                         {liveConfigured.data.homeScore ?? '-'}
                         <span className="text-white/35 mx-1">-</span>
@@ -1098,9 +1138,12 @@ export default function MarketDetail() {
                       </p>
                       <p className="text-2xs text-dark-500 mt-1">{liveConfigured.data.statusLabel}</p>
                     </div>
-                    <div className="min-w-0 text-right">
-                      <p className="text-xs text-dark-400 uppercase tracking-wider">Away</p>
-                      <p className="text-sm sm:text-base font-semibold text-white truncate">{liveConfigured.data.awayTeam}</p>
+                    <div className="min-w-0 text-right flex flex-col items-end">
+                      <p className="text-xs text-dark-400 uppercase tracking-wider mb-1">Away</p>
+                      {liveConfigured.data.awayLogo ? (
+                        <img src={liveConfigured.data.awayLogo} alt={liveConfigured.data.awayTeam} className="w-10 h-10 object-contain mb-1" />
+                      ) : null}
+                      <p className="text-sm sm:text-base font-semibold text-white truncate w-full">{liveConfigured.data.awayTeam}</p>
                     </div>
                   </div>
                   <div className="flex items-center justify-between text-2xs text-dark-500 pt-2 border-t border-white/[0.08]">
