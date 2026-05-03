@@ -993,16 +993,24 @@ export default function MarketDetail() {
                       ? liveConfigured.data.kind === 'crypto-price'
                         ? `${liveConfigured.data.baseSymbol}/${liveConfigured.data.quoteSymbol} ${formatCryptoPrimaryLabel(liveConfigured.data.metric).toLowerCase()} feed`
                         : `${liveConfigured.data.leagueName || 'Sports'} live score feed`
-                      : 'This market resolves without an external reference feed'}
+                      : liveData && !liveData.configured
+                        ? 'This market resolves without an external reference feed'
+                        : liveError
+                          ? 'Error loading feed'
+                          : 'Loading feed...'}
                   </p>
                 </div>
-                {!liveConfigured ? (
+                {liveData && !liveData.configured ? (
                   <span className="badge bg-dark-750/80 text-dark-300 border-white/[0.08]">No Feed</span>
+                ) : liveError ? (
+                  <span className="badge bg-red-500/15 text-red-400 border-red-500/25">Error</span>
+                ) : !liveConfigured ? (
+                  <span className="badge bg-dark-750/80 text-dark-400 border-white/[0.08]">Loading</span>
                 ) : (detail.stage === STAGE.Resolved || detail.stage === STAGE.Cancelled || detail.stage === STAGE.Expired) ? (
                   <span className="badge bg-cyan-500/15 text-cyan-300 border-cyan-500/25">Final Snapshot</span>
-                ) : liveConfigured?.effectiveStatus === 'upcoming' ? (
+                ) : liveConfigured.effectiveStatus === 'upcoming' ? (
                   <span className="badge bg-purple-500/15 text-purple-400 border-purple-500/25">Upcoming</span>
-                ) : liveConfigured?.stale ? (
+                ) : liveConfigured.stale ? (
                   <span className="badge bg-amber-500/15 text-amber-400 border-amber-500/25">Delayed</span>
                 ) : (
                   <span className="badge bg-emerald-500/15 text-emerald-400 border-emerald-500/25">Live</span>
