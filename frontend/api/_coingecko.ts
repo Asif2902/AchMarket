@@ -132,7 +132,7 @@ export async function searchCoinGeckoAssets(rawQuery: string, limit = 10): Promi
   const candidates = coins
     .map((coin: any) => mapSearchCandidate(coin))
     .filter((candidate: CoinGeckoSearchCandidate | null): candidate is CoinGeckoSearchCandidate => candidate !== null)
-    .sort((a, b) => {
+    .sort((a: CoinGeckoSearchCandidate, b: CoinGeckoSearchCandidate) => {
       const scoreDelta = scoreSearchCandidate(b, query) - scoreSearchCandidate(a, query);
       if (scoreDelta !== 0) return scoreDelta;
       const rankA = a.marketCapRank ?? Number.MAX_SAFE_INTEGER;

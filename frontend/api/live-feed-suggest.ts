@@ -400,10 +400,12 @@ async function detectCrypto(input: SuggestRequest) {
     }
   }
 
-  if (!dynamicBest || dynamicBest.confidence < 0.6) {
+  const dynamicBestConfidence = dynamicBest?.confidence ?? 0;
+
+  if (!dynamicBest || dynamicBestConfidence < 0.6) {
     return {
       detected: false,
-      confidence: Math.max(best?.confidence ?? 0, dynamicBest?.confidence ?? 0),
+      confidence: Math.max(best?.confidence ?? 0, dynamicBestConfidence),
       reason: 'No strong crypto pair detected from market text.',
       coingeckoId: null,
       baseSymbol: null,
@@ -837,6 +839,18 @@ async function detectSports(input: SuggestRequest) {
     };
   }
 
+  if (!teamPair) {
+    return {
+      detected: false,
+      confidence: 0,
+      reason: 'No clear sports matchup detected.',
+      homeTeam: null,
+      awayTeam: null,
+      selectedEventId: null,
+      selectedLeagueName: null,
+      candidates,
+    };
+  }
 
   let confidence = titleTeams ? 0.82 : 0.66;
   if (categoryHint) confidence += 0.06;
