@@ -271,7 +271,22 @@ async function fetchCryptoSnapshot(config: LiveFeedDoc): Promise<CachedLiveSnaps
   const change24h = toFiniteNumber(coin?.price_change_percentage_24h);
   const marketCap = toFiniteNumber(coin?.market_cap);
   const volume24h = toFiniteNumber(coin?.total_volume);
-  const sparkline = Array.isArray(coin?.sparkline_in_7d?.price) ? coin.sparkline_in_7d.price : null;
+  let sparkline = Array.isArray(coin?.sparkline_in_7d?.price) ? coin.sparkline_in_7d.price : null;
+
+  if (metric !== 'price') {
+    try {
+      const chartEndpoint = `https://api.coingecko.com/api/v3/coins/${encodeURIComponent(id)}/market_chart?vs_currency=${encodeURIComponent(vs)}&days=7`;
+      const chartJson = await fetchJsonWithTimeout(chartEndpoint);
+      
+      if (metric === 'market-cap' && Array.isArray(chartJson?.market_caps)) {
+        sparkline = chartJson.market_caps.map((point: any[]) => point[1]);
+      } else if (metric === 'volume-24h' && Array.isArray(chartJson?.total_volumes)) {
+        sparkline = chartJson.total_volumes.map((point: any[]) => point[1]);
+      }
+    } catch (e) {
+      console.error(`Failed to fetch 7d chart for metric ${metric}`, e);
+    }
+  }
 
   if (price === null) {
     throw new Error('CoinGecko returned no price for this pair.');
