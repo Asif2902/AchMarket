@@ -919,8 +919,8 @@ export default async function handler(req: any, res: any) {
       signature = extracted.signature;
       signed = !!(address && signature);
     } catch (headerErr: any) {
-      const walletHeader = req.headers?.['x-wallet-address'];
-      const signatureHeader = req.headers?.['x-signature'];
+      const walletHeader = req.headers?.['x-wallet-address'] || req.body?.address;
+      const signatureHeader = req.headers?.['x-signature'] || req.body?.signature;
       const hasWalletHeader = typeof walletHeader === 'string' && walletHeader.trim().length > 0;
       const hasSignatureHeader = typeof signatureHeader === 'string' && signatureHeader.trim().length > 0;
 

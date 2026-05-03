@@ -45,13 +45,16 @@ export function serializeLiveFeedPayload(payload: any): string {
 }
 
 export function extractSignedHeaders(req: any): SignedRequest {
-  const address = typeof req.headers?.['x-wallet-address'] === 'string'
-    ? getAddress(req.headers['x-wallet-address']).toLowerCase()
-    : '';
+  const rawAddress = typeof req.headers?.['x-wallet-address'] === 'string'
+    ? req.headers['x-wallet-address']
+    : (typeof req.body?.address === 'string' ? req.body.address : '');
+  const address = rawAddress ? getAddress(rawAddress).toLowerCase() : '';
+
   const timestamp = Number(req.headers?.['x-timestamp'] ?? req.body?.timestamp);
+
   const signature = typeof req.headers?.['x-signature'] === 'string'
     ? req.headers['x-signature'].trim()
-    : '';
+    : (typeof req.body?.signature === 'string' ? req.body.signature.trim() : '');
 
   if (!address) throw new Error('Wallet address is required.');
   if (!signature) throw new Error('Signature is required.');

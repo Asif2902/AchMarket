@@ -331,18 +331,16 @@ export default async function handler(req: any, res: any) {
     }
 
     if (req.method === 'POST') {
-      const { address, timestamp, signature } = extractSignedHeaders(req);
-
-      let body = req.body;
-      if (typeof body === 'string') {
+      if (typeof req.body === 'string') {
         try {
-          body = JSON.parse(body);
+          req.body = JSON.parse(req.body);
         } catch {
           return res.status(400).json({ error: 'Invalid JSON' });
         }
       }
 
-      const payload = body?.payload;
+      const { address, timestamp, signature } = extractSignedHeaders(req);
+      const payload = req.body?.payload;
       const message = [
         'AchMarket Live Feed Config',
         `Address: ${address}`,
