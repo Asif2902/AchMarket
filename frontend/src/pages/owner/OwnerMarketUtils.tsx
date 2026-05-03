@@ -90,8 +90,10 @@ export function useOwnerMarkets() {
   const [markets, setMarkets] = useState<OwnerMarketData[]>([]);
   const [loading, setLoading] = useState(true);
   const latestFetchKeyRef = useRef('');
+  const fetchSequenceRef = useRef(0);
 
   const fetchAll = useCallback(async (force = false) => {
+    let currentFetchToken = '';
     try {
       const cacheKey = await getCacheKey();
       if (!cacheKey) {
@@ -100,19 +102,22 @@ export function useOwnerMarkets() {
         setLoading(false);
         return;
       }
-      latestFetchKeyRef.current = cacheKey;
+      currentFetchToken = `${cacheKey}:${Date.now()}:${fetchSequenceRef.current + 1}`;
+      fetchSequenceRef.current += 1;
+      latestFetchKeyRef.current = currentFetchToken;
       const now = Date.now();
       const cached = ownerMarketsCache.get(cacheKey);
       const cachedAt = ownerMarketsCacheAt.get(cacheKey) ?? 0;
 
       if (!force && cached && now - cachedAt < OWNER_MARKETS_CACHE_TTL_MS) {
-        if (latestFetchKeyRef.current !== cacheKey) return;
+        if (latestFetchKeyRef.current !== currentFetchToken) return;
         setMarkets(cached);
         setLoading(false);
         return;
       }
 
       if (!cached) {
+        setMarkets([]);
         setLoading(true);
       }
 
@@ -120,7 +125,7 @@ export function useOwnerMarkets() {
       const lens = new ethers.Contract(LENS_ADDRESS, LENS_ABI, readProvider);
       const total = Number(await factory.totalMarkets());
       if (total === 0) {
-        if (latestFetchKeyRef.current !== cacheKey) return;
+        if (latestFetchKeyRef.current !== currentFetchToken) return;
         ownerMarketsCache.set(cacheKey, []);
         ownerMarketsCacheAt.set(cacheKey, Date.now());
         setMarkets([]);
@@ -143,8 +148,8 @@ export function useOwnerMarkets() {
             const decoded = infoInterface.decodeFunctionResult('admin', result);
             const adminAddr = decoded[0] as string;
             return adminAddr.toLowerCase();
-          } catch {
-            return '';
+          } catch (err) {
+            throw err;
           }
         })
       );
@@ -353,7 +358,7 @@ export function useOwnerMarkets() {
         };
       }
 
-      if (latestFetchKeyRef.current !== cacheKey) return;
+      if (latestFetchKeyRef.current !== currentFetchToken) return;
 
       ownerMarketsCache.set(cacheKey, result);
       ownerMarketsCacheAt.set(cacheKey, Date.now());
@@ -362,10 +367,10 @@ export function useOwnerMarkets() {
       // Fetch accurate volumes from BlockScout events (buys + sells)
       const addresses = result.map((m) => m.market);
       fetchAllMarketVolumes(addresses).then((volumes) => {
-        if (latestFetchKeyRef.current !== cacheKey) return;
+        if (latestFetchKeyRef.current !== currentFetchToken) return;
         if (volumes.size === 0) return;
         setMarkets((prev) => {
-          if (latestFetchKeyRef.current !== cacheKey) return prev;
+          if (latestFetchKeyRef.current !== currentFetchToken) return prev;
           const next = prev.map((m) => {
             const vol = volumes.get(m.market.toLowerCase());
             return vol !== undefined ? { ...m, totalVolumeWei: vol } : m;
@@ -381,9 +386,11 @@ export function useOwnerMarkets() {
     } catch (err) {
       console.error('Failed to fetch markets:', err);
     } finally {
-      setLoading(false);
+      if (!currentFetchToken || latestFetchKeyRef.current === currentFetchToken) {
+        setLoading(false);
+      }
     }
-  }, [readProvider, getCacheKey]);
+  }, [readProvider, getCacheKey, address]);
 
   const refetch = useCallback(() => {
     void fetchAll(true);

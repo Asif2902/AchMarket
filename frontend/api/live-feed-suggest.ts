@@ -47,7 +47,19 @@ for (const asset of CRYPTO_ASSETS) {
   }
 }
 
-const AMBIGUOUS_ALIASES = new Set(['ton', 'link', 'dot', 'op', 'arb', 'sui']);
+const AMBIGUOUS_ALIASES = new Set([
+  'ton',
+  'link',
+  'dot',
+  'op',
+  'arb',
+  'sui',
+  'binance',
+  'ripple',
+  'optimism',
+  'avalanche',
+  'tron',
+]);
 
 const SPORTS_STOP_WORDS = new Set([
   'will',
@@ -270,7 +282,7 @@ async function detectCrypto(input: SuggestRequest) {
   const categoryHint = /(crypto|btc|bitcoin|eth|ethereum|token|coin|altcoin|defi)/i.test(category);
 
   let best: {
-    asset: CryptoAsset;
+    asset: (typeof CRYPTO_ASSETS)[number];
     confidence: number;
     reason: string;
   } | null = null;
@@ -278,6 +290,8 @@ async function detectCrypto(input: SuggestRequest) {
   for (const asset of CRYPTO_ASSETS) {
     let score = 0;
     let reason = '';
+    let ambiguousMatchCount = 0;
+    let ambiguousHasDollarPrefix = false;
 
     for (const alias of asset.aliases) {
       const isAmbiguous = AMBIGUOUS_ALIASES.has(alias) && alias.length >= 3;
@@ -288,43 +302,43 @@ async function detectCrypto(input: SuggestRequest) {
           dollarRegex.test(description) ||
           dollarRegex.test(outcomes)
         : false;
+      const raiseScore = (ambiguousScore: number, strongScore: number) => {
+        if (isAmbiguous && !hasDollarPrefix) {
+          ambiguousMatchCount += 1;
+          score = Math.max(score, ambiguousScore);
+          return;
+        }
+        if (isAmbiguous && hasDollarPrefix) {
+          ambiguousHasDollarPrefix = true;
+        }
+        score = Math.max(score, strongScore);
+      };
 
       if (containsWord(title, alias)) {
-        if (isAmbiguous && !hasDollarPrefix) {
-          score = Math.max(score, 0.54);
-        } else {
-          score = Math.max(score, 0.9);
-        }
+        raiseScore(0.46, 0.9);
         reason = `Detected ${asset.symbol} in market title`;
       }
       if (containsWord(category, alias)) {
-        if (isAmbiguous && !hasDollarPrefix) {
-          score = Math.max(score, 0.50);
-        } else {
-          score = Math.max(score, 0.75);
-        }
+        raiseScore(0.4, 0.75);
         reason = reason || `Detected ${asset.symbol} in market category`;
       }
       if (containsWord(description, alias)) {
-        if (isAmbiguous && !hasDollarPrefix) {
-          score = Math.max(score, 0.5);
-        } else {
-          score = Math.max(score, 0.7);
-        }
+        raiseScore(0.38, 0.7);
         reason = reason || `Detected ${asset.symbol} in market description`;
       }
       if (containsWord(outcomes, alias)) {
-        if (isAmbiguous && !hasDollarPrefix) {
-          score = Math.max(score, 0.48);
-        } else {
-          score = Math.max(score, 0.68);
-        }
+        raiseScore(0.36, 0.68);
         reason = reason || `Detected ${asset.symbol} in outcome labels`;
       }
     }
 
+    const ambiguousHasCorroboration = ambiguousHasDollarPrefix || ambiguousMatchCount >= 2;
+    if (ambiguousHasCorroboration) {
+      score = Math.max(score, ambiguousHasDollarPrefix ? 0.82 : 0.58);
+    }
+
     if (score > 0 && categoryHint) {
-      score = Math.min(0.98, score + 0.05);
+      score = Math.min(0.98, score + (ambiguousMatchCount > 0 && !ambiguousHasCorroboration ? 0.02 : 0.05));
     }
 
     if (!best || score > best.confidence) {

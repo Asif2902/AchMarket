@@ -269,7 +269,7 @@ export default function CreateMarket() {
     parseFloat(bValue) >= 1000,
   ].filter(Boolean).length;
 
-  const feedCanSave = feedUserEdited && (feedKind === 'crypto-price'
+  const feedCanSave = feedEnabled && (feedKind === 'crypto-price'
     ? Boolean(feedCoingeckoId.trim() && feedBaseSymbol.trim() && feedQuoteSymbol.trim() && feedVsCurrency.trim())
     : Boolean(feedEventId.trim()));
 
@@ -375,7 +375,13 @@ export default function CreateMarket() {
   }, [title, actualCategory, description, outcomes, feedUserEdited]);
 
   useEffect(() => {
-    if (feedKind !== 'crypto-price' || !feedCoingeckoId.trim() || !feedVsCurrency.trim()) {
+    if (
+      feedKind !== 'crypto-price' ||
+      feedCryptoMetric !== 'price' ||
+      !feedCoingeckoId.trim() ||
+      !feedVsCurrency.trim()
+    ) {
+      setCryptoPriceLoading(false);
       setCryptoPricePreview(null);
       setCryptoPriceError(null);
       return;
@@ -411,7 +417,7 @@ export default function CreateMarket() {
     return () => {
       cancelled = true;
     };
-  }, [feedKind, feedCoingeckoId, feedVsCurrency]);
+  }, [feedKind, feedCryptoMetric, feedCoingeckoId, feedVsCurrency]);
 
   useEffect(() => {
     if (feedKind !== 'sports-score') {
@@ -575,7 +581,7 @@ export default function CreateMarket() {
         marketTitle: title.trim(),
       });
 
-      if (marketAddr && feedEnabled && feedCanSave) {
+      if (marketAddr && feedCanSave) {
         setFeedSaving(true);
         try {
           let payload: LiveFeedConfigInput;
