@@ -98,6 +98,7 @@ export default function CreateMarket() {
   const [feedDetecting, setFeedDetecting] = useState(false);
   const [feedDetectionHint, setFeedDetectionHint] = useState('');
   const [feedDetectionError, setFeedDetectionError] = useState('');
+  const [feedAutoFilled, setFeedAutoFilled] = useState(false);
   const [feedUserEdited, setFeedUserEdited] = useState(false);
   const [feedSaving, setFeedSaving] = useState(false);
 
@@ -269,16 +270,33 @@ export default function CreateMarket() {
     parseFloat(bValue) >= 1000,
   ].filter(Boolean).length;
 
-  const feedCanSave = feedEnabled && (feedKind === 'crypto-price'
-    ? Boolean(feedCoingeckoId.trim() && feedBaseSymbol.trim() && feedQuoteSymbol.trim() && feedVsCurrency.trim())
-    : Boolean(feedEventId.trim()));
+  const markFeedUserEdited = () => {
+    setFeedUserEdited(true);
+    setFeedAutoFilled(false);
+  };
+
+  const feedValidationMessage = !feedEnabled
+    ? ''
+    : feedKind === 'crypto-price'
+      ? (() => {
+          if (!feedCoingeckoId.trim()) return 'Live feed requires a CoinGecko id.';
+          if (!feedBaseSymbol.trim()) return 'Live feed requires a base symbol.';
+          if (!feedQuoteSymbol.trim()) return 'Live feed requires a quote symbol.';
+          if (!feedVsCurrency.trim()) return 'Live feed requires a quote key.';
+          return '';
+        })()
+      : (!feedEventId.trim() ? 'Live feed requires a SportsDB event id.' : '');
+
+  const feedCanSave = feedEnabled && !feedValidationMessage;
+  const showFeedSummary = feedEnabled && feedCanSave;
+  const showFeedValidation = feedEnabled && !feedCanSave;
 
   const applyFeedCryptoCandidate = (candidate: LiveCryptoSearchCandidate) => {
     setFeedKind('crypto-price');
     setFeedCoingeckoId(candidate.id);
     setFeedBaseSymbol(candidate.symbol.toUpperCase());
     setFeedQuoteSymbol((feedQuoteSymbol.trim() || feedVsCurrency.trim() || 'usd').toUpperCase());
-    setFeedUserEdited(true);
+    markFeedUserEdited();
     setFeedDetectionHint(`Selected ${candidate.name} (${candidate.symbol.toUpperCase()}) from CoinGecko.`);
     setFeedDetectionError('');
   };
@@ -316,7 +334,7 @@ export default function CreateMarket() {
         setFeedAwayTeam(suggestions.sports.awayTeam || '');
         setFeedSportsSearchQuery(`${suggestions.sports.homeTeam || ''} vs ${suggestions.sports.awayTeam || ''}`.trim());
         setFeedDetectionHint(suggestions.sports.reason || 'Detected sports feed suggestion.');
-        setFeedUserEdited(true);
+        setFeedAutoFilled(true);
       } else if (suggestions.crypto.detected) {
         setFeedKind('crypto-price');
         setFeedCoingeckoId(suggestions.crypto.coingeckoId || 'bitcoin');
@@ -325,7 +343,7 @@ export default function CreateMarket() {
         setFeedVsCurrency(suggestions.crypto.vsCurrency || 'usd');
         setFeedCryptoMetric(suggestions.crypto.metric || 'price');
         setFeedDetectionHint(suggestions.crypto.reason || 'Detected crypto feed suggestion.');
-        setFeedUserEdited(true);
+        setFeedAutoFilled(true);
       } else if (suggestions.sports.detected) {
         setFeedKind('sports-score');
         setFeedEventId(suggestions.sports.selectedEventId || '');
@@ -334,18 +352,20 @@ export default function CreateMarket() {
         setFeedAwayTeam(suggestions.sports.awayTeam || '');
         setFeedSportsSearchQuery(`${suggestions.sports.homeTeam || ''} vs ${suggestions.sports.awayTeam || ''}`.trim());
         setFeedDetectionHint(suggestions.sports.reason || 'Detected sports feed suggestion.');
-        setFeedUserEdited(true);
+        setFeedAutoFilled(true);
       } else {
+        setFeedEnabled(false);
         setFeedKind('crypto-price');
         setFeedEventId('');
         setFeedLeagueName('');
         setFeedHomeTeam('');
         setFeedAwayTeam('');
-        setFeedCoingeckoId('bitcoin');
-        setFeedBaseSymbol('BTC');
-        setFeedQuoteSymbol('USD');
-        setFeedVsCurrency('usd');
+        setFeedCoingeckoId('');
+        setFeedBaseSymbol('');
+        setFeedQuoteSymbol('');
+        setFeedVsCurrency('');
         setFeedCryptoMetric('price');
+        setFeedAutoFilled(false);
         setFeedUserEdited(false);
         setFeedDetectionHint('No strong feed suggestion found. Fill manually or continue without feed.');
       }
@@ -536,6 +556,12 @@ export default function CreateMarket() {
       return;
     }
 
+    if (feedEnabled && !feedCanSave) {
+      setTxResult({ type: 'error', text: feedValidationMessage || 'Live feed is enabled but incomplete.' });
+      submittingRef.current = false;
+      return;
+    }
+
     setSubmitting(true);
     setTxResult(null);
     setFeedSaving(false);
@@ -655,6 +681,7 @@ export default function CreateMarket() {
       setOutcomes(['Yes', 'No']);
       setFeedEnabled(true);
       setFeedKind('crypto-price');
+      setFeedAutoFilled(false);
       setFeedUserEdited(false);
       setFeedCandidates([]);
       setFeedSportsSearchQuery('');
@@ -1100,7 +1127,10 @@ export default function CreateMarket() {
               <input
                 type="checkbox"
                 checked={feedEnabled}
-                onChange={(e) => setFeedEnabled(e.target.checked)}
+                onChange={(e) => {
+                  setFeedEnabled(e.target.checked);
+                  markFeedUserEdited();
+                }}
                 className="rounded border-white/[0.15] bg-dark-900"
               />
               Auto-attach live feed right after create
@@ -1109,14 +1139,14 @@ export default function CreateMarket() {
             <div className="flex gap-2 mb-3">
               <button
                 type="button"
-                onClick={() => { setFeedKind('crypto-price'); setFeedUserEdited(true); }}
+                onClick={() => { setFeedKind('crypto-price'); markFeedUserEdited(); }}
                 className={`chip ${feedKind === 'crypto-price' ? 'chip-active' : ''}`}
               >
                 Crypto Price
               </button>
               <button
                 type="button"
-                onClick={() => { setFeedKind('sports-score'); setFeedUserEdited(true); }}
+                onClick={() => { setFeedKind('sports-score'); markFeedUserEdited(); }}
                 className={`chip ${feedKind === 'sports-score' ? 'chip-active' : ''}`}
               >
                 Sports Score
@@ -1137,6 +1167,12 @@ export default function CreateMarket() {
             {feedDetectionError && (
               <p className="text-xs text-amber-400 mb-2">{feedDetectionError}</p>
             )}
+            {feedAutoFilled && !feedUserEdited && (
+              <p className="text-xs text-dark-500 mb-2">Detection pre-filled this section. Review it before creating the market.</p>
+            )}
+            {showFeedValidation && (
+              <p className="text-xs text-amber-400 mb-2">{feedValidationMessage}</p>
+            )}
 
             {feedKind === 'crypto-price' ? (
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -1145,11 +1181,11 @@ export default function CreateMarket() {
                   selectedSymbol={feedBaseSymbol}
                   selectedQuoteSymbol={feedQuoteSymbol}
                   onSelect={applyFeedCryptoCandidate}
-                  onChange={() => setFeedUserEdited(true)}
+                  onChange={markFeedUserEdited}
                 />
                 <select
                   value={feedCryptoMetric}
-                  onChange={(e) => { setFeedCryptoMetric(e.target.value as 'price' | 'market-cap' | 'volume-24h'); setFeedUserEdited(true); }}
+                  onChange={(e) => { setFeedCryptoMetric(e.target.value as 'price' | 'market-cap' | 'volume-24h'); markFeedUserEdited(); }}
                   className="input-field"
                 >
                   <option value="price">Metric: Price</option>
@@ -1159,28 +1195,28 @@ export default function CreateMarket() {
                 <input
                   type="text"
                   value={feedCoingeckoId}
-                  onChange={(e) => { setFeedCoingeckoId(e.target.value); setFeedUserEdited(true); }}
+                  onChange={(e) => { setFeedCoingeckoId(e.target.value); markFeedUserEdited(); }}
                   placeholder="CoinGecko id (bitcoin)"
                   className="input-field"
                 />
                 <input
                   type="text"
                   value={feedBaseSymbol}
-                  onChange={(e) => { setFeedBaseSymbol(e.target.value); setFeedUserEdited(true); }}
+                  onChange={(e) => { setFeedBaseSymbol(e.target.value); markFeedUserEdited(); }}
                   placeholder="Base symbol (BTC)"
                   className="input-field"
                 />
                 <input
                   type="text"
                   value={feedQuoteSymbol}
-                  onChange={(e) => { setFeedQuoteSymbol(e.target.value); setFeedUserEdited(true); }}
+                  onChange={(e) => { setFeedQuoteSymbol(e.target.value); markFeedUserEdited(); }}
                   placeholder="Quote symbol (USD)"
                   className="input-field"
                 />
                 <input
                   type="text"
                   value={feedVsCurrency}
-                  onChange={(e) => { setFeedVsCurrency(e.target.value); setFeedUserEdited(true); }}
+                  onChange={(e) => { setFeedVsCurrency(e.target.value); markFeedUserEdited(); }}
                   placeholder="Quote key (usd)"
                   className="input-field"
                 />
@@ -1195,7 +1231,7 @@ export default function CreateMarket() {
                   value={feedSportsSearchQuery}
                   onChange={(e) => {
                     setFeedSportsSearchQuery(e.target.value);
-                    setFeedUserEdited(true);
+                    markFeedUserEdited();
                     // Clear selected event when search query is edited
                     setFeedEventId('');
                     setFeedLeagueName('');
@@ -1226,7 +1262,7 @@ export default function CreateMarket() {
                         setFeedHomeTeam(found.homeTeam || '');
                         setFeedAwayTeam(found.awayTeam || '');
                       }
-                      setFeedUserEdited(true);
+                      markFeedUserEdited();
                     }}
                     className="input-field"
                   >
@@ -1245,7 +1281,7 @@ export default function CreateMarket() {
                     onChange={(e) => {
                       setFeedEventId(e.target.value);
                       setFeedEventLookupError('');
-                      setFeedUserEdited(true);
+                      markFeedUserEdited();
                     }}
                     onBlur={() => {
                       if (feedEventId.trim()) {
@@ -1270,7 +1306,7 @@ export default function CreateMarket() {
                 <input
                   type="text"
                   value={feedLeagueName}
-                  onChange={(e) => { setFeedLeagueName(e.target.value); setFeedUserEdited(true); }}
+                  onChange={(e) => { setFeedLeagueName(e.target.value); markFeedUserEdited(); }}
                   placeholder="League name"
                   className="input-field"
                 />
@@ -1279,14 +1315,14 @@ export default function CreateMarket() {
                   <input
                     type="text"
                     value={feedHomeTeam}
-                    onChange={(e) => { setFeedHomeTeam(e.target.value); setFeedUserEdited(true); }}
+                    onChange={(e) => { setFeedHomeTeam(e.target.value); markFeedUserEdited(); }}
                     placeholder="Home team (validation)"
                     className="input-field"
                   />
                   <input
                     type="text"
                     value={feedAwayTeam}
-                    onChange={(e) => { setFeedAwayTeam(e.target.value); setFeedUserEdited(true); }}
+                    onChange={(e) => { setFeedAwayTeam(e.target.value); markFeedUserEdited(); }}
                     placeholder="Away team (validation)"
                     className="input-field"
                   />
@@ -1295,7 +1331,7 @@ export default function CreateMarket() {
                   <input
                     type="checkbox"
                     checked={feedForceUpcoming}
-                    onChange={(e) => { setFeedForceUpcoming(e.target.checked); setFeedUserEdited(true); }}
+                    onChange={(e) => { setFeedForceUpcoming(e.target.checked); markFeedUserEdited(); }}
                     className="rounded border-white/[0.15] bg-dark-900"
                   />
                   Force Upcoming until you disable it
@@ -1308,7 +1344,7 @@ export default function CreateMarket() {
           <div className="card p-5">
             <button
               onClick={() => setShowConfirmDialog(true)}
-              disabled={!isValid || submitting || imageUploading || feedSaving}
+              disabled={!isValid || submitting || imageUploading || feedSaving || (feedEnabled && !feedCanSave)}
               className="btn-primary w-full py-3.5 text-base font-semibold"
             >
               {feedSaving ? (
@@ -1505,10 +1541,15 @@ export default function CreateMarket() {
                 <span className="text-dark-400">Liquidity (b): </span>
                 <span className="text-white">{bValue}</span>
               </div>
-              {feedEnabled && (
+              {showFeedSummary && (
                 <div>
                   <span className="text-dark-400">Live Feed: </span>
                   <span className="text-emerald-400">{feedKind === 'crypto-price' ? 'Crypto Price' : 'Sports Score'}</span>
+                </div>
+              )}
+              {showFeedValidation && (
+                <div className="p-3 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-400 text-xs">
+                  {feedValidationMessage}
                 </div>
               )}
             </div>
@@ -1522,9 +1563,11 @@ export default function CreateMarket() {
               </button>
               <button
                 onClick={() => {
+                  if (feedEnabled && !feedCanSave) return;
                   setShowConfirmDialog(false);
                   handleSubmit();
                 }}
+                disabled={feedEnabled && !feedCanSave}
                 className="flex-1 btn-primary py-2.5"
               >
                 Confirm & Create

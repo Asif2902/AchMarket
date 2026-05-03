@@ -208,7 +208,7 @@ function parseRequestBody(raw: unknown): SuggestRequest {
   return { title, category, description, outcomeLabels: trimmedLabels };
 }
 
-function extractCryptoSearchTerms(input: SuggestRequest): string[] {
+function extractCryptoSearchTerms(input: SuggestRequest, categoryHint: boolean): string[] {
   const out: string[] = [];
   const push = (value: string) => {
     const trimmed = value.trim();
@@ -219,6 +219,9 @@ function extractCryptoSearchTerms(input: SuggestRequest): string[] {
 
   const rawSources = [input.title, ...input.outcomeLabels];
   const combined = rawSources.join(' ');
+  const hasTickerEvidence =
+    /\$[A-Za-z0-9-]+/.test(combined) ||
+    /\b[A-Z][A-Z0-9]{1,9}\b/.test(combined);
 
   for (const match of combined.matchAll(/\$([a-zA-Z0-9][a-zA-Z0-9-]{1,19})/g)) {
     push(match[1]);
@@ -235,8 +238,10 @@ function extractCryptoSearchTerms(input: SuggestRequest): string[] {
     .map((word) => word.trim())
     .filter((word) => word.length >= 3 && word.length <= 20 && !CRYPTO_STOP_WORDS.has(word) && !/^\d+$/.test(word));
 
-  for (const word of normalizedWords) {
-    push(word);
+  if (categoryHint || hasTickerEvidence) {
+    for (const word of normalizedWords) {
+      push(word);
+    }
   }
 
   const deduped: string[] = [];
@@ -255,6 +260,7 @@ function scoreDynamicCryptoCandidate(term: string, candidate: CoinGeckoSearchCan
   const normalizedSymbol = candidate.symbol.trim().toLowerCase();
   const normalizedName = candidate.name.trim().toLowerCase();
   const normalizedId = candidate.id.trim().toLowerCase();
+  const isTickerLikeTerm = /^[a-z0-9-]{2,10}$/i.test(term) && !/\s/.test(term);
 
   let confidence = 0.52;
   if (normalizedSymbol === normalizedTerm) confidence = 0.84;
@@ -263,6 +269,13 @@ function scoreDynamicCryptoCandidate(term: string, candidate: CoinGeckoSearchCan
   else if (normalizedSymbol.startsWith(normalizedTerm)) confidence = 0.7;
   else if (normalizedName.startsWith(normalizedTerm) || normalizedId.startsWith(normalizedTerm)) confidence = 0.66;
   else if (normalizedName.includes(normalizedTerm) || normalizedId.includes(normalizedTerm)) confidence = 0.61;
+
+  if (!categoryHint && !isTickerLikeTerm) {
+    if (normalizedName === normalizedTerm) confidence = Math.min(confidence, 0.64);
+    else if (normalizedId === normalizedTerm) confidence = Math.min(confidence, 0.62);
+    else if (normalizedName.startsWith(normalizedTerm) || normalizedId.startsWith(normalizedTerm)) confidence = Math.min(confidence, 0.58);
+    else if (normalizedName.includes(normalizedTerm) || normalizedId.includes(normalizedTerm)) confidence = Math.min(confidence, 0.55);
+  }
 
   if (candidate.marketCapRank !== null && candidate.marketCapRank <= 100) {
     confidence += 0.03;
@@ -372,7 +385,7 @@ async function detectCrypto(input: SuggestRequest) {
     };
   }
 
-  const searchTerms = extractCryptoSearchTerms(input);
+  const searchTerms = extractCryptoSearchTerms(input, categoryHint);
   let dynamicBest: {
     candidate: CoinGeckoSearchCandidate;
     confidence: number;
@@ -402,7 +415,9 @@ async function detectCrypto(input: SuggestRequest) {
 
   const dynamicBestConfidence = dynamicBest?.confidence ?? 0;
 
-  if (!dynamicBest || dynamicBestConfidence < 0.6) {
+  const dynamicAcceptanceThreshold = categoryHint ? 0.6 : 0.72;
+
+  if (!dynamicBest || dynamicBestConfidence < dynamicAcceptanceThreshold) {
     return {
       detected: false,
       confidence: Math.max(best?.confidence ?? 0, dynamicBestConfidence),
