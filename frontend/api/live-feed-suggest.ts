@@ -40,10 +40,14 @@ interface SportsCandidate {
 
 const CRYPTO_ASSETS = LIVE_CRYPTO_ASSETS;
 
+function escapeRegExp(string: string) {
+  return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 const DOLLAR_PREFIX_REGEX = new Map<string, RegExp>();
 for (const asset of CRYPTO_ASSETS) {
   for (const alias of asset.aliases) {
-    DOLLAR_PREFIX_REGEX.set(alias, new RegExp(`\\$${alias}\\b`, 'i'));
+    DOLLAR_PREFIX_REGEX.set(alias, new RegExp(`\\$${escapeRegExp(alias)}\\b`, 'i'));
   }
 }
 
@@ -165,6 +169,9 @@ const MAX_OUTCOME_LABELS = 20;
 const MAX_LABEL_LEN = 100;
 
 function parseRequestBody(raw: unknown): SuggestRequest {
+  if (Array.isArray(raw)) {
+    throw new ValidationError('Request body must be an object');
+  }
   const body = (raw && typeof raw === 'object') ? (raw as Record<string, unknown>) : {};
 
   // Check raw sizes before any processing to reject oversized payloads early
