@@ -32,7 +32,6 @@ export default function MarketCard({ data, effectiveStatus }: Props) {
   const isSuspended = data.stage === STAGE.Suspended;
   const isResolved = data.stage === STAGE.Resolved;
   const isCancelled = data.stage === STAGE.Cancelled || data.stage === STAGE.Expired;
-  const showUpcoming = effectiveStatus === 'upcoming';
   const isTradingAllowed = isActive || isSuspended;
 
   const hasOutcomes = data.impliedProbabilitiesWad.length > 0;
@@ -61,12 +60,8 @@ export default function MarketCard({ data, effectiveStatus }: Props) {
           <div className="absolute inset-0 bg-gradient-to-t from-[var(--bg-card)] via-[var(--bg-card)]/30 to-transparent" />
 
           <div className="absolute top-2 left-2">
-            <span className={`badge backdrop-blur-sm text-2xs ${
-              showUpcoming
-                ? 'bg-purple-500/20 text-purple-400 border-purple-500/30'
-                : `${STAGE_COLORS[data.stage]}`
-            }`}>
-              {showUpcoming ? 'Upcoming' : STAGE_LABELS[data.stage]}
+            <span className={`badge backdrop-blur-sm text-2xs ${STAGE_COLORS[data.stage]}`}>
+              {STAGE_LABELS[data.stage]}
             </span>
           </div>
           <div className="absolute top-2 right-2">
@@ -143,17 +138,17 @@ export default function MarketCard({ data, effectiveStatus }: Props) {
               <span className="font-medium">{data.participants}</span>
             </div>
             <div className="flex items-center gap-1.5 text-[11px]">
-              {showUpcoming ? (
-                <span className="text-purple-400">Upcoming</span>
-              ) : isTradingAllowed ? (
+              {isTradingAllowed ? (
                 <>
                   <svg className="w-2.5 h-2.5 text-white/60" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
                   </svg>
-                  <Countdown deadline={data.marketDeadline} compact className="text-white/80 font-medium" />
+                  <Countdown deadline={data.marketDeadline} compact />
                 </>
+              ) : isResolved ? (
+                <span className="text-cyan-400">Resolved</span>
               ) : (
-                <span className="text-white/60">Ended</span>
+                <span className="text-red-400">Ended</span>
               )}
             </div>
           </div>
