@@ -5,10 +5,22 @@ import { FACTORY_ADDRESS } from '../../config/network';
 import { FACTORY_ABI } from '../../config/abis';
 import ImageWithFallback from '../../components/ImageWithFallback';
 import ProbabilityBar from '../../components/ProbabilityBar';
+import CryptoAssetPicker from '../../components/CryptoAssetPicker';
 import { parseContractError, makeMarketSlug } from '../../utils/format';
 import { useDateTimePicker } from '../../hooks/useDateTimePicker';
 import { compressMarketImage } from '../../utils/marketImage';
 import { uploadMarketMedia, deleteMarketMedia } from '../../services/marketMedia';
+import {
+  fetchLiveFeedSuggestions,
+  lookupSportsEventById,
+  searchSportsEvents,
+  saveLiveFeedConfig,
+} from '../../services/live';
+import type {
+  LiveFeedConfigInput,
+  LiveCryptoSearchCandidate,
+  LiveFeedSuggestionsResponse,
+} from '../../types/live';
 
 const CATEGORIES = ['Crypto', 'Sports', 'Politics', 'Entertainment', 'Science', 'Other'];
 const DURATION_PRESETS = [
@@ -64,19 +76,56 @@ export default function CreateMarket() {
   const deadlinePicker = useDateTimePicker();
   const [bValue, setBValue] = useState('1000');
   const [showBTooltip, setShowBTooltip] = useState(false);
+  const [feedEnabled, setFeedEnabled] = useState(true);
+  const [feedKind, setFeedKind] = useState<'crypto-price' | 'sports-score'>('crypto-price');
+  const [feedCryptoMetric, setFeedCryptoMetric] = useState<'price' | 'market-cap' | 'volume-24h'>('price');
+  const [feedCoingeckoId, setFeedCoingeckoId] = useState('bitcoin');
+  const [feedBaseSymbol, setFeedBaseSymbol] = useState('BTC');
+  const [feedQuoteSymbol, setFeedQuoteSymbol] = useState('USD');
+  const [feedVsCurrency, setFeedVsCurrency] = useState('usd');
+  const [feedEventId, setFeedEventId] = useState('');
+  const [feedLeagueName, setFeedLeagueName] = useState('');
+  const [feedHomeTeam, setFeedHomeTeam] = useState('');
+  const [feedAwayTeam, setFeedAwayTeam] = useState('');
+  const [feedForceUpcoming, setFeedForceUpcoming] = useState(false);
+  const feedEventIdRef = useRef('');
+  const [feedCandidates, setFeedCandidates] = useState<LiveFeedSuggestionsResponse['sports']['candidates']>([]);
+  const [feedSportsSearchQuery, setFeedSportsSearchQuery] = useState('');
+  const [feedSportsSearchLoading, setFeedSportsSearchLoading] = useState(false);
+  const [feedSportsSearchError, setFeedSportsSearchError] = useState('');
+  const [feedEventLookupLoading, setFeedEventLookupLoading] = useState(false);
+  const [feedEventLookupError, setFeedEventLookupError] = useState('');
+  const [feedDetecting, setFeedDetecting] = useState(false);
+  const [feedDetectionHint, setFeedDetectionHint] = useState('');
+  const [feedDetectionError, setFeedDetectionError] = useState('');
+  const [feedAutoFilled, setFeedAutoFilled] = useState(false);
+  const [feedUserEdited, setFeedUserEdited] = useState(false);
+  const [feedSaving, setFeedSaving] = useState(false);
+
+  const [cryptoPricePreview, setCryptoPricePreview] = useState<number | null>(null);
+  const [cryptoPriceLoading, setCryptoPriceLoading] = useState(false);
+  const [cryptoPriceError, setCryptoPriceError] = useState<string | null>(null);
+  const [showConfirmDialog, setShowConfirmDialog] = useState(false);
 
   const [submitting, setSubmitting] = useState(false);
-  const [txResult, setTxResult] = useState<{ type: 'success' | 'error'; text: string; market?: string; marketId?: string } | null>(null);
+  const [txResult, setTxResult] = useState<{ type: 'success' | 'error'; text: string; market?: string; marketId?: string; marketTitle?: string } | null>(null);
   const imageFileInputRef = useRef<HTMLInputElement | null>(null);
   const latestImagePreviewRef = useRef<string | null>(null);
   const latestImageUploadKeyRef = useRef('');
   const addressRef = useRef(address);
   const signerRef = useRef(signer);
   const keepUploadedImageOnCloseRef = useRef(false);
+  const feedDetectRequestIdRef = useRef(0);
+  const feedSearchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const submittingRef = useRef(false);
 
   latestImageUploadKeyRef.current = imageUploadKey;
   addressRef.current = address;
   signerRef.current = signer;
+
+  useEffect(() => {
+    feedEventIdRef.current = feedEventId;
+  }, [feedEventId]);
 
   useEffect(() => {
     latestImagePreviewRef.current = localImagePreviewUrl;
@@ -221,10 +270,301 @@ export default function CreateMarket() {
     parseFloat(bValue) >= 1000,
   ].filter(Boolean).length;
 
+  const markFeedUserEdited = () => {
+    setFeedUserEdited(true);
+    setFeedAutoFilled(false);
+  };
+
+  const feedValidationMessage = !feedEnabled
+    ? ''
+    : feedKind === 'crypto-price'
+      ? (() => {
+          if (!feedCoingeckoId.trim()) return 'Live feed requires a CoinGecko id.';
+          if (!feedBaseSymbol.trim()) return 'Live feed requires a base symbol.';
+          if (!feedQuoteSymbol.trim()) return 'Live feed requires a quote symbol.';
+          if (!feedVsCurrency.trim()) return 'Live feed requires a quote key.';
+          return '';
+        })()
+      : (!feedEventId.trim() ? 'Live feed requires a SportsDB event id.' : '');
+
+  const feedCanSave = feedEnabled && !feedValidationMessage;
+  const showFeedSummary = feedEnabled && feedCanSave;
+  const showFeedValidation = feedEnabled && !feedCanSave;
+
+  const applyFeedCryptoCandidate = (candidate: LiveCryptoSearchCandidate) => {
+    setFeedKind('crypto-price');
+    setFeedCoingeckoId(candidate.id);
+    setFeedBaseSymbol(candidate.symbol.toUpperCase());
+    setFeedQuoteSymbol((feedQuoteSymbol.trim() || feedVsCurrency.trim() || 'usd').toUpperCase());
+    markFeedUserEdited();
+    setFeedDetectionHint(`Selected ${candidate.name} (${candidate.symbol.toUpperCase()}) from CoinGecko.`);
+    setFeedDetectionError('');
+  };
+
+  const detectFeedFromDraft = async () => {
+    if (!title.trim() || !actualCategory.trim()) return;
+
+    feedDetectRequestIdRef.current += 1;
+    const requestId = feedDetectRequestIdRef.current;
+
+    setFeedDetecting(true);
+    setFeedDetectionError('');
+    setFeedDetectionHint('Detecting feed suggestions from your draft...');
+
+    try {
+      const suggestions = await fetchLiveFeedSuggestions({
+        title: title.trim(),
+        category: actualCategory.trim(),
+        description: description.trim(),
+        outcomeLabels: outcomes.map((o) => o.trim()).filter(Boolean),
+      });
+
+      if (requestId !== feedDetectRequestIdRef.current) return;
+
+      const cryptoScore = suggestions.crypto.detected ? suggestions.crypto.confidence : 0;
+      const sportsScore = suggestions.sports.detected ? suggestions.sports.confidence : 0;
+
+      setFeedCandidates(suggestions.sports.candidates ?? []);
+
+      if (sportsScore > cryptoScore && suggestions.sports.detected) {
+        setFeedKind('sports-score');
+        setFeedEventId(suggestions.sports.selectedEventId || '');
+        setFeedLeagueName(suggestions.sports.selectedLeagueName || '');
+        setFeedHomeTeam(suggestions.sports.homeTeam || '');
+        setFeedAwayTeam(suggestions.sports.awayTeam || '');
+        setFeedSportsSearchQuery(`${suggestions.sports.homeTeam || ''} vs ${suggestions.sports.awayTeam || ''}`.trim());
+        setFeedDetectionHint(suggestions.sports.reason || 'Detected sports feed suggestion.');
+        setFeedAutoFilled(true);
+      } else if (suggestions.crypto.detected) {
+        setFeedKind('crypto-price');
+        setFeedCoingeckoId(suggestions.crypto.coingeckoId || 'bitcoin');
+        setFeedBaseSymbol(suggestions.crypto.baseSymbol || 'BTC');
+        setFeedQuoteSymbol(suggestions.crypto.quoteSymbol || 'USD');
+        setFeedVsCurrency(suggestions.crypto.vsCurrency || 'usd');
+        setFeedCryptoMetric(suggestions.crypto.metric || 'price');
+        setFeedDetectionHint(suggestions.crypto.reason || 'Detected crypto feed suggestion.');
+        setFeedAutoFilled(true);
+      } else if (suggestions.sports.detected) {
+        setFeedKind('sports-score');
+        setFeedEventId(suggestions.sports.selectedEventId || '');
+        setFeedLeagueName(suggestions.sports.selectedLeagueName || '');
+        setFeedHomeTeam(suggestions.sports.homeTeam || '');
+        setFeedAwayTeam(suggestions.sports.awayTeam || '');
+        setFeedSportsSearchQuery(`${suggestions.sports.homeTeam || ''} vs ${suggestions.sports.awayTeam || ''}`.trim());
+        setFeedDetectionHint(suggestions.sports.reason || 'Detected sports feed suggestion.');
+        setFeedAutoFilled(true);
+      } else {
+        setFeedEnabled(false);
+        setFeedKind('crypto-price');
+        setFeedEventId('');
+        setFeedLeagueName('');
+        setFeedHomeTeam('');
+        setFeedAwayTeam('');
+        setFeedCoingeckoId('');
+        setFeedBaseSymbol('');
+        setFeedQuoteSymbol('');
+        setFeedVsCurrency('');
+        setFeedCryptoMetric('price');
+        setFeedAutoFilled(false);
+        setFeedUserEdited(false);
+        setFeedDetectionHint('No strong feed suggestion found. Fill manually or continue without feed.');
+      }
+    } catch (err) {
+      if (requestId !== feedDetectRequestIdRef.current) return;
+      const msg = err instanceof Error ? err.message : 'Could not detect feed suggestion.';
+      setFeedDetectionError(msg);
+      setFeedDetectionHint('');
+    } finally {
+      if (requestId === feedDetectRequestIdRef.current) {
+        setFeedDetecting(false);
+      }
+    }
+  };
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      if (!title.trim() || !actualCategory.trim()) return;
+      if (feedUserEdited) return;
+      void detectFeedFromDraft();
+    }, 500);
+    return () => {
+      clearTimeout(timer);
+      feedDetectRequestIdRef.current += 1;
+      setFeedDetecting(false);
+    };
+  }, [title, actualCategory, description, outcomes, feedUserEdited]);
+
+  useEffect(() => {
+    if (
+      feedKind !== 'crypto-price' ||
+      feedCryptoMetric !== 'price' ||
+      !feedCoingeckoId.trim() ||
+      !feedVsCurrency.trim()
+    ) {
+      setCryptoPriceLoading(false);
+      setCryptoPricePreview(null);
+      setCryptoPriceError(null);
+      return;
+    }
+
+    let cancelled = false;
+    setCryptoPriceLoading(true);
+    setCryptoPriceError(null);
+
+    const normalizedVsCurrency = feedVsCurrency.trim().toLowerCase();
+
+    fetch(`https://api.coingecko.com/api/v3/simple/price?ids=${encodeURIComponent(feedCoingeckoId.trim())}&vs_currencies=${encodeURIComponent(normalizedVsCurrency)}`)
+      .then(async (res) => {
+        if (cancelled) return;
+        if (res.status === 429) {
+          throw new Error('Rate limit exceeded. Please try again in a moment.');
+        }
+        if (!res.ok) throw new Error('Failed to fetch price');
+        const data = await res.json();
+        const price = data[feedCoingeckoId.trim()]?.[normalizedVsCurrency];
+        if (price === undefined) throw new Error('Price not found');
+        setCryptoPricePreview(typeof price === 'number' ? price : null);
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        setCryptoPriceError(err instanceof Error ? err.message : 'Failed to fetch price');
+        setCryptoPricePreview(null);
+      })
+      .finally(() => {
+        if (!cancelled) setCryptoPriceLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [feedKind, feedCryptoMetric, feedCoingeckoId, feedVsCurrency]);
+
+  useEffect(() => {
+    if (feedKind !== 'sports-score') {
+      setFeedSportsSearchLoading(false);
+      setFeedSportsSearchError('');
+      setFeedEventLookupLoading(false);
+      setFeedEventLookupError('');
+      setFeedCandidates([]);
+      setFeedEventId('');
+      setFeedLeagueName('');
+      setFeedHomeTeam('');
+      setFeedAwayTeam('');
+      setFeedForceUpcoming(false);
+      return;
+    }
+    const query = feedSportsSearchQuery.trim();
+    if (!query || query.length < 3) {
+      setFeedSportsSearchLoading(false);
+      setFeedSportsSearchError('');
+      setFeedCandidates([]);
+      return;
+    }
+
+    let cancelled = false;
+    if (feedSearchTimerRef.current) {
+      clearTimeout(feedSearchTimerRef.current);
+      feedSearchTimerRef.current = null;
+    }
+    setFeedSportsSearchLoading(true);
+    setFeedSportsSearchError('');
+
+    feedSearchTimerRef.current = setTimeout(() => {
+      searchSportsEvents(query)
+        .then((result) => {
+          if (cancelled) return;
+          setFeedCandidates(result.candidates);
+          if (!feedEventIdRef.current && result.candidates[0]) {
+            setFeedEventId(result.candidates[0].eventId);
+            feedEventIdRef.current = result.candidates[0].eventId;
+            setFeedLeagueName(result.candidates[0].leagueName);
+            setFeedHomeTeam(result.candidates[0].homeTeam || '');
+            setFeedAwayTeam(result.candidates[0].awayTeam || '');
+          }
+        })
+        .catch((err) => {
+          if (cancelled) return;
+          const msg = err instanceof Error ? err.message : 'Failed to search sports events.';
+          setFeedSportsSearchError(msg);
+        })
+        .finally(() => {
+          if (!cancelled) setFeedSportsSearchLoading(false);
+        });
+    }, 300);
+
+    return () => {
+      cancelled = true;
+      if (feedSearchTimerRef.current) {
+        clearTimeout(feedSearchTimerRef.current);
+        feedSearchTimerRef.current = null;
+      }
+    };
+  }, [feedSportsSearchQuery, feedKind]);
+
+  const applyFeedSportsCandidate = (candidate: LiveFeedSuggestionsResponse['sports']['candidates'][number]) => {
+    setFeedEventId(candidate.eventId);
+    feedEventIdRef.current = candidate.eventId;
+    setFeedLeagueName(candidate.leagueName);
+    setFeedHomeTeam(candidate.homeTeam || '');
+    setFeedAwayTeam(candidate.awayTeam || '');
+  };
+
+  const resolveFeedSportsEventId = async (rawEventId: string) => {
+    const nextEventId = rawEventId.trim();
+    if (!nextEventId) return null;
+
+    const existingCandidate = feedCandidates.find((candidate) => candidate.eventId === nextEventId) || null;
+    if (existingCandidate) {
+      applyFeedSportsCandidate(existingCandidate);
+      setFeedEventLookupError('');
+      return existingCandidate;
+    }
+
+    setFeedEventLookupLoading(true);
+    setFeedEventLookupError('');
+    try {
+      const candidate = await lookupSportsEventById(nextEventId);
+      if (!candidate) {
+        throw new Error('Sports event not found for this event id.');
+      }
+
+      applyFeedSportsCandidate(candidate);
+      setFeedCandidates((prev) => [candidate, ...prev.filter((item) => item.eventId !== candidate.eventId)]);
+      setFeedEventLookupError('');
+      return candidate;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to load SportsDB event id.';
+      setFeedEventLookupError(message);
+      throw err;
+    } finally {
+      setFeedEventLookupLoading(false);
+    }
+  };
+
   const handleSubmit = async () => {
-    if (!signer || !isValid || imageUploading) return;
+    if (submittingRef.current) return;
+    submittingRef.current = true;
+
+    if (!signer || !isValid || imageUploading || feedSaving) {
+      submittingRef.current = false;
+      return;
+    }
+
+    if (!address || !ethers.isAddress(address)) {
+      setTxResult({ type: 'error', text: 'Invalid wallet address. Please reconnect your wallet.' });
+      submittingRef.current = false;
+      return;
+    }
+
+    if (feedEnabled && !feedCanSave) {
+      setTxResult({ type: 'error', text: feedValidationMessage || 'Live feed is enabled but incomplete.' });
+      submittingRef.current = false;
+      return;
+    }
+
     setSubmitting(true);
     setTxResult(null);
+    setFeedSaving(false);
     try {
       const factory = new ethers.Contract(FACTORY_ADDRESS, FACTORY_ABI, signer);
       const bWad = ethers.parseEther(bValue);
@@ -264,7 +604,69 @@ export default function CreateMarket() {
         text: 'Market created successfully!',
         market: marketAddr,
         marketId,
+        marketTitle: title.trim(),
       });
+
+      if (marketAddr && feedCanSave) {
+        setFeedSaving(true);
+        try {
+          let payload: LiveFeedConfigInput;
+          if (feedKind === 'crypto-price') {
+            payload = {
+              marketAddress: marketAddr,
+              enabled: true,
+              kind: 'crypto-price',
+              crypto: {
+                coingeckoId: feedCoingeckoId.trim().toLowerCase(),
+                baseSymbol: feedBaseSymbol.trim().toUpperCase(),
+                quoteSymbol: feedQuoteSymbol.trim().toUpperCase(),
+                vsCurrency: feedVsCurrency.trim().toLowerCase(),
+                metric: feedCryptoMetric,
+              },
+            };
+          } else {
+            const resolvedCandidate = (!feedLeagueName.trim() || !feedHomeTeam.trim() || !feedAwayTeam.trim())
+              ? await resolveFeedSportsEventId(feedEventId.trim()).catch(() => null)
+              : null;
+
+            payload = {
+              marketAddress: marketAddr,
+              enabled: true,
+              kind: 'sports-score',
+              sports: {
+                eventId: feedEventId.trim(),
+                leagueName: (resolvedCandidate?.leagueName || feedLeagueName).trim(),
+                homeTeam: (resolvedCandidate?.homeTeam || feedHomeTeam).trim() || undefined,
+                awayTeam: (resolvedCandidate?.awayTeam || feedAwayTeam).trim() || undefined,
+                forceUpcoming: feedForceUpcoming,
+              },
+            };
+          }
+
+          await saveLiveFeedConfig(address || '', payload, signer);
+          setTxResult({
+            type: 'success',
+            text: 'Market created and live feed attached successfully!',
+            market: marketAddr,
+            marketId,
+            marketTitle: title.trim(),
+          });
+        } catch (feedErr) {
+          const feedMsg = parseContractError(feedErr);
+          setTxResult({
+            type: 'error',
+            text: `Market created, but feed setup failed: ${feedMsg}`,
+            market: marketAddr,
+            marketId,
+            marketTitle: title.trim(),
+          });
+        } finally {
+          setFeedSaving(false);
+          setSubmitting(false);
+        }
+      } else {
+        setSubmitting(false);
+      }
 
       setTitle('');
       setDescription('');
@@ -277,11 +679,27 @@ export default function CreateMarket() {
         return null;
       });
       setOutcomes(['Yes', 'No']);
+      setFeedEnabled(true);
+      setFeedKind('crypto-price');
+      setFeedAutoFilled(false);
+      setFeedUserEdited(false);
+      setFeedCandidates([]);
+      setFeedSportsSearchQuery('');
+      setFeedSportsSearchError('');
+      setFeedDetectionHint('');
+      setFeedDetectionError('');
+      setFeedEventLookupError('');
+      setFeedEventId('');
+      setFeedLeagueName('');
+      setFeedHomeTeam('');
+      setFeedAwayTeam('');
+      setFeedForceUpcoming(false);
     } catch (err) {
       keepUploadedImageOnCloseRef.current = false;
       setTxResult({ type: 'error', text: parseContractError(err) });
-    } finally {
       setSubmitting(false);
+    } finally {
+      submittingRef.current = false;
     }
   };
 
@@ -417,15 +835,15 @@ export default function CreateMarket() {
               accept="image/*"
               className="sr-only"
               onChange={handleImageFileChange}
-              disabled={imageUploading || submitting}
+              disabled={imageUploading || submitting || feedSaving}
             />
             <button
               type="button"
               onClick={() => imageFileInputRef.current?.click()}
-              disabled={imageUploading || submitting}
+              disabled={imageUploading || submitting || feedSaving}
               aria-label="Upload market header image"
               className={`w-full text-left rounded-2xl border border-dashed border-white/[0.2] bg-dark-900/60 p-4 transition-colors ${
-                imageUploading || submitting
+                imageUploading || submitting || feedSaving
                   ? 'opacity-60 cursor-not-allowed'
                   : 'hover:border-primary-400/40 hover:bg-dark-850/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400/40'
               }`}
@@ -486,7 +904,7 @@ export default function CreateMarket() {
                   <button
                     type="button"
                     onClick={handleClearImage}
-                    disabled={imageUploading || submitting}
+                    disabled={imageUploading || submitting || feedSaving}
                     className="text-2xs text-red-300 hover:text-red-200"
                   >
                     Remove image
@@ -697,14 +1115,244 @@ export default function CreateMarket() {
             </div>
           </div>
 
+          {/* Live feed setup */}
+          <div className="card p-5">
+            <SectionHeader
+              icon={<svg className="w-4 h-4 text-primary-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 17v-2m3 2v-4m3 4v-6m-9 6h12" /></svg>}
+              title="Live Feed (Optional, Recommended)"
+              subtitle="Attach price/score feed immediately after market creation"
+            />
+
+            <label className="flex items-center gap-2 text-sm text-dark-300 mb-3">
+              <input
+                type="checkbox"
+                checked={feedEnabled}
+                onChange={(e) => {
+                  setFeedEnabled(e.target.checked);
+                  markFeedUserEdited();
+                }}
+                className="rounded border-white/[0.15] bg-dark-900"
+              />
+              Auto-attach live feed right after create
+            </label>
+
+            <div className="flex gap-2 mb-3">
+              <button
+                type="button"
+                onClick={() => { setFeedKind('crypto-price'); markFeedUserEdited(); }}
+                className={`chip ${feedKind === 'crypto-price' ? 'chip-active' : ''}`}
+              >
+                Crypto Price
+              </button>
+              <button
+                type="button"
+                onClick={() => { setFeedKind('sports-score'); markFeedUserEdited(); }}
+                className={`chip ${feedKind === 'sports-score' ? 'chip-active' : ''}`}
+              >
+                Sports Score
+              </button>
+              <button
+                type="button"
+                onClick={() => void detectFeedFromDraft()}
+                className="btn-secondary text-xs"
+                disabled={feedDetecting}
+              >
+                {feedDetecting ? 'Detecting...' : 'Detect From Draft'}
+              </button>
+            </div>
+
+            {feedDetectionHint && (
+              <p className="text-xs text-emerald-400 mb-2">{feedDetectionHint}</p>
+            )}
+            {feedDetectionError && (
+              <p className="text-xs text-amber-400 mb-2">{feedDetectionError}</p>
+            )}
+            {feedAutoFilled && !feedUserEdited && (
+              <p className="text-xs text-dark-500 mb-2">Detection pre-filled this section. Review it before creating the market.</p>
+            )}
+            {showFeedValidation && (
+              <p className="text-xs text-amber-400 mb-2">{feedValidationMessage}</p>
+            )}
+
+            {feedKind === 'crypto-price' ? (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <CryptoAssetPicker
+                  selectedId={feedCoingeckoId}
+                  selectedSymbol={feedBaseSymbol}
+                  selectedQuoteSymbol={feedQuoteSymbol}
+                  onSelect={applyFeedCryptoCandidate}
+                  onChange={markFeedUserEdited}
+                />
+                <select
+                  value={feedCryptoMetric}
+                  onChange={(e) => { setFeedCryptoMetric(e.target.value as 'price' | 'market-cap' | 'volume-24h'); markFeedUserEdited(); }}
+                  className="input-field"
+                >
+                  <option value="price">Metric: Price</option>
+                  <option value="market-cap">Metric: Market Cap</option>
+                  <option value="volume-24h">Metric: 24h Volume</option>
+                </select>
+                <input
+                  type="text"
+                  value={feedCoingeckoId}
+                  onChange={(e) => { setFeedCoingeckoId(e.target.value); markFeedUserEdited(); }}
+                  placeholder="CoinGecko id (bitcoin)"
+                  className="input-field"
+                />
+                <input
+                  type="text"
+                  value={feedBaseSymbol}
+                  onChange={(e) => { setFeedBaseSymbol(e.target.value); markFeedUserEdited(); }}
+                  placeholder="Base symbol (BTC)"
+                  className="input-field"
+                />
+                <input
+                  type="text"
+                  value={feedQuoteSymbol}
+                  onChange={(e) => { setFeedQuoteSymbol(e.target.value); markFeedUserEdited(); }}
+                  placeholder="Quote symbol (USD)"
+                  className="input-field"
+                />
+                <input
+                  type="text"
+                  value={feedVsCurrency}
+                  onChange={(e) => { setFeedVsCurrency(e.target.value); markFeedUserEdited(); }}
+                  placeholder="Quote key (usd)"
+                  className="input-field"
+                />
+                <p className="text-xs text-dark-500 sm:col-span-2">
+                  For cap/volume markets, choose metric above and keep pair as base/quote for display.
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                <input
+                  type="text"
+                  value={feedSportsSearchQuery}
+                  onChange={(e) => {
+                    setFeedSportsSearchQuery(e.target.value);
+                    markFeedUserEdited();
+                    // Clear selected event when search query is edited
+                    setFeedEventId('');
+                    setFeedLeagueName('');
+                    setFeedHomeTeam('');
+                    setFeedAwayTeam('');
+                  }}
+                  placeholder="Search matches, e.g. Brazil vs France"
+                  className="input-field"
+                />
+                {feedSportsSearchLoading && (
+                  <p className="text-xs text-dark-500">Searching matches...</p>
+                )}
+                {feedSportsSearchError && (
+                  <p className="text-xs text-amber-400">{feedSportsSearchError}</p>
+                )}
+                {feedCandidates.length === 0 && !feedSportsSearchLoading && feedSportsSearchQuery.trim().length >= 3 && (
+                  <p className="text-xs text-dark-500">No matches found yet. Try only teams like "Brazil vs France".</p>
+                )}
+                {feedCandidates.length > 0 && (
+                  <select
+                    value={feedEventId}
+                    onChange={(e) => {
+                      const id = e.target.value;
+                      setFeedEventId(id);
+                      const found = feedCandidates.find((c) => c.eventId === id);
+                      if (found) {
+                        setFeedLeagueName(found.leagueName);
+                        setFeedHomeTeam(found.homeTeam || '');
+                        setFeedAwayTeam(found.awayTeam || '');
+                      }
+                      markFeedUserEdited();
+                    }}
+                    className="input-field"
+                  >
+                    <option value="">Select detected event</option>
+                    {feedCandidates.map((c) => (
+                      <option key={c.eventId} value={c.eventId}>
+                        {c.homeTeam} vs {c.awayTeam} · {c.leagueName} · {c.kickoffAt ? new Date(c.kickoffAt).toLocaleString() : 'Date N/A'} · {c.statusLabel}
+                      </option>
+                    ))}
+                  </select>
+                )}
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={feedEventId}
+                    onChange={(e) => {
+                      setFeedEventId(e.target.value);
+                      setFeedEventLookupError('');
+                      markFeedUserEdited();
+                    }}
+                    onBlur={() => {
+                      if (feedEventId.trim()) {
+                        void resolveFeedSportsEventId(feedEventId.trim()).catch(() => {});
+                      }
+                    }}
+                    placeholder="TheSportsDB event id"
+                    className="input-field"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => void resolveFeedSportsEventId(feedEventId.trim()).catch(() => {})}
+                    disabled={!feedEventId.trim() || feedEventLookupLoading}
+                    className="btn-secondary shrink-0 text-xs"
+                  >
+                    {feedEventLookupLoading ? 'Loading...' : 'Load ID'}
+                  </button>
+                </div>
+                {feedEventLookupError && (
+                  <p className="text-xs text-amber-400">{feedEventLookupError}</p>
+                )}
+                <input
+                  type="text"
+                  value={feedLeagueName}
+                  onChange={(e) => { setFeedLeagueName(e.target.value); markFeedUserEdited(); }}
+                  placeholder="League name"
+                  className="input-field"
+                />
+                <p className="text-xs text-dark-500">Paste only the SportsDB event id to auto-fill league and teams, or keep using search from the title above.</p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <input
+                    type="text"
+                    value={feedHomeTeam}
+                    onChange={(e) => { setFeedHomeTeam(e.target.value); markFeedUserEdited(); }}
+                    placeholder="Home team (validation)"
+                    className="input-field"
+                  />
+                  <input
+                    type="text"
+                    value={feedAwayTeam}
+                    onChange={(e) => { setFeedAwayTeam(e.target.value); markFeedUserEdited(); }}
+                    placeholder="Away team (validation)"
+                    className="input-field"
+                  />
+                </div>
+                <label className="flex items-center gap-2 text-sm text-dark-300">
+                  <input
+                    type="checkbox"
+                    checked={feedForceUpcoming}
+                    onChange={(e) => { setFeedForceUpcoming(e.target.checked); markFeedUserEdited(); }}
+                    className="rounded border-white/[0.15] bg-dark-900"
+                  />
+                  Force Upcoming until you disable it
+                </label>
+              </div>
+            )}
+          </div>
+
           {/* Submit */}
           <div className="card p-5">
             <button
-              onClick={handleSubmit}
-              disabled={!isValid || submitting}
+              onClick={() => setShowConfirmDialog(true)}
+              disabled={!isValid || submitting || imageUploading || feedSaving || (feedEnabled && !feedCanSave)}
               className="btn-primary w-full py-3.5 text-base font-semibold"
             >
-              {submitting ? (
+              {feedSaving ? (
+                <span className="flex items-center justify-center gap-2">
+                  <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                  Saving Live Feed...
+                </span>
+              ) : submitting ? (
                 <span className="flex items-center justify-center gap-2">
                   <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
                   Creating Market...
@@ -751,7 +1399,7 @@ export default function CreateMarket() {
                   </p>
                   {txResult.marketId && (
                     <a
-                      href={`/market/${makeMarketSlug(Number(txResult.marketId), title)}`}
+                      href={`/market/${makeMarketSlug(Number(txResult.marketId), txResult.marketTitle || 'market')}`}
                       className="mt-2 inline-flex items-center gap-1 text-sm text-primary-400 hover:text-primary-300 font-medium"
                     >
                       View Market
@@ -810,6 +1458,22 @@ export default function CreateMarket() {
                     </span>
                   )}
                 </div>
+                {feedKind === 'crypto-price' && (
+                  <div className="mt-2 pt-3 border-t border-white/[0.08]">
+                    {cryptoPriceLoading ? (
+                      <p className="text-xs text-dark-500">Loading price...</p>
+                    ) : cryptoPriceError ? (
+                      <p className="text-xs text-red-400">{cryptoPriceError}</p>
+                    ) : cryptoPricePreview !== null ? (
+                      <p className="text-xs text-dark-300">
+                        <span className="text-dark-500">Current {feedBaseSymbol} Price: </span>
+                        <span className="text-emerald-400 font-semibold">
+                          {cryptoPricePreview.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 8 })} {feedQuoteSymbol || feedVsCurrency.toUpperCase()}
+                        </span>
+                      </p>
+                    ) : null}
+                  </div>
+                )}
               </div>
             </div>
 
@@ -840,6 +1504,78 @@ export default function CreateMarket() {
           </div>
         </div>
       </div>
+
+      {/* Confirmation Dialog */}
+      {showConfirmDialog && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-dark-950/80 backdrop-blur-sm" onClick={() => setShowConfirmDialog(false)} />
+          <div className="relative card w-full max-w-md p-6 animate-slide-up">
+            <h3 className="text-lg font-bold text-white mb-4">Confirm Market Creation</h3>
+
+            <div className="space-y-3 mb-6 text-sm">
+              <div>
+                <span className="text-dark-400">Title: </span>
+                <span className="text-white">{title || <span className="italic text-dark-500">Untitled</span>}</span>
+              </div>
+              <div>
+                <span className="text-dark-400">Category: </span>
+                <span className="text-white">{actualCategory || '-'}</span>
+              </div>
+              <div>
+                <span className="text-dark-400">Outcomes: </span>
+                <span className="text-white">{outcomes.filter(o => o.trim()).join(', ') || '-'}</span>
+              </div>
+              {outcomes.length === 2 && outcomes[0].trim().toLowerCase() === 'yes' && outcomes[1].trim().toLowerCase() === 'no' && (
+                <div className="p-3 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-400 text-xs">
+                  <svg className="w-4 h-4 inline mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                  You are about to create a market with default "Yes/No" outcomes. Consider customizing outcomes for better user experience.
+                </div>
+              )}
+              <div>
+                <span className="text-dark-400">Duration: </span>
+                <span className="text-white">{durationSeconds >= 86400 ? `${Math.floor(durationSeconds / 86400)} days` : `${Math.floor(durationSeconds / 3600)} hours`}</span>
+              </div>
+              <div>
+                <span className="text-dark-400">Liquidity (b): </span>
+                <span className="text-white">{bValue}</span>
+              </div>
+              {showFeedSummary && (
+                <div>
+                  <span className="text-dark-400">Live Feed: </span>
+                  <span className="text-emerald-400">{feedKind === 'crypto-price' ? 'Crypto Price' : 'Sports Score'}</span>
+                </div>
+              )}
+              {showFeedValidation && (
+                <div className="p-3 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-400 text-xs">
+                  {feedValidationMessage}
+                </div>
+              )}
+            </div>
+
+            <div className="flex gap-3">
+              <button
+                onClick={() => setShowConfirmDialog(false)}
+                className="flex-1 btn-secondary py-2.5"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => {
+                  if (feedEnabled && !feedCanSave) return;
+                  setShowConfirmDialog(false);
+                  handleSubmit();
+                }}
+                disabled={feedEnabled && !feedCanSave}
+                className="flex-1 btn-primary py-2.5"
+              >
+                Confirm & Create
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef, type ChangeEvent } from 'react';
 import { ethers } from 'ethers';
 import { useWallet } from '../../context/WalletContext';
-import { FACTORY_ADDRESS, LENS_ADDRESS, STAGE, STAGE_LABELS, STAGE_COLORS } from '../../config/network';
+import { FACTORY_ADDRESS, LENS_ADDRESS, STAGE, STAGE_LABELS, STAGE_COLORS, NETWORK } from '../../config/network';
 import { FACTORY_ABI, LENS_ABI, MARKET_ABI } from '../../config/abis';
 import ImageWithFallback from '../../components/ImageWithFallback';
 import ProbabilityBar from '../../components/ProbabilityBar';
@@ -33,72 +33,374 @@ export interface OwnerMarketData {
   cancelProofUri: string;
 }
 
+const MARKET_INFO_ABI = [
+  'function getMarketInfo() view returns (string _title, string _description, string _category, string _imageUri, string _proofUri, string[] _outcomeLabels, uint8 _stage, uint256 _winningOutcome, uint256 _createdAt, uint256 _marketDeadline, uint256 _totalVolumeWei, uint256 _participantCount, string _cancelReason, string _cancelProofUri)',
+  'function admin() view returns (address)',
+] as const;
+
+interface LensSummary {
+  market: string;
+  marketId: bigint;
+  title: string;
+  category: string;
+  imageUri: string;
+  outcomeLabels: string[];
+  impliedProbabilitiesWad: bigint[];
+  stage: bigint;
+  winningOutcome: bigint;
+  marketDeadline: bigint;
+  totalVolumeWei: bigint;
+  participants: bigint;
+  bWad: bigint;
+}
+
+interface MarketInfo {
+  _title: string;
+  _description: string;
+  _category: string;
+  _imageUri: string;
+  _proofUri: string;
+  _outcomeLabels: string[];
+  _stage: number;
+  _winningOutcome: bigint;
+  _createdAt: bigint;
+  _marketDeadline: bigint;
+  _totalVolumeWei: bigint;
+  _participantCount: bigint;
+  _cancelReason: string;
+  _cancelProofUri: string;
+}
+
+const OWNER_MARKETS_CACHE_TTL_MS = 15_000;
+const ownerMarketsCache = new Map<string, OwnerMarketData[]>();
+const ownerMarketsCacheAt = new Map<string, number>();
+
 export function useOwnerMarkets() {
-  const { readProvider } = useWallet();
+  const { readProvider, address } = useWallet();
+
+  const getCacheKey = useCallback(async () => {
+    if (!address) return null;
+    const network = await readProvider.getNetwork();
+    const chainId = network.chainId.toString();
+    const rpcUrl = NETWORK.rpcUrl;
+    const normalizedOwner = ethers.getAddress(address);
+    return `${chainId}:${rpcUrl}:${normalizedOwner}`;
+  }, [readProvider, address]);
+
   const [markets, setMarkets] = useState<OwnerMarketData[]>([]);
   const [loading, setLoading] = useState(true);
+  const latestFetchKeyRef = useRef('');
+  const fetchSequenceRef = useRef(0);
 
-  const fetchAll = useCallback(async () => {
+  const fetchAll = useCallback(async (force = false) => {
+    let currentFetchToken = '';
     try {
-      setLoading(true);
+      const cacheKey = await getCacheKey();
+      if (!cacheKey) {
+        latestFetchKeyRef.current = '';
+        setMarkets([]);
+        setLoading(false);
+        return;
+      }
+      currentFetchToken = `${cacheKey}:${Date.now()}:${fetchSequenceRef.current + 1}`;
+      fetchSequenceRef.current += 1;
+      latestFetchKeyRef.current = currentFetchToken;
+      const now = Date.now();
+      const cached = ownerMarketsCache.get(cacheKey);
+      const cachedAt = ownerMarketsCacheAt.get(cacheKey) ?? 0;
+
+      if (!force && cached && now - cachedAt < OWNER_MARKETS_CACHE_TTL_MS) {
+        if (latestFetchKeyRef.current !== currentFetchToken) return;
+        setMarkets(cached);
+        setLoading(false);
+        return;
+      }
+
+      if (!cached) {
+        setMarkets([]);
+        setLoading(true);
+      }
+
       const factory = new ethers.Contract(FACTORY_ADDRESS, FACTORY_ABI, readProvider);
       const lens = new ethers.Contract(LENS_ADDRESS, LENS_ABI, readProvider);
       const total = Number(await factory.totalMarkets());
-      if (total === 0) { setMarkets([]); return; }
+      if (total === 0) {
+        if (latestFetchKeyRef.current !== currentFetchToken) return;
+        ownerMarketsCache.set(cacheKey, []);
+        ownerMarketsCacheAt.set(cacheKey, Date.now());
+        setMarkets([]);
+        return;
+      }
 
-      const summaries = await lens.getMarketSummaries(0, total);
-      const result: OwnerMarketData[] = [];
+      const allSummaries = (await lens.getMarketSummaries(0, total)) as LensSummary[];
+      const normalizedOwner = address ? ethers.getAddress(address).toLowerCase() : '';
 
-      for (const s of summaries) {
-        const marketContract = new ethers.Contract(s.market, MARKET_ABI, readProvider);
-        const info = await marketContract.getMarketInfo();
+      const infoInterface = new ethers.Interface(MARKET_INFO_ABI);
+      const adminCalls = allSummaries.map((s) => ({
+        to: s.market,
+        data: infoInterface.encodeFunctionData('admin', []),
+      }));
 
-        result.push({
-          market: s.market,
-          marketId: Number(s.marketId),
-          title: s.title,
+      const adminResults = await Promise.all(
+        adminCalls.map(async (call) => {
+          try {
+            const result = await readProvider.call({ to: call.to, data: call.data });
+            const decoded = infoInterface.decodeFunctionResult('admin', result);
+            const adminAddr = decoded[0] as string;
+            return adminAddr.toLowerCase();
+          } catch (err) {
+            throw err;
+          }
+        })
+      );
+
+      const summaries = normalizedOwner
+        ? allSummaries.filter((s, i) => adminResults[i] === normalizedOwner)
+        : allSummaries;
+
+      const result: OwnerMarketData[] = summaries.map((s) => ({
+        market: s.market,
+        marketId: Number(s.marketId),
+        title: s.title,
+        description: '',
+        category: s.category,
+        imageUri: s.imageUri,
+        outcomeLabels: [...s.outcomeLabels],
+        impliedProbabilitiesWad: [...s.impliedProbabilitiesWad],
+        stage: Number(s.stage),
+        winningOutcome: Number(s.winningOutcome),
+        marketDeadline: Number(s.marketDeadline),
+        createdAt: 0,
+        totalVolumeWei: s.totalVolumeWei,
+        participants: Number(s.participants),
+        proofUri: '',
+        cancelReason: '',
+        cancelProofUri: '',
+      }));
+
+      const calls = summaries.map((s) => ({
+        to: s.market,
+        data: infoInterface.encodeFunctionData('getMarketInfo', []),
+      }));
+
+      const batchSize = 24;
+      const slots: Array<MarketInfo | null> = new Array(calls.length).fill(null);
+
+      await Promise.all(
+        Array.from({ length: Math.ceil(calls.length / batchSize) }, (_, chunkIdx) => {
+          const start = chunkIdx * batchSize;
+          const end = Math.min(start + batchSize, calls.length);
+          const chunk = calls.slice(start, end);
+          return readProvider
+            .send('eth_callMany', [
+              {
+                calls: chunk,
+                blockNumber: 'latest',
+              },
+            ])
+            .then(async (response: unknown) => {
+              let decodedCount = 0;
+              const rawResults = Array.isArray(response)
+                ? response
+                : Array.isArray((response as { results?: unknown[] })?.results)
+                  ? (response as { results: unknown[] }).results
+                  : [];
+
+              for (let i = 0; i < chunk.length; i += 1) {
+                const rawEntry = rawResults[i] as { success?: boolean; returnData?: string } | undefined;
+                const returnData = typeof rawEntry?.returnData === 'string' ? rawEntry.returnData : '';
+                if (!rawEntry?.success || !returnData || returnData === '0x') continue;
+                try {
+                  const decoded = infoInterface.decodeFunctionResult('getMarketInfo', returnData) as unknown as [
+                    string,
+                    string,
+                    string,
+                    string,
+                    string,
+                    string[],
+                    number,
+                    bigint,
+                    bigint,
+                    bigint,
+                    bigint,
+                    bigint,
+                    string,
+                    string,
+                  ];
+
+                  slots[start + i] = {
+                    _title: decoded[0],
+                    _description: decoded[1],
+                    _category: decoded[2],
+                    _imageUri: decoded[3],
+                    _proofUri: decoded[4],
+                    _outcomeLabels: decoded[5],
+                    _stage: Number(decoded[6]),
+                    _winningOutcome: decoded[7],
+                    _createdAt: decoded[8],
+                    _marketDeadline: decoded[9],
+                    _totalVolumeWei: decoded[10],
+                    _participantCount: decoded[11],
+                    _cancelReason: decoded[12],
+                    _cancelProofUri: decoded[13],
+                  };
+                  decodedCount += 1;
+                } catch {
+                  slots[start + i] = null;
+                }
+              }
+
+              // Retry individual failed entries
+              for (let i = 0; i < chunk.length; i += 1) {
+                if (slots[start + i] !== null) continue;
+                try {
+                  const raw = await readProvider.call({ to: chunk[i].to, data: chunk[i].data });
+                  const decoded = infoInterface.decodeFunctionResult('getMarketInfo', raw) as unknown as [
+                    string,
+                    string,
+                    string,
+                    string,
+                    string,
+                    string[],
+                    number,
+                    bigint,
+                    bigint,
+                    bigint,
+                    bigint,
+                    bigint,
+                    string,
+                    string,
+                  ];
+
+                  slots[start + i] = {
+                    _title: decoded[0],
+                    _description: decoded[1],
+                    _category: decoded[2],
+                    _imageUri: decoded[3],
+                    _proofUri: decoded[4],
+                    _outcomeLabels: decoded[5],
+                    _stage: Number(decoded[6]),
+                    _winningOutcome: decoded[7],
+                    _createdAt: decoded[8],
+                    _marketDeadline: decoded[9],
+                    _totalVolumeWei: decoded[10],
+                    _participantCount: decoded[11],
+                    _cancelReason: decoded[12],
+                    _cancelProofUri: decoded[13],
+                  };
+                  decodedCount += 1;
+                } catch {
+                  slots[start + i] = null;
+                }
+              }
+
+              if (decodedCount === 0 && chunk.length > 0) {
+                throw new Error('eth_callMany decode yielded zero results');
+              }
+            })
+            .catch(async () => {
+              await Promise.all(
+                chunk.map(async (call, localIdx) => {
+                  try {
+                    const raw = await readProvider.call({ to: call.to, data: call.data });
+                    const decoded = infoInterface.decodeFunctionResult('getMarketInfo', raw) as unknown as [
+                      string,
+                      string,
+                      string,
+                      string,
+                      string,
+                      string[],
+                      number,
+                      bigint,
+                      bigint,
+                      bigint,
+                      bigint,
+                      bigint,
+                      string,
+                      string,
+                    ];
+
+                    slots[start + localIdx] = {
+                      _title: decoded[0],
+                      _description: decoded[1],
+                      _category: decoded[2],
+                      _imageUri: decoded[3],
+                      _proofUri: decoded[4],
+                      _outcomeLabels: decoded[5],
+                      _stage: Number(decoded[6]),
+                      _winningOutcome: decoded[7],
+                      _createdAt: decoded[8],
+                      _marketDeadline: decoded[9],
+                      _totalVolumeWei: decoded[10],
+                      _participantCount: decoded[11],
+                      _cancelReason: decoded[12],
+                      _cancelProofUri: decoded[13],
+                    };
+                  } catch {
+                    slots[start + localIdx] = null;
+                  }
+                }),
+              );
+            });
+        }),
+      );
+
+      for (let i = 0; i < result.length; i += 1) {
+        const info = slots[i];
+        if (!info) continue;
+        result[i] = {
+          ...result[i],
           description: info._description,
-          category: s.category,
-          imageUri: s.imageUri,
-          outcomeLabels: [...s.outcomeLabels],
-          impliedProbabilitiesWad: [...s.impliedProbabilitiesWad],
-          stage: Number(s.stage),
-          winningOutcome: Number(s.winningOutcome),
-          marketDeadline: Number(s.marketDeadline),
           createdAt: Number(info._createdAt),
-          totalVolumeWei: s.totalVolumeWei,
-          participants: Number(s.participants),
           proofUri: info._proofUri,
           cancelReason: info._cancelReason || '',
           cancelProofUri: info._cancelProofUri || '',
-        });
+        };
       }
 
+      if (latestFetchKeyRef.current !== currentFetchToken) return;
+
+      ownerMarketsCache.set(cacheKey, result);
+      ownerMarketsCacheAt.set(cacheKey, Date.now());
       setMarkets(result);
 
       // Fetch accurate volumes from BlockScout events (buys + sells)
       const addresses = result.map((m) => m.market);
       fetchAllMarketVolumes(addresses).then((volumes) => {
+        if (latestFetchKeyRef.current !== currentFetchToken) return;
         if (volumes.size === 0) return;
-        setMarkets((prev) =>
-          prev.map((m) => {
+        setMarkets((prev) => {
+          if (latestFetchKeyRef.current !== currentFetchToken) return prev;
+          const next = prev.map((m) => {
             const vol = volumes.get(m.market.toLowerCase());
             return vol !== undefined ? { ...m, totalVolumeWei: vol } : m;
-          })
-        );
+          });
+
+          ownerMarketsCache.set(cacheKey, next);
+          ownerMarketsCacheAt.set(cacheKey, Date.now());
+          return next;
+        });
       }).catch((err) => {
         console.warn('BlockScout volume fetch failed, using on-chain values:', err);
       });
     } catch (err) {
       console.error('Failed to fetch markets:', err);
     } finally {
-      setLoading(false);
+      if (!currentFetchToken || latestFetchKeyRef.current === currentFetchToken) {
+        setLoading(false);
+      }
     }
-  }, [readProvider]);
+  }, [readProvider, getCacheKey, address]);
 
-  useEffect(() => { fetchAll(); }, [fetchAll]);
+  const refetch = useCallback(() => {
+    void fetchAll(true);
+  }, [fetchAll]);
 
-  return { markets, loading, refetch: fetchAll };
+  useEffect(() => {
+    void fetchAll(false);
+  }, [fetchAll]);
+
+  return { markets, loading, refetch };
 }
 
 // Reusable market card for owner views

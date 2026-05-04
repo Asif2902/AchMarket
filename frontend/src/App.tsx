@@ -21,6 +21,7 @@ import PendingResolution from './pages/owner/PendingResolution';
 import ResolvedMarkets from './pages/owner/ResolvedMarkets';
 import CancelledMarkets from './pages/owner/CancelledMarkets';
 import FeeManagement from './pages/owner/FeeManagement';
+import LiveFeeds from './pages/owner/LiveFeeds';
 
 const sharedRoutes = (
   <>
@@ -41,6 +42,7 @@ const ownerRoutes = (
     <Route path="pending" element={<PendingResolution />} />
     <Route path="resolved" element={<ResolvedMarkets />} />
     <Route path="cancelled" element={<CancelledMarkets />} />
+    <Route path="live-feeds" element={<LiveFeeds />} />
     <Route path="fees" element={<FeeManagement />} />
     <Route path="analytics" element={<Analytics />} />
   </Route>

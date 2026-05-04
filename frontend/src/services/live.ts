@@ -1,0 +1,241 @@
+import { ethers } from 'ethers';
+import type { Signer } from 'ethers';
+import type {
+  LiveFeedConfig,
+  LiveFeedConfigInput,
+  LiveCryptoSearchResponse,
+  LiveMarketDataResponse,
+  LiveFeedSuggestionInput,
+  LiveFeedSuggestionsResponse,
+  LiveSportsSearchResponse,
+} from '../types/live';
+
+const LIVE_FEED_CONFIG_API_PATH = '/api/live-feed-config';
+const LIVE_MARKET_API_PATH = '/api/live-market';
+const LIVE_FEED_SUGGEST_API_PATH = '/api/live-feed-suggest';
+const LIVE_FEED_SEARCH_API_PATH = '/api/live-feed-search';
+const LIVE_TOKEN_SEARCH_API_PATH = '/api/live-token-search';
+const LIVE_CONFIG_BATCH_SIZE = 50;
+
+function serializeLiveFeedPayload(payload: LiveFeedConfigInput): string {
+  if (payload.kind === 'crypto-price') {
+    return JSON.stringify({
+      marketAddress: payload.marketAddress,
+      enabled: payload.enabled,
+      kind: payload.kind,
+      crypto: {
+        coingeckoId: payload.crypto.coingeckoId,
+        baseSymbol: payload.crypto.baseSymbol,
+        quoteSymbol: payload.crypto.quoteSymbol,
+        vsCurrency: payload.crypto.vsCurrency,
+        metric: payload.crypto.metric,
+      },
+      sports: null,
+    });
+  }
+
+  return JSON.stringify({
+    marketAddress: payload.marketAddress,
+    enabled: payload.enabled,
+    kind: payload.kind,
+    crypto: null,
+    sports: {
+      eventId: payload.sports.eventId,
+      leagueName: payload.sports.leagueName,
+      homeTeam: payload.sports.homeTeam || undefined,
+      awayTeam: payload.sports.awayTeam || undefined,
+      forceUpcoming: payload.sports.forceUpcoming,
+    },
+  });
+}
+
+function buildLiveFeedSigningMessage(address: string, payload: LiveFeedConfigInput, timestamp: number): string {
+  return [
+    'AchMarket Live Feed Config',
+    `Address: ${address}`,
+    `Timestamp: ${timestamp}`,
+    `Payload: ${serializeLiveFeedPayload(payload)}`,
+    'No gas fee. Sign only if you trust this request.',
+  ].join('\n');
+}
+
+function withCacheBust(url: string): string {
+  const separator = url.includes('?') ? '&' : '?';
+  return `${url}${separator}t=${Date.now()}`;
+}
+
+async function parseApiResponse<T>(response: Response): Promise<T> {
+  const raw = await response.text();
+  let body: any = {};
+  if (raw) {
+    try {
+      body = JSON.parse(raw);
+    } catch {
+      body = { raw };
+    }
+  }
+
+  if (!response.ok) {
+    const fallback =
+      typeof body?.raw === 'string' && body.raw.trim()
+        ? body.raw.trim().slice(0, 240)
+        : `Request failed (${response.status})`;
+    const errorMessage = typeof body?.error === 'string' ? body.error : fallback;
+    throw new Error(errorMessage);
+  }
+
+  return body as T;
+}
+
+function sanitizeMarketAddress(value: string): string {
+  return ethers.getAddress(value).toLowerCase();
+}
+
+function sanitizeSymbol(value: string): string {
+  return value.trim().toUpperCase();
+}
+
+function sanitizeLiveFeedInput(input: LiveFeedConfigInput): LiveFeedConfigInput {
+  const marketAddress = sanitizeMarketAddress(input.marketAddress);
+  const enabled = Boolean(input.enabled);
+
+  if (input.kind === 'crypto-price') {
+    return {
+      marketAddress,
+      enabled,
+      kind: 'crypto-price',
+      crypto: {
+        coingeckoId: input.crypto.coingeckoId.trim().toLowerCase(),
+        baseSymbol: sanitizeSymbol(input.crypto.baseSymbol),
+        quoteSymbol: sanitizeSymbol(input.crypto.quoteSymbol),
+        vsCurrency: input.crypto.vsCurrency.trim().toLowerCase(),
+        metric: input.crypto.metric || 'price',
+      },
+      sports: null,
+    };
+  }
+
+  return {
+    marketAddress,
+    enabled,
+    kind: 'sports-score',
+    crypto: null,
+    sports: {
+      eventId: input.sports.eventId.trim(),
+      leagueName: input.sports.leagueName.trim(),
+      homeTeam: input.sports.homeTeam?.trim() || undefined,
+      awayTeam: input.sports.awayTeam?.trim() || undefined,
+      forceUpcoming: Boolean(input.sports.forceUpcoming),
+    },
+  };
+}
+
+export async function fetchLiveFeedConfig(marketAddress: string): Promise<LiveFeedConfig | null> {
+  const normalized = sanitizeMarketAddress(marketAddress);
+  const response = await fetch(withCacheBust(`${LIVE_FEED_CONFIG_API_PATH}?marketAddress=${encodeURIComponent(normalized)}`));
+  const body = await parseApiResponse<{ config: LiveFeedConfig | null }>(response);
+  return body.config;
+}
+
+export async function fetchLiveFeedConfigs(marketAddresses: string[]): Promise<LiveFeedConfig[]> {
+  if (!marketAddresses.length) return [];
+  const normalized = Array.from(new Set(marketAddresses.map(sanitizeMarketAddress)));
+
+  const chunks: string[][] = [];
+  for (let i = 0; i < normalized.length; i += LIVE_CONFIG_BATCH_SIZE) {
+    chunks.push(normalized.slice(i, i + LIVE_CONFIG_BATCH_SIZE));
+  }
+
+  const responses = await Promise.all(
+    chunks.map(async (chunk) => {
+      const response = await fetch(withCacheBust(`${LIVE_FEED_CONFIG_API_PATH}?marketAddresses=${encodeURIComponent(chunk.join(','))}`));
+      const body = await parseApiResponse<{ configs: LiveFeedConfig[] }>(response);
+      return Array.isArray(body.configs) ? body.configs : [];
+    }),
+  );
+
+  return responses.flat();
+}
+
+export async function saveLiveFeedConfig(
+  _address: string,
+  payload: LiveFeedConfigInput,
+  signer: Signer,
+): Promise<LiveFeedConfig> {
+  const walletAddress = sanitizeMarketAddress(_address);
+  const canonicalMarketAddress = sanitizeMarketAddress(payload.marketAddress);
+  const sanitizedPayload = sanitizeLiveFeedInput(payload);
+  sanitizedPayload.marketAddress = canonicalMarketAddress;
+  const timestamp = Date.now();
+  const message = buildLiveFeedSigningMessage(walletAddress, sanitizedPayload, timestamp);
+  const signature = await signer.signMessage(message);
+
+  const response = await fetch(LIVE_FEED_CONFIG_API_PATH, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      address: walletAddress,
+      timestamp,
+      signature,
+      serializedPayload: serializeLiveFeedPayload(sanitizedPayload),
+    }),
+  });
+
+  const body = await parseApiResponse<{ config: LiveFeedConfig }>(response);
+  return body.config;
+}
+
+export async function fetchLiveMarketData(marketAddress: string, signal?: AbortSignal): Promise<LiveMarketDataResponse> {
+  const normalized = sanitizeMarketAddress(marketAddress);
+  const response = await fetch(withCacheBust(`${LIVE_MARKET_API_PATH}?marketAddress=${encodeURIComponent(normalized)}`), { signal });
+  return parseApiResponse<LiveMarketDataResponse>(response);
+}
+
+export async function fetchLiveFeedSuggestions(input: LiveFeedSuggestionInput): Promise<LiveFeedSuggestionsResponse> {
+  const response = await fetch(LIVE_FEED_SUGGEST_API_PATH, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      title: input.title ?? '',
+      category: input.category ?? '',
+      description: input.description ?? '',
+      outcomeLabels: Array.isArray(input.outcomeLabels) ? input.outcomeLabels : [],
+    }),
+  });
+
+  return parseApiResponse<LiveFeedSuggestionsResponse>(response);
+}
+
+export async function searchSportsEvents(query: string): Promise<LiveSportsSearchResponse> {
+  const trimmed = query.trim();
+  if (!trimmed) {
+    return { query: '', candidates: [] };
+  }
+
+  const response = await fetch(withCacheBust(`${LIVE_FEED_SEARCH_API_PATH}?query=${encodeURIComponent(trimmed)}`));
+  return parseApiResponse<LiveSportsSearchResponse>(response);
+}
+
+export async function lookupSportsEventById(eventId: string) {
+  const trimmed = eventId.trim();
+  if (!trimmed) return null;
+
+  const response = await fetch(withCacheBust(`${LIVE_FEED_SEARCH_API_PATH}?eventId=${encodeURIComponent(trimmed)}`));
+  const body = await parseApiResponse<LiveSportsSearchResponse>(response);
+  const candidates = Array.isArray(body.candidates) ? body.candidates : [];
+  return candidates.length > 0 ? candidates[0] : null;
+}
+
+export async function searchCryptoAssets(query: string): Promise<LiveCryptoSearchResponse> {
+  const trimmed = query.trim();
+  if (!trimmed) {
+    return { query: '', candidates: [] };
+  }
+
+  const response = await fetch(withCacheBust(`${LIVE_TOKEN_SEARCH_API_PATH}?query=${encodeURIComponent(trimmed)}`));
+  return parseApiResponse<LiveCryptoSearchResponse>(response);
+}

@@ -12,7 +12,7 @@ import { PageLoader } from '../../components/LoadingSpinner';
 import UsdcIcon from '../../components/UsdcIcon';
 import { fetchTradeEvents, computeVolumeFromEvents } from '../../services/blockscout';
 import {
-  formatUSDC, formatCompactUSDC, formatWad, formatProbability, probToPercent, formatDate,
+  formatUSDC, formatCompactUSDC, formatCompact, formatWad, formatProbability, probToPercent, formatDate,
   applyBuySlippage, applySellSlippage, parseContractError, resolveImageUri,
   parseMarketSlug, parseProofLinks, parseDescription
 } from '../../utils/format';
@@ -21,6 +21,8 @@ import { NETWORK } from '../../config/network';
 import ChatThread from '../../components/chat/ChatThread';
 import { fetchProfileByAddress } from '../../services/profile';
 import { fetchLinkPreview, type LinkPreviewData } from '../../services/linkPreview';
+import { fetchLiveMarketData } from '../../services/live';
+import type { LiveMarketDataResponse } from '../../types/live';
 
 const DEFAULT_META_TITLE = 'AchMarket - Prediction Markets';
 const DEFAULT_META_DESCRIPTION = 'Trade prediction markets on ARC Testnet with USDC.';
@@ -89,6 +91,60 @@ function setCanonicalUrl(url: string): void {
   document.head.appendChild(link);
 }
 
+function formatLivePrice(price: number): string {
+  if (!Number.isFinite(price)) return '--';
+  const abs = Math.abs(price);
+  if (abs >= 1000) {
+    return price.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  }
+  if (abs >= 1) {
+    return price.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 4 });
+  }
+  return price.toLocaleString(undefined, { minimumFractionDigits: 4, maximumFractionDigits: 8 });
+}
+
+function formatLiveAge(iso: string): string {
+  const ts = Date.parse(iso);
+  if (!Number.isFinite(ts)) return 'unknown';
+  const seconds = Math.max(0, Math.floor((Date.now() - ts) / 1000));
+  if (seconds < 5) return 'just now';
+  if (seconds < 60) return `${seconds}s ago`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  return `${days}d ago`;
+}
+
+function formatLiveMetric(value: number | null): string {
+  if (value === null || !Number.isFinite(value)) return '--';
+  return formatCompact(value);
+}
+
+function formatCryptoPrimaryMetric(data: {
+  metric: 'price' | 'market-cap' | 'volume-24h';
+  price: number;
+  marketCap: number | null;
+  volume24h: number | null;
+}): string {
+  if (data.metric === 'market-cap') return formatLiveMetric(data.marketCap);
+  if (data.metric === 'volume-24h') return formatLiveMetric(data.volume24h);
+  return formatLivePrice(data.price);
+}
+
+function formatCryptoPrimaryLabel(metric: 'price' | 'market-cap' | 'volume-24h'): string {
+  if (metric === 'market-cap') return 'Market Cap';
+  if (metric === 'volume-24h') return '24h Volume';
+  return 'Price';
+}
+
+function formatCryptoPrimaryChangeLabel(metric: 'price' | 'market-cap' | 'volume-24h'): string {
+  if (metric === 'market-cap') return '24h price change';
+  if (metric === 'volume-24h') return '24h price change';
+  return '24h change';
+}
+
 export default function MarketDetail() {
   const { slug } = useParams<{ slug: string }>();
   const marketId = slug ? parseMarketSlug(slug) : null;
@@ -124,6 +180,9 @@ export default function MarketDetail() {
   const [refreshTrigger, setRefreshTrigger] = useState(0);
   const [userBalance, setUserBalance] = useState<bigint | null>(null);
   const [hasProfile, setHasProfile] = useState(false);
+  const [liveData, setLiveData] = useState<LiveMarketDataResponse | null>(null);
+  const [liveLoading, setLiveLoading] = useState(false);
+  const [liveError, setLiveError] = useState<string | null>(null);
   const hasLoadedOnce = useRef(false);
   const requestSeqRef = useRef(0);
   const prevMarketIdRef = useRef<number | null>(null);
@@ -176,6 +235,9 @@ export default function MarketDetail() {
       setEstimatedShares(null);
       setPreviewCost(null);
       setPreviewKey('');
+      setLiveData(null);
+      setLiveLoading(false);
+      setLiveError(null);
     }
   }, [marketId]);
 
@@ -442,6 +504,97 @@ export default function MarketDetail() {
   }, [marketAddress, detail?.market, detail?.outcomeLabels, detail?.totalSharesWad, detail?.bWad, detail?.createdAt]);
 
   useEffect(() => { fetchAll(); }, [fetchAll]);
+
+  useEffect(() => {
+    if (!marketAddress) {
+      setLiveData(null);
+      setLiveLoading(false);
+      setLiveError(null);
+      return;
+    }
+
+    let cancelled = false;
+    let inFlight = false;
+    let scheduleTimeoutId: ReturnType<typeof setTimeout> | undefined;
+    let abortTimeoutId: ReturnType<typeof setTimeout> | undefined;
+    let controller: AbortController | undefined;
+    let hasRequestedStageRefresh = false;
+
+    const schedule = (seconds: number) => {
+      if (cancelled) return;
+      scheduleTimeoutId = setTimeout(() => {
+        void poll(false);
+      }, Math.max(5, seconds) * 1000);
+    };
+
+    const poll = async (initial: boolean) => {
+      if (cancelled || inFlight) return;
+      inFlight = true;
+      if (initial) setLiveLoading(true);
+
+      controller = new AbortController();
+      const FETCH_TIMEOUT_MS = 12000;
+
+      abortTimeoutId = setTimeout(() => {
+        if (controller) {
+          controller.abort();
+        }
+      }, FETCH_TIMEOUT_MS);
+
+      try {
+        const data = await fetchLiveMarketData(marketAddress, controller.signal);
+        if (cancelled) return;
+        setLiveData(data);
+        setLiveError(null);
+        if (data.configured && data.finalSnapshot && !hasRequestedStageRefresh) {
+          hasRequestedStageRefresh = true;
+          void refreshData();
+        }
+        if (!data.configured || !data.finalSnapshot) {
+          const next = data.configured
+            ? (data.refreshFailed ? 30 : Math.max(5, data.nextSuggestedPollSeconds || 15))
+            : 30;
+          schedule(next);
+        }
+      } catch (err) {
+        if (cancelled) return;
+        setLiveData((prev) => {
+          if (!prev?.configured) return prev;
+          return {
+            ...prev,
+            stale: true,
+            refreshFailed: true,
+          };
+        });
+        const message = err instanceof Error ? err.message : 'Failed to load live reference data.';
+        setLiveError(message);
+        schedule(30);
+      } finally {
+        if (abortTimeoutId !== undefined) {
+          clearTimeout(abortTimeoutId);
+          abortTimeoutId = undefined;
+        }
+        controller = undefined;
+        inFlight = false;
+        if (!cancelled) setLiveLoading(false);
+      }
+    };
+
+    void poll(true);
+
+    return () => {
+      cancelled = true;
+      if (scheduleTimeoutId !== undefined) {
+        clearTimeout(scheduleTimeoutId);
+      }
+      if (abortTimeoutId !== undefined) {
+        clearTimeout(abortTimeoutId);
+      }
+      if (controller) {
+        controller.abort();
+      }
+    };
+  }, [marketAddress, refreshData]);
 
   useEffect(() => {
     if (!userAddress || !isConnected) { setUserBalance(null); setHasProfile(false); return; }
@@ -766,6 +919,7 @@ export default function MarketDetail() {
   const selectedOutcomeLabel = detail.outcomeLabels[selectedOutcome] ?? `Outcome ${selectedOutcome + 1}`;
   const selectedOutcomePrice = probToPercent(detail.impliedProbabilitiesWad[selectedOutcome] ?? 0n) / 100;
   const selectedOwnedShares = userInfo?.shares[selectedOutcome] ?? 0n;
+  const liveConfigured = liveData && liveData.configured ? liveData : null;
 
   return (
     <div className="min-h-screen animate-fade-in">
@@ -827,6 +981,176 @@ export default function MarketDetail() {
               <MiniStat label="Traders" value={detail.participants.toString()} />
               <MiniStat label="Created" value={formatDate(detail.createdAt)} small />
               <MiniStat label={isActive ? 'Ends' : 'Ended'} value={formatDate(detail.marketDeadline)} small />
+            </div>
+
+            <div className="card p-4 border-primary-500/20 bg-gradient-to-br from-primary-500/[0.08] via-transparent to-emerald-500/[0.05]">
+              <div className="flex items-center justify-between gap-3 mb-3">
+                <div>
+                  <p className="text-2xs uppercase tracking-[0.14em] text-white/45 font-semibold">Live Reference</p>
+                  <p className="text-xs text-white/70 mt-1">
+                    {liveConfigured
+                      ? liveConfigured.data.kind === 'crypto-price'
+                        ? `${liveConfigured.data.baseSymbol}/${liveConfigured.data.quoteSymbol} ${formatCryptoPrimaryLabel(liveConfigured.data.metric).toLowerCase()} feed`
+                        : `${liveConfigured.data.leagueName || 'Sports'} live score feed`
+                      : liveData && !liveData.configured
+                        ? 'This market resolves without an external reference feed'
+                        : liveError
+                          ? 'Error loading feed'
+                          : 'Loading feed...'}
+                  </p>
+                </div>
+                {liveData && !liveData.configured ? (
+                  <span className="badge bg-dark-750/80 text-dark-300 border-white/[0.08]">No Feed</span>
+                ) : liveError ? (
+                  <span className="badge bg-red-500/15 text-red-400 border-red-500/25">Error</span>
+                ) : !liveConfigured ? (
+                  <span className="badge bg-dark-750/80 text-dark-400 border-white/[0.08]">Loading</span>
+                ) : liveConfigured.finalSnapshot ? (
+                  <span className="badge bg-cyan-500/15 text-cyan-300 border-cyan-500/25">Final Snapshot</span>
+                ) : liveConfigured.effectiveStatus === 'upcoming' ? (
+                  <span className="badge bg-purple-500/15 text-purple-400 border-purple-500/25">Upcoming</span>
+                ) : liveConfigured.stale ? (
+                  <span className="badge bg-amber-500/15 text-amber-400 border-amber-500/25">Delayed</span>
+                ) : (
+                  <span className="badge bg-emerald-500/15 text-emerald-400 border-emerald-500/25">Live</span>
+                )}
+              </div>
+
+              {!liveConfigured && liveLoading && (
+                <p className="text-xs text-dark-400">Loading live data...</p>
+              )}
+
+              {!liveConfigured && !liveLoading && (
+                <p className="text-xs text-dark-400">
+                  {liveData && !liveData.configured
+                    ? (liveData.reason || 'This market does not use an external reference feed.')
+                    : (liveError || 'This market does not use an external reference feed.')}
+                </p>
+              )}
+
+              {liveConfigured && liveConfigured.data.kind === 'crypto-price' && (
+                <div className="space-y-2">
+                  <div className="flex items-end justify-between gap-2">
+                    <p className="text-xl sm:text-2xl font-bold text-white tabular-nums leading-none">
+                      {formatCryptoPrimaryMetric(liveConfigured.data)}
+                      <span className="text-sm text-white/60 ml-1">{liveConfigured.data.quoteSymbol}</span>
+                    </p>
+                    <div className="text-right">
+                      <p className={`text-sm font-semibold tabular-nums ${
+                        liveConfigured.data.change24h === null
+                          ? 'text-dark-400'
+                          : liveConfigured.data.change24h >= 0
+                            ? 'text-emerald-400'
+                            : 'text-red-400'
+                      }`}>
+                        {liveConfigured.data.change24h === null
+                          ? '--'
+                          : `${liveConfigured.data.change24h >= 0 ? '+' : ''}${liveConfigured.data.change24h.toFixed(2)}%`}
+                      </p>
+                      <p className="text-2xs text-dark-500">{formatCryptoPrimaryChangeLabel(liveConfigured.data.metric)}</p>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2 pt-1">
+                    <div className="rounded-lg bg-dark-900/40 border border-white/[0.08] px-2.5 py-2">
+                      <p className="text-2xs text-dark-500">Market Cap</p>
+                      <p className="text-xs font-semibold text-white tabular-nums mt-0.5">
+                        {formatLiveMetric(liveConfigured.data.marketCap)} {liveConfigured.data.quoteSymbol}
+                      </p>
+                    </div>
+                    <div className="rounded-lg bg-dark-900/40 border border-white/[0.08] px-2.5 py-2">
+                      <p className="text-2xs text-dark-500">24h Volume</p>
+                      <p className="text-xs font-semibold text-white tabular-nums mt-0.5">
+                        {formatLiveMetric(liveConfigured.data.volume24h)} {liveConfigured.data.quoteSymbol}
+                      </p>
+                    </div>
+                  </div>
+                  {liveConfigured.data.sparkline && liveConfigured.data.sparkline.length > 0 && (
+                    <div className="h-24 w-full mt-4 -mx-1">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <AreaChart data={liveConfigured.data.sparkline.map((price, index) => ({ index, price }))}>
+                          <defs>
+                            <linearGradient id="colorSparkline" x1="0" y1="0" x2="0" y2="1">
+                              <stop offset="5%" stopColor={liveConfigured.data.sparkline[0] <= liveConfigured.data.sparkline[liveConfigured.data.sparkline.length - 1] ? '#10b981' : '#ef4444'} stopOpacity={0.3}/>
+                              <stop offset="95%" stopColor={liveConfigured.data.sparkline[0] <= liveConfigured.data.sparkline[liveConfigured.data.sparkline.length - 1] ? '#10b981' : '#ef4444'} stopOpacity={0}/>
+                            </linearGradient>
+                          </defs>
+                          <Area 
+                            type="monotone" 
+                            dataKey="price" 
+                            stroke={liveConfigured.data.sparkline[0] <= liveConfigured.data.sparkline[liveConfigured.data.sparkline.length - 1] ? '#10b981' : '#ef4444'} 
+                            strokeWidth={2}
+                            fillOpacity={1} 
+                            fill="url(#colorSparkline)" 
+                            isAnimationActive={false}
+                          />
+                          <YAxis domain={['dataMin', 'dataMax']} hide />
+                          <Tooltip 
+                            content={({ active, payload }) => {
+                              if (active && payload && payload.length) {
+                                return (
+                                  <div className="bg-dark-800 border border-white/[0.1] px-2 py-1 rounded text-xs text-white tabular-nums shadow-xl">
+                                    {Number(payload[0].value).toLocaleString(undefined, { maximumFractionDigits: 6 })}
+                                  </div>
+                                );
+                              }
+                              return null;
+                            }}
+                            cursor={{ stroke: 'rgba(255,255,255,0.1)', strokeWidth: 1, strokeDasharray: '4 4' }}
+                          />
+                        </AreaChart>
+                      </ResponsiveContainer>
+                    </div>
+                  )}
+                  <div className="flex items-center justify-between text-2xs text-dark-500 pt-2 border-t border-white/[0.08]">
+                    <span>Source: {liveConfigured.data.provider}</span>
+                    <span>Updated {formatLiveAge(liveConfigured.fetchedAt)}</span>
+                  </div>
+                </div>
+              )}
+
+              {liveConfigured && liveConfigured.data.kind === 'sports-score' && (
+                <div className="space-y-2.5">
+                  {liveConfigured.effectiveStatus === 'upcoming' && liveConfigured.data.kickoffAt && (
+                    <div className="p-3 rounded-lg bg-purple-500/10 border border-purple-500/20 text-sm text-purple-300">
+                      <div className="flex items-center gap-2">
+                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                        </svg>
+                        Match starts {new Date(liveConfigured.data.kickoffAt).toLocaleString()}
+                      </div>
+                      <p className="text-2xs text-purple-400/80 mt-1">Live Score will begin when the match starts</p>
+                    </div>
+                  )}
+                  <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2">
+                    <div className="min-w-0 text-left flex flex-col items-start">
+                      <p className="text-xs text-dark-400 uppercase tracking-wider mb-1">Home</p>
+                      {liveConfigured.data.homeLogo ? (
+                        <img src={liveConfigured.data.homeLogo} alt={liveConfigured.data.homeTeam} className="w-10 h-10 object-contain mb-1" />
+                      ) : null}
+                      <p className="text-sm sm:text-base font-semibold text-white truncate w-full">{liveConfigured.data.homeTeam}</p>
+                    </div>
+                    <div className="text-center px-2 flex flex-col items-center justify-center">
+                      <p className="text-2xl sm:text-3xl font-bold text-white tabular-nums leading-none">
+                        {liveConfigured.data.homeScore ?? '-'}
+                        <span className="text-white/35 mx-1">-</span>
+                        {liveConfigured.data.awayScore ?? '-'}
+                      </p>
+                      <p className="text-2xs text-dark-500 mt-1">{liveConfigured.data.statusLabel}</p>
+                    </div>
+                    <div className="min-w-0 text-right flex flex-col items-end">
+                      <p className="text-xs text-dark-400 uppercase tracking-wider mb-1">Away</p>
+                      {liveConfigured.data.awayLogo ? (
+                        <img src={liveConfigured.data.awayLogo} alt={liveConfigured.data.awayTeam} className="w-10 h-10 object-contain mb-1" />
+                      ) : null}
+                      <p className="text-sm sm:text-base font-semibold text-white truncate w-full">{liveConfigured.data.awayTeam}</p>
+                    </div>
+                  </div>
+                  <div className="flex items-center justify-between text-2xs text-dark-500 pt-2 border-t border-white/[0.08]">
+                    <span>Source: {liveConfigured.data.provider}</span>
+                    <span>Updated {formatLiveAge(liveConfigured.fetchedAt)}</span>
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Countdown (active) */}

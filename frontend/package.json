@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1026.0",
@@ -20,6 +21,7 @@
     "react-dom": "^18.3.1",
     "react-router-dom": "^6.28.0",
     "recharts": "^2.13.3",
+    "undici": "^7.25.0",
     "viem": "^2.46.3",
     "wagmi": "^2.19.5"
   },
