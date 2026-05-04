@@ -975,7 +975,6 @@ export default async function handler(req: any, res: any) {
         const isTimestampOrMalformed = 
           msg.includes('timestamp') || 
           msg.includes('Timestamp') || 
-          msg.includes('Signature expired') || 
           msg.includes('Invalid signature format') ||
           msg.includes('required');
           
@@ -984,7 +983,7 @@ export default async function handler(req: any, res: any) {
         } else if (msg.includes('Invalid signature for wallet address')) {
           return res.status(401).json({ error: msg });
         }
-        return res.status(500).json({ error: msg || 'Internal signature error' });
+        throw sigErr;
       }
     }
 
@@ -1009,7 +1008,7 @@ export default async function handler(req: any, res: any) {
       return res.status(401).json({ error: msg });
     }
     // Malformed header/validation problems
-    if (lower.includes('wallet address') || lower.includes('signature') || lower.includes('timestamp') || lower.includes('invalid')) {
+    if (lower.includes('wallet address') || (lower.includes('signature') && !lower.includes('expired')) || lower.includes('timestamp') || lower.includes('invalid')) {
       return res.status(400).json({ error: msg });
     }
 
