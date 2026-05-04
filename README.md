@@ -118,6 +118,19 @@ npm run typecheck
 
 This list is sourced from the live feed asset mapping used by the app. The authoritative source is `frontend/src/config/liveCryptoAssets.ts`.
 
+### Supported Sports
+
+The platform integrates with TheSportsDB API (via the `searchevents.php` endpoint) to provide live feeds for sports matches. It supports a wide variety of global sports, including but not limited to:
+- Football (Soccer)
+- Basketball (NBA)
+- American Football (NFL)
+- Tennis
+- Baseball (MLB)
+- Ice Hockey (NHL)
+
+**How to use the Sports Score search bar:**
+When creating a market, use the search bar to query for specific matchups across these sports. You should enter the team names (e.g., "Lakers vs Warriors" or "Nadal Djokovic"). The `searchevents` API is capable of matching specific game events across all sports without needing to specify a league, bypassing the free tier limitations on bulk league lookups.
+
 ## Technology Stack
 
 ### Smart Contracts
