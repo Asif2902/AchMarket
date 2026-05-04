@@ -28,10 +28,29 @@ interface Props {
 }
 
 export default function MarketCard({ data, effectiveStatus }: Props) {
-  const isActive = data.stage === STAGE.Active;
-  const isSuspended = data.stage === STAGE.Suspended;
-  const isResolved = data.stage === STAGE.Resolved;
-  const isCancelled = data.stage === STAGE.Cancelled || data.stage === STAGE.Expired;
+  let derivedStage = data.stage;
+  if (effectiveStatus) {
+    switch (effectiveStatus) {
+      case 'live':
+      case 'upcoming':
+        derivedStage = STAGE.Active;
+        break;
+      case 'postponed':
+        derivedStage = STAGE.Suspended;
+        break;
+      case 'finished':
+        derivedStage = STAGE.Resolved;
+        break;
+      case 'cancelled':
+        derivedStage = STAGE.Cancelled;
+        break;
+    }
+  }
+
+  const isActive = derivedStage === STAGE.Active;
+  const isSuspended = derivedStage === STAGE.Suspended;
+  const isResolved = derivedStage === STAGE.Resolved;
+  const isCancelled = derivedStage === STAGE.Cancelled || derivedStage === STAGE.Expired;
   const isTradingAllowed = isActive || isSuspended;
 
   const hasOutcomes = data.impliedProbabilitiesWad.length > 0;
@@ -60,8 +79,8 @@ export default function MarketCard({ data, effectiveStatus }: Props) {
           <div className="absolute inset-0 bg-gradient-to-t from-[var(--bg-card)] via-[var(--bg-card)]/30 to-transparent" />
 
           <div className="absolute top-2 left-2">
-            <span className={`badge backdrop-blur-sm text-2xs ${STAGE_COLORS[data.stage]}`}>
-              {STAGE_LABELS[data.stage]}
+            <span className={`badge backdrop-blur-sm text-2xs ${STAGE_COLORS[derivedStage]}`}>
+              {STAGE_LABELS[derivedStage]}
             </span>
           </div>
           <div className="absolute top-2 right-2">

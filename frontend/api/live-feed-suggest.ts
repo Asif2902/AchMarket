@@ -854,19 +854,6 @@ async function detectSports(input: SuggestRequest) {
     };
   }
 
-  if (!teamPair) {
-    return {
-      detected: false,
-      confidence: 0,
-      reason: 'No clear sports matchup detected.',
-      homeTeam: null,
-      awayTeam: null,
-      selectedEventId: null,
-      selectedLeagueName: null,
-      candidates,
-    };
-  }
-
   let confidence = titleTeams ? 0.82 : 0.66;
   if (categoryHint) confidence += 0.06;
   if (candidates.length > 0) confidence += 0.08;
@@ -954,7 +941,15 @@ export default async function handler(req: any, res: any) {
     }
 
     if (signed) {
-      const canonicalBody = { ...rawBody };
+      let canonicalBody: Record<string, any> = {};
+      if (typeof rawBody === 'object' && rawBody !== null) {
+        canonicalBody = { ...rawBody };
+      } else if (rawBody === undefined || rawBody === null) {
+        canonicalBody = {};
+      } else {
+        return res.status(400).json({ error: 'Invalid request body type' });
+      }
+
       delete canonicalBody.address;
       delete canonicalBody.timestamp;
       delete canonicalBody.signature;
@@ -970,7 +965,14 @@ export default async function handler(req: any, res: any) {
         verifySignedMessage(address, timestamp, signature, message);
       } catch (sigErr: any) {
         const msg = sigErr?.message || '';
-        if (msg.includes('Timestamp') || msg.includes('Signature expired') || msg.includes('Invalid signature format')) {
+        const isTimestampOrMalformed = 
+          msg.includes('timestamp') || 
+          msg.includes('Timestamp') || 
+          msg.includes('Signature expired') || 
+          msg.includes('Invalid signature format') ||
+          msg.includes('required');
+          
+        if (isTimestampOrMalformed) {
           return res.status(400).json({ error: msg });
         } else if (msg.includes('Invalid signature for wallet address')) {
           return res.status(401).json({ error: msg });
