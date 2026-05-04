@@ -954,17 +954,28 @@ export default async function handler(req: any, res: any) {
     }
 
     if (signed) {
+      const canonicalBody = { ...rawBody };
+      delete canonicalBody.address;
+      delete canonicalBody.timestamp;
+      delete canonicalBody.signature;
+
       const message = [
         'AchMarket Live Feed Suggest',
         `Address: ${address}`,
         `Timestamp: ${timestamp}`,
-        `Body: ${JSON.stringify(rawBody)}`,
+        `Body: ${JSON.stringify(canonicalBody)}`,
       ].join('\n');
 
       try {
         verifySignedMessage(address, timestamp, signature, message);
       } catch (sigErr: any) {
-        return res.status(401).json({ error: sigErr.message || 'Invalid signature' });
+        const msg = sigErr?.message || '';
+        if (msg.includes('Timestamp') || msg.includes('Signature expired') || msg.includes('Invalid signature format')) {
+          return res.status(400).json({ error: msg });
+        } else if (msg.includes('Invalid signature for wallet address')) {
+          return res.status(401).json({ error: msg });
+        }
+        return res.status(500).json({ error: msg || 'Internal signature error' });
       }
     }
 
