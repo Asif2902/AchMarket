@@ -81,7 +81,7 @@ contract HybridMarketLens {
         require(_factory != address(0), "LensV2: zero factory");
         require(_router != address(0), "LensV2: zero router");
         require(_orderBook != address(0), "LensV2: zero order book");
-        factory = HybridMarketFactory(_factory);
+        factory = HybridMarketFactory(payable(_factory));
         router = MarketRouter(payable(_router));
         orderBook = HybridOrderBook(_orderBook);
     }
