@@ -2,8 +2,8 @@ import { createContext, useContext, useState, useEffect, useCallback, ReactNode 
 import { ethers } from 'ethers';
 import { useAccount, useDisconnect, useWalletClient, useSwitchChain } from 'wagmi';
 import { useConnectModal, useChainModal } from '@rainbow-me/rainbowkit';
-import { NETWORK, FACTORY_ADDRESS, LENS_ADDRESS } from '../config/network';
-import { FACTORY_ABI, LENS_ABI, MARKET_ABI } from '../config/abis';
+import { NETWORK, HYBRID_FACTORY_ADDRESS, HYBRID_LENS_ADDRESS } from '../config/network';
+import { HYBRID_FACTORY_ABI, HYBRID_LENS_ABI, MARKET_V2_ABI } from '../config/abis';
 
 interface WalletState {
   provider: ethers.BrowserProvider | null;
@@ -46,7 +46,7 @@ const WalletContext = createContext<WalletState>({
   disconnect: () => {},
   switchNetwork: () => {},
   getFactoryContract: () => null,
-  getLensContract: () => new ethers.Contract(LENS_ADDRESS, LENS_ABI, readProvider),
+  getLensContract: () => new ethers.Contract(HYBRID_LENS_ADDRESS, HYBRID_LENS_ABI, readProvider),
   getMarketContract: () => null,
   readProvider,
 });
@@ -121,7 +121,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     const currentAddress = address;
     (async () => {
       try {
-        const factory = new ethers.Contract(FACTORY_ADDRESS, FACTORY_ABI, readProvider);
+        const factory = new ethers.Contract(HYBRID_FACTORY_ADDRESS, HYBRID_FACTORY_ABI, readProvider);
         const ownerAddr: string = await factory.owner();
         if (!cancelled) {
           setIsOwner(ownerAddr.toLowerCase() === currentAddress.toLowerCase());
@@ -172,16 +172,16 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     (withSigner = false): ethers.Contract | null => {
       if (withSigner) {
         if (!signer) return null;
-        return new ethers.Contract(FACTORY_ADDRESS, FACTORY_ABI, signer);
+        return new ethers.Contract(HYBRID_FACTORY_ADDRESS, HYBRID_FACTORY_ABI, signer);
       }
-      return new ethers.Contract(FACTORY_ADDRESS, FACTORY_ABI, readProvider);
+      return new ethers.Contract(HYBRID_FACTORY_ADDRESS, HYBRID_FACTORY_ABI, readProvider);
     },
     [signer],
   );
 
   const getLensContract = useCallback(
     (): ethers.Contract => {
-      return new ethers.Contract(LENS_ADDRESS, LENS_ABI, readProvider);
+      return new ethers.Contract(HYBRID_LENS_ADDRESS, HYBRID_LENS_ABI, readProvider);
     },
     [],
   );
@@ -190,9 +190,9 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     (marketAddress: string, withSigner = false): ethers.Contract | null => {
       if (withSigner) {
         if (!signer) return null;
-        return new ethers.Contract(marketAddress, MARKET_ABI, signer);
+        return new ethers.Contract(marketAddress, MARKET_V2_ABI, signer);
       }
-      return new ethers.Contract(marketAddress, MARKET_ABI, readProvider);
+      return new ethers.Contract(marketAddress, MARKET_V2_ABI, readProvider);
     },
     [signer],
   );

@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState, type ChangeEvent } from 'react';
 import { ethers } from 'ethers';
 import { useWallet } from '../../context/WalletContext';
-import { FACTORY_ADDRESS } from '../../config/network';
-import { FACTORY_ABI } from '../../config/abis';
+import { HYBRID_FACTORY_ADDRESS } from '../../config/network';
+import { HYBRID_FACTORY_ABI } from '../../config/abis';
 import ImageWithFallback from '../../components/ImageWithFallback';
 import ProbabilityBar from '../../components/ProbabilityBar';
 import CryptoAssetPicker from '../../components/CryptoAssetPicker';
@@ -75,6 +75,10 @@ export default function CreateMarket() {
   const [useCalendar, setUseCalendar] = useState(false);
   const deadlinePicker = useDateTimePicker();
   const [bValue, setBValue] = useState('1000');
+  const [resolutionBufferHours, setResolutionBufferHours] = useState('48');
+  const [resolutionSource, setResolutionSource] = useState('Official source linked in the market description or live feed snapshot.');
+  const [fallbackResolutionSource, setFallbackResolutionSource] = useState('Admin multisig/arbitration using public evidence if the primary source is unavailable.');
+  const [invalidCondition, setInvalidCondition] = useState('Primary and fallback sources are unavailable, the wording is ambiguous, or the event cannot be settled objectively.');
   const [showBTooltip, setShowBTooltip] = useState(false);
   const [feedEnabled, setFeedEnabled] = useState(true);
   const [feedKind, setFeedKind] = useState<'crypto-price' | 'sports-score'>('crypto-price');
@@ -156,6 +160,11 @@ export default function CreateMarket() {
   const expiryDate = useCalendar && deadlinePicker.value
     ? new Date(deadlinePicker.value)
     : new Date(Date.now() + durationSeconds * 1000);
+  const resolutionBufferSeconds = Math.max(3600, Math.floor(parseFloat(resolutionBufferHours || '0') * 3600));
+  const resolutionTime = Math.floor(expiryDate.getTime() / 1000) + resolutionBufferSeconds;
+  const requiredSeedEth = Number.isFinite(parseFloat(bValue)) && outcomes.length >= 2
+    ? Math.max(0, parseFloat(bValue) * Math.log(outcomes.length))
+    : 0;
 
   const addOutcome = () => setOutcomes([...outcomes, '']);
   const removeOutcome = (index: number) => {
@@ -258,6 +267,9 @@ export default function CreateMarket() {
     outcomes.every(o => o.trim().length > 0) &&
     durationSeconds >= 3600 &&
     parseFloat(bValue) >= 1000 &&
+    resolutionSource.trim().length > 0 &&
+    fallbackResolutionSource.trim().length > 0 &&
+    invalidCondition.trim().length > 0 &&
     !imageUploading;
 
   // Count completed fields for progress
@@ -268,6 +280,9 @@ export default function CreateMarket() {
     outcomes.length >= 2 && outcomes.every(o => o.trim().length > 0),
     durationSeconds >= 3600,
     parseFloat(bValue) >= 1000,
+    resolutionSource.trim().length > 0,
+    fallbackResolutionSource.trim().length > 0,
+    invalidCondition.trim().length > 0,
   ].filter(Boolean).length;
 
   const markFeedUserEdited = () => {
@@ -566,8 +581,9 @@ export default function CreateMarket() {
     setTxResult(null);
     setFeedSaving(false);
     try {
-      const factory = new ethers.Contract(FACTORY_ADDRESS, FACTORY_ABI, signer);
+      const factory = new ethers.Contract(HYBRID_FACTORY_ADDRESS, HYBRID_FACTORY_ABI, signer);
       const bWad = ethers.parseEther(bValue);
+      const seedValue = ethers.parseEther(requiredSeedEth.toFixed(18));
       const encodedDescription = subcategory.trim().length > 0
         ? `${description.trim()}:::${subcategory.trim()}`
         : description.trim();
@@ -580,6 +596,11 @@ export default function CreateMarket() {
         outcomes.map(o => o.trim()),
         bWad,
         durationSeconds,
+        resolutionSource.trim(),
+        resolutionTime,
+        fallbackResolutionSource.trim(),
+        invalidCondition.trim(),
+        { value: seedValue },
       );
       keepUploadedImageOnCloseRef.current = true;
 
@@ -679,6 +700,10 @@ export default function CreateMarket() {
         return null;
       });
       setOutcomes(['Yes', 'No']);
+      setResolutionBufferHours('48');
+      setResolutionSource('Official source linked in the market description or live feed snapshot.');
+      setFallbackResolutionSource('Admin multisig/arbitration using public evidence if the primary source is unavailable.');
+      setInvalidCondition('Primary and fallback sources are unavailable, the wording is ambiguous, or the event cannot be settled objectively.');
       setFeedEnabled(true);
       setFeedKind('crypto-price');
       setFeedAutoFilled(false);
@@ -722,12 +747,12 @@ export default function CreateMarket() {
       <div className="mb-8 card p-4">
         <div className="flex items-center justify-between mb-2">
           <span className="text-xs font-medium text-dark-400">Form completion</span>
-          <span className="text-xs font-semibold text-primary-400">{completedSteps}/6 fields</span>
+          <span className="text-xs font-semibold text-primary-400">{completedSteps}/9 fields</span>
         </div>
         <div className="h-1.5 bg-dark-800 rounded-full overflow-hidden">
           <div
             className="h-full bg-gradient-to-r from-primary-600 to-primary-400 rounded-full transition-all duration-500 ease-out"
-            style={{ width: `${(completedSteps / 6) * 100}%` }}
+            style={{ width: `${(completedSteps / 9) * 100}%` }}
           />
         </div>
       </div>
@@ -1113,6 +1138,73 @@ export default function CreateMarket() {
                 </button>
               ))}
             </div>
+            <div className="mt-4 p-3 rounded-xl bg-dark-900/40 border border-white/[0.06]">
+              <p className="text-2xs uppercase tracking-[0.12em] text-dark-500 font-semibold mb-1">Required seed</p>
+              <p className="text-sm text-white font-semibold tabular-nums">
+                {requiredSeedEth.toFixed(4)} USDC
+              </p>
+              <p className="text-xs text-dark-500 mt-1">
+                The v2 factory seeds LMSR solvency at creation using b * ln(outcomes).
+              </p>
+            </div>
+          </div>
+
+          {/* Resolution rules */}
+          <div className="card p-5">
+            <SectionHeader
+              icon={<svg className="w-4 h-4 text-primary-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12.75L11.25 15 15 9.75M12 3.75l7.5 4.5v5.25c0 4.142-3.358 7.5-7.5 7.5s-7.5-3.358-7.5-7.5V8.25l7.5-4.5z" /></svg>}
+              title="Resolution Rules"
+              subtitle="Required for bonded optimistic resolution and challenges"
+            />
+            <div className="space-y-3">
+              <label className="block">
+                <span className="text-xs text-dark-400 mb-1.5 block">Exact primary source</span>
+                <textarea
+                  value={resolutionSource}
+                  onChange={(e) => setResolutionSource(e.target.value)}
+                  rows={2}
+                  className="input-field resize-none"
+                  placeholder="Official API, exchange page, league site, oracle feed, or exact URL"
+                />
+              </label>
+              <label className="block">
+                <span className="text-xs text-dark-400 mb-1.5 block">Fallback source</span>
+                <textarea
+                  value={fallbackResolutionSource}
+                  onChange={(e) => setFallbackResolutionSource(e.target.value)}
+                  rows={2}
+                  className="input-field resize-none"
+                  placeholder="Backup source or arbitration standard if primary source fails"
+                />
+              </label>
+              <label className="block">
+                <span className="text-xs text-dark-400 mb-1.5 block">Invalid or cancel condition</span>
+                <textarea
+                  value={invalidCondition}
+                  onChange={(e) => setInvalidCondition(e.target.value)}
+                  rows={2}
+                  className="input-field resize-none"
+                  placeholder="When this market should be invalid, cancelled, or sent to arbitration"
+                />
+              </label>
+              <div>
+                <label className="text-xs text-dark-400 mb-1.5 block">Resolution time after trading ends</label>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="number"
+                    value={resolutionBufferHours}
+                    onChange={(e) => setResolutionBufferHours(e.target.value)}
+                    min="1"
+                    step="1"
+                    className="input-field"
+                  />
+                  <span className="text-xs text-dark-400 w-16">hours</span>
+                </div>
+                <p className="text-xs text-dark-500 mt-2">
+                  Proposals open after <span className="text-white">{new Date(resolutionTime * 1000).toLocaleString()}</span>. Challenges use the resolver contract window.
+                </p>
+              </div>
+            </div>
           </div>
 
           {/* Live feed setup */}
@@ -1485,7 +1577,9 @@ export default function CreateMarket() {
                   { label: 'Outcomes', value: outcomes.filter(o => o.trim()).length.toString(), ok: outcomes.length >= 2 && outcomes.every(o => o.trim().length > 0) },
                   { label: 'Duration', value: durationSeconds >= 86400 ? `${Math.floor(durationSeconds / 86400)} days` : `${Math.floor(durationSeconds / 3600)} hours`, ok: durationSeconds >= 3600 },
                   { label: 'Liquidity (b)', value: bValue, ok: parseFloat(bValue) >= 1000 },
+                  { label: 'Seed', value: `${requiredSeedEth.toFixed(2)} USDC`, ok: requiredSeedEth > 0 },
                   { label: 'Expiry', value: durationSeconds >= 3600 ? expiryDate.toLocaleDateString() : '-', ok: durationSeconds >= 3600 },
+                  { label: 'Resolution', value: resolutionSource.trim() ? 'Configured' : '-', ok: resolutionSource.trim().length > 0 && fallbackResolutionSource.trim().length > 0 && invalidCondition.trim().length > 0 },
                 ].map(row => (
                   <div key={row.label} className="flex items-center justify-between">
                     <span className="text-dark-400 flex items-center gap-1.5">
@@ -1540,6 +1634,14 @@ export default function CreateMarket() {
               <div>
                 <span className="text-dark-400">Liquidity (b): </span>
                 <span className="text-white">{bValue}</span>
+              </div>
+              <div>
+                <span className="text-dark-400">Required seed: </span>
+                <span className="text-white">{requiredSeedEth.toFixed(4)} USDC</span>
+              </div>
+              <div>
+                <span className="text-dark-400">Resolution opens: </span>
+                <span className="text-white">{new Date(resolutionTime * 1000).toLocaleString()}</span>
               </div>
               {showFeedSummary && (
                 <div>

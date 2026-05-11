@@ -39,6 +39,16 @@ export default function MobileBottomNav() {
           }
           label="Analytics"
         />
+        <NavLink
+          to="/propose"
+          active={isActive('/propose')}
+          icon={
+            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M12 3.75l7.5 4.5v5.25c0 4.142-3.358 7.5-7.5 7.5s-7.5-3.358-7.5-7.5V8.25l7.5-4.5z" />
+            </svg>
+          }
+          label="Propose"
+        />
         {isConnected && (
           <NavLink
             to="/portfolio"

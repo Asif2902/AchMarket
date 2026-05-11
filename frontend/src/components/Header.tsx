@@ -34,6 +34,9 @@ export default function Header() {
               <NavLink to="/portfolio" active={location.pathname === '/portfolio'} badge={pendingCount > 0 ? pendingCount : undefined}>
                 Portfolio
               </NavLink>
+              <NavLink to="/propose" active={location.pathname === '/propose'}>
+                Propose
+              </NavLink>
               {isConnected && (
                 <NavLink to="/profile" active={location.pathname === '/profile' || location.pathname.startsWith('/profile/')}>
                   Profile

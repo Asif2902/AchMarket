@@ -3,8 +3,8 @@ import { Link } from 'react-router-dom';
 import { ethers } from 'ethers';
 import { useWallet } from '../../context/WalletContext';
 import { usePendingClaims } from '../../hooks/usePendingClaims';
-import { FACTORY_ADDRESS, LENS_ADDRESS, STAGE, STAGE_LABELS, STAGE_COLORS } from '../../config/network';
-import { FACTORY_ABI, LENS_ABI, MARKET_ABI } from '../../config/abis';
+import { HYBRID_FACTORY_ADDRESS, HYBRID_LENS_ADDRESS, STAGE, STAGE_LABELS, STAGE_COLORS } from '../../config/network';
+import { HYBRID_FACTORY_ABI, HYBRID_LENS_ABI, MARKET_V2_ABI } from '../../config/abis';
 import { PageLoader } from '../../components/LoadingSpinner';
 import EmptyState from '../../components/EmptyState';
 import UsdcIcon from '../../components/UsdcIcon';
@@ -91,7 +91,7 @@ export default function Portfolio() {
   const addrToIdCache = useRef<Map<string, number>>(new Map());
 
   const refreshPortfolio = useCallback(async (expectedAddress: string): Promise<Position[]> => {
-    const lens = new ethers.Contract(LENS_ADDRESS, LENS_ABI, readProvider);
+    const lens = new ethers.Contract(HYBRID_LENS_ADDRESS, HYBRID_LENS_ABI, readProvider);
     const portfolio = await lens.getUserPortfolio(expectedAddress);
 
     const portfolioAddrs = (portfolio as Array<Record<string, unknown>>)
@@ -105,7 +105,7 @@ export default function Portfolio() {
     const missingAddrs = uniqueAddrs.filter((addr) => !addrToIdCache.current.has(addr));
 
     if (missingAddrs.length > 0) {
-      const factory = new ethers.Contract(FACTORY_ADDRESS, FACTORY_ABI, readProvider);
+      const factory = new ethers.Contract(HYBRID_FACTORY_ADDRESS, HYBRID_FACTORY_ABI, readProvider);
       const totalMarkets = Number(await factory.totalMarkets());
       if (totalMarkets > 0) {
         const summaries = await lens.getMarketSummaries(0, totalMarkets);
@@ -117,20 +117,25 @@ export default function Portfolio() {
       }
     }
 
-    return portfolio.map((p: Record<string, unknown>) => ({
-      market: p.market as string,
-      marketId: addrToIdCache.current.get((p.market as string).toLowerCase()) ?? null,
-      title: p.title as string,
-      category: p.category as string,
-      outcomeLabels: [...(p.outcomeLabels as string[])],
-      sharesPerOutcome: [...(p.sharesPerOutcome as bigint[])],
-      netDepositedWei: p.netDepositedWei as bigint,
-      canRedeem: p.canRedeem as boolean,
-      canRefund: p.canRefund as boolean,
-      hasRedeemed: p.hasRedeemed as boolean,
-      hasRefunded: p.hasRefunded as boolean,
-      stage: Number(p.stage),
-    }));
+    return portfolio.map((p: Record<string, unknown>) => {
+      const sharesPerOutcome = [...(p.sharesPerOutcome as bigint[])];
+      const stage = Number(p.stage);
+      const estimatedValue = sharesPerOutcome.reduce((acc, value) => acc + value, 0n);
+      return {
+        market: p.market as string,
+        marketId: addrToIdCache.current.get((p.market as string).toLowerCase()) ?? null,
+        title: p.title as string,
+        category: p.category as string,
+        outcomeLabels: [...(p.outcomeLabels as string[])],
+        sharesPerOutcome,
+        netDepositedWei: estimatedValue,
+        canRedeem: p.canRedeem as boolean,
+        canRefund: (p.canRedeem as boolean) && stage !== STAGE.Resolved,
+        hasRedeemed: p.hasRedeemed as boolean,
+        hasRefunded: false,
+        stage,
+      };
+    });
   }, [readProvider]);
 
   useEffect(() => {
@@ -175,8 +180,8 @@ export default function Portfolio() {
     setTxPending(marketAddr);
     setTxMsg(null);
     try {
-      const market = new ethers.Contract(marketAddr, MARKET_ABI, signer);
-      const tx = action === 'redeem' ? await market.redeem() : await market.refund();
+      const market = new ethers.Contract(marketAddr, MARKET_V2_ABI, signer);
+      const tx = await market.redeem();
       await tx.wait();
       if (latestAddressRef.current === submittingAddress) {
         setTxMsg({ type: 'success', text: `${action === 'redeem' ? 'Winnings' : 'Refund'} claimed!` });

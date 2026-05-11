@@ -2,8 +2,8 @@ import { useCallback, useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { ethers } from 'ethers';
 import { useWallet } from '../../context/WalletContext';
-import { FACTORY_ADDRESS, LENS_ADDRESS, STAGE, STAGE_LABELS, STAGE_COLORS } from '../../config/network';
-import { FACTORY_ABI, LENS_ABI } from '../../config/abis';
+import { HYBRID_FACTORY_ADDRESS, HYBRID_LENS_ADDRESS, STAGE, STAGE_LABELS, STAGE_COLORS } from '../../config/network';
+import { HYBRID_FACTORY_ABI, HYBRID_LENS_ABI } from '../../config/abis';
 import { PageLoader } from '../../components/LoadingSpinner';
 import EmptyState from '../../components/EmptyState';
 import ImageWithFallback from '../../components/ImageWithFallback';
@@ -67,8 +67,8 @@ export default function PublicProfile() {
 
       const resolvedAddress = profileResponse.profile.address;
 
-      const factory = new ethers.Contract(FACTORY_ADDRESS, FACTORY_ABI, readProvider);
-      const lens = new ethers.Contract(LENS_ADDRESS, LENS_ABI, readProvider);
+      const factory = new ethers.Contract(HYBRID_FACTORY_ADDRESS, HYBRID_FACTORY_ABI, readProvider);
+      const lens = new ethers.Contract(HYBRID_LENS_ADDRESS, HYBRID_LENS_ABI, readProvider);
 
       const portfolio = await lens.getUserPortfolio(resolvedAddress);
       const portfolioArr = portfolio as Array<Record<string, unknown>>;
@@ -114,13 +114,16 @@ export default function PublicProfile() {
       if (signal.aborted) return;
 
       const positions: PositionItem[] = portfolioArr
-        .map((entry) => ({
-          market: String(entry.market),
-          title: String(entry.title),
-          marketId: addrToId.get(String(entry.market).toLowerCase()) ?? 0,
-          stage: Number(entry.stage),
-          netDepositedWei: entry.netDepositedWei as bigint,
-        }))
+        .map((entry) => {
+          const shares = [...(entry.sharesPerOutcome as bigint[])];
+          return {
+            market: String(entry.market),
+            title: String(entry.title),
+            marketId: addrToId.get(String(entry.market).toLowerCase()) ?? 0,
+            stage: Number(entry.stage),
+            netDepositedWei: shares.reduce((acc, value) => acc + value, 0n),
+          };
+        })
         .sort((a, b) => {
           if (a.netDepositedWei === b.netDepositedWei) return b.marketId - a.marketId;
           return a.netDepositedWei > b.netDepositedWei ? -1 : 1;

@@ -74,13 +74,13 @@ async function deployHybridFixture() {
     "Crypto",
     "",
     ["Yes", "No"],
-    ethers.parseEther("10"),
+    ethers.parseEther("1000"),
     duration,
     "https://example.com/source",
     block.timestamp + duration + 60,
     "https://example.com/fallback",
     "Source unavailable or market wording invalid",
-    { value: ethers.parseEther("100") }
+    { value: ethers.parseEther("1000") }
   )).wait();
 
   const marketAddress = await factory.markets(0);
@@ -293,13 +293,13 @@ describe("Hybrid CLOB + LMSR", function () {
       "Test",
       "",
       ["Yes", "No"],
-      ethers.parseEther("10"),
+      ethers.parseEther("1000"),
       24 * 60 * 60,
       "https://example.com/source",
       block.timestamp + 24 * 60 * 60 + 60,
       "https://example.com/fallback",
       "Invalid",
-      { value: ethers.parseEther("100") }
+      { value: ethers.parseEther("1000") }
     )).to.be.revertedWith("FactoryV2: creation paused");
   });
 });

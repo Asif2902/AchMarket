@@ -1,8 +1,8 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { ethers } from 'ethers';
 import { useWallet } from '../../context/WalletContext';
-import { FACTORY_ADDRESS, NETWORK, STAGE } from '../../config/network';
-import { FACTORY_ABI, MARKET_ABI } from '../../config/abis';
+import { HYBRID_FACTORY_ADDRESS, NETWORK, STAGE } from '../../config/network';
+import { HYBRID_FACTORY_ABI, MARKET_V2_ABI } from '../../config/abis';
 import EmptyState from '../../components/EmptyState';
 import UsdcIcon from '../../components/UsdcIcon';
 import { formatCompact, formatCompactUSDC } from '../../utils/format';
@@ -66,7 +66,7 @@ export default function Analytics() {
       setLoading(true);
       setError(null);
 
-      const factory = new ethers.Contract(FACTORY_ADDRESS, FACTORY_ABI, readProvider);
+      const factory = new ethers.Contract(HYBRID_FACTORY_ADDRESS, HYBRID_FACTORY_ABI, readProvider);
       const totalMarkets = Number(await factory.totalMarkets());
 
       if (totalMarkets === 0) {
@@ -107,7 +107,7 @@ export default function Analytics() {
         const chunk = marketAddrs.slice(i, i + CONCURRENCY);
         const chunkResults = await Promise.all(chunk.map(async (addr) => {
           try {
-            const market = new ethers.Contract(addr, MARKET_ABI, readProvider);
+            const market = new ethers.Contract(addr, MARKET_V2_ABI, readProvider);
             const [volume, stage] = await Promise.all([
               market.totalVolumeWei(),
               market.stage(),

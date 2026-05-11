@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useWallet } from '../context/WalletContext';
-import { FACTORY_ADDRESS, LENS_ADDRESS } from '../config/network';
-import { FACTORY_ABI, LENS_ABI } from '../config/abis';
+import { HYBRID_FACTORY_ADDRESS, HYBRID_LENS_ADDRESS } from '../config/network';
+import { HYBRID_FACTORY_ABI, HYBRID_LENS_ABI } from '../config/abis';
 import { ethers } from 'ethers';
 
 export interface PendingClaim {
@@ -100,8 +100,8 @@ export function usePendingClaims() {
 
     setLoading(true);
     try {
-      const factory = new ethers.Contract(FACTORY_ADDRESS, FACTORY_ABI, readProvider);
-      const lens = new ethers.Contract(LENS_ADDRESS, LENS_ABI, readProvider);
+      const factory = new ethers.Contract(HYBRID_FACTORY_ADDRESS, HYBRID_FACTORY_ABI, readProvider);
+      const lens = new ethers.Contract(HYBRID_LENS_ADDRESS, HYBRID_LENS_ABI, readProvider);
       
       const [portfolio, totalMarkets] = await Promise.all([
         lens.getUserPortfolio(address),
@@ -130,9 +130,7 @@ export function usePendingClaims() {
       for (const p of portfolio as Record<string, unknown>[]) {
         const marketAddr = (p.market as string).toLowerCase();
         const canRedeem = p.canRedeem as boolean;
-        const canRefund = p.canRefund as boolean;
         const hasRedeemed = p.hasRedeemed as boolean;
-        const hasRefunded = p.hasRefunded as boolean;
         
         const summary = addrToSummary.get(marketAddr);
         const stage = summary ? Number(summary.stage) : 0;
@@ -141,36 +139,22 @@ export function usePendingClaims() {
           const shares = p.sharesPerOutcome as bigint[];
           const winningOutcome = Number(summary.winningOutcome);
           const winningShares = shares[winningOutcome] || 0n;
+          const totalShares = shares.reduce((acc, value) => acc + value, 0n);
+          const amount = stage === 2 ? winningShares : totalShares / BigInt(Math.max(1, shares.length));
           
-          // Calculate winnings: shares * price (simplified - actual would need more data)
-          // For now, use a reasonable estimate based on net deposited
-          const netDeposited = p.netDepositedWei as bigint;
-          
-          claims.push({
-            marketAddress: p.market as string,
-            marketId: addrToId.get(marketAddr) || 0,
-            title: p.title as string,
-            category: p.category as string,
-            outcomeLabels: [...(p.outcomeLabels as string[])],
-            winningOutcome,
-            type: 'win',
-            amountWei: winningShares > 0n ? winningShares : netDeposited,
-            stage,
-          });
-        }
-
-        if (canRefund && !hasRefunded && (p.netDepositedWei as bigint) > 0n) {
-          claims.push({
-            marketAddress: p.market as string,
-            marketId: addrToId.get(marketAddr) || 0,
-            title: p.title as string,
-            category: p.category as string,
-            outcomeLabels: [...(p.outcomeLabels as string[])],
-            winningOutcome: 0,
-            type: 'refund',
-            amountWei: p.netDepositedWei as bigint,
-            stage,
-          });
+          if (amount > 0n) {
+            claims.push({
+              marketAddress: p.market as string,
+              marketId: addrToId.get(marketAddr) || 0,
+              title: p.title as string,
+              category: p.category as string,
+              outcomeLabels: [...(p.outcomeLabels as string[])],
+              winningOutcome,
+              type: stage === 2 ? 'win' : 'refund',
+              amountWei: amount,
+              stage,
+            });
+          }
         }
       }
 

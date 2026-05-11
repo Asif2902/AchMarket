@@ -3,8 +3,8 @@ import { useParams, Link } from 'react-router-dom';
 import { ethers } from 'ethers';
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
 import { useWallet } from '../../context/WalletContext';
-import { FACTORY_ADDRESS, LENS_ADDRESS, STAGE, STAGE_LABELS, STAGE_COLORS } from '../../config/network';
-import { FACTORY_ABI, LENS_ABI, MARKET_ABI } from '../../config/abis';
+import { HYBRID_FACTORY_ADDRESS, HYBRID_LENS_ADDRESS, MARKET_ROUTER_ADDRESS, ORDER_BOOK_ADDRESS, STAGE, STAGE_LABELS, STAGE_COLORS } from '../../config/network';
+import { HYBRID_FACTORY_ABI, HYBRID_LENS_ABI, MARKET_V2_ABI, MARKET_ROUTER_ABI, ORDER_BOOK_ABI } from '../../config/abis';
 import ImageWithFallback from '../../components/ImageWithFallback';
 import ProbabilityBar, { getOutcomeColor } from '../../components/ProbabilityBar';
 import Countdown from '../../components/Countdown';
@@ -41,22 +41,23 @@ interface MarketDetailData {
   winningOutcome: number;
   createdAt: number;
   marketDeadline: number;
+  resolutionTime: number;
   bWad: bigint;
   totalVolumeWei: bigint;
   participants: number;
   resolvedPoolWei: bigint;
-  resolutionDeadline: number;
   cancelReason: string;
   cancelProofUri: string;
+  resolutionSource: string;
+  fallbackResolutionSource: string;
+  invalidCondition: string;
+  resolutionManager: string;
 }
 
 interface UserInfo {
   shares: bigint[];
-  netDeposited: bigint;
   redeemed: boolean;
-  refunded: boolean;
   canRedeem: boolean;
-  canRefund: boolean;
 }
 
 interface ProbHistoryPoint {
@@ -159,12 +160,16 @@ export default function MarketDetail() {
   const [error, setError] = useState<string | null>(null);
 
   // Trade state
+  const [executionMode, setExecutionMode] = useState<'instant' | 'limit'>('instant');
   const [tradeTab, setTradeTab] = useState<'buy' | 'sell'>('buy');
   const [selectedOutcome, setSelectedOutcome] = useState(0);
   const [shareAmount, setShareAmount] = useState('');
+  const [limitPrice, setLimitPrice] = useState('');
+  const [limitExpiryMinutes, setLimitExpiryMinutes] = useState('1440');
   const [slippage, setSlippage] = useState(1);
   const [estimatedShares, setEstimatedShares] = useState<number | null>(null);
   const [previewCost, setPreviewCost] = useState<bigint | null>(null);
+  const [executionSource, setExecutionSource] = useState('');
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewKey, setPreviewKey] = useState('');
   const [txPending, setTxPending] = useState(false);
@@ -247,8 +252,8 @@ export default function MarketDetail() {
     const seq = ++requestSeqRef.current;
 
     const attemptFetch = async (): Promise<void> => {
-      const factory = new ethers.Contract(FACTORY_ADDRESS, FACTORY_ABI, readProvider);
-      const lens = new ethers.Contract(LENS_ADDRESS, LENS_ABI, readProvider);
+      const factory = new ethers.Contract(HYBRID_FACTORY_ADDRESS, HYBRID_FACTORY_ABI, readProvider);
+      const lens = new ethers.Contract(HYBRID_LENS_ADDRESS, HYBRID_LENS_ABI, readProvider);
       const addr = await factory.markets(BigInt(marketId));
       if (!addr || addr === ethers.ZeroAddress) {
         throw new Error('Market not found');
@@ -266,10 +271,14 @@ export default function MarketDetail() {
         impliedProbabilitiesWad: [...d.impliedProbabilitiesWad],
         stage: Number(d.stage), winningOutcome: Number(d.winningOutcome),
         createdAt: Number(d.createdAt), marketDeadline: Number(d.marketDeadline),
+        resolutionTime: Number(d.resolutionTime),
         bWad: d.bWad, totalVolumeWei: d.totalVolumeWei,
         participants: Number(d.participants), resolvedPoolWei: d.resolvedPoolWei,
-        resolutionDeadline: Number(d.resolutionDeadline),
         cancelReason: d.cancelReason || '', cancelProofUri: d.cancelProofUri || '',
+        resolutionSource: d.resolutionSource || '',
+        fallbackResolutionSource: d.fallbackResolutionSource || '',
+        invalidCondition: d.invalidCondition || '',
+        resolutionManager: d.resolutionManager || ethers.ZeroAddress,
       };
       setDetail(parsed);
       setError(null);
@@ -277,7 +286,7 @@ export default function MarketDetail() {
       const [bal, uInfo] = await Promise.all([
         readProvider.getBalance(addr).catch(() => parsed.totalVolumeWei),
         userAddress
-          ? new ethers.Contract(addr, MARKET_ABI, readProvider).getUserInfo(userAddress).catch(() => null)
+          ? new ethers.Contract(addr, MARKET_V2_ABI, readProvider).getUserInfo(userAddress).catch(() => null)
           : Promise.resolve(null),
       ]);
       if (seq !== requestSeqRef.current) return;
@@ -286,9 +295,9 @@ export default function MarketDetail() {
 
       if (uInfo) {
         setUserInfo({
-          shares: [...uInfo._shares], netDeposited: uInfo._netDeposited,
-          redeemed: uInfo._redeemed, refunded: uInfo._refunded,
-          canRedeem: uInfo._canRedeem, canRefund: uInfo._canRefund,
+          shares: [...uInfo._shares],
+          redeemed: uInfo._redeemed,
+          canRedeem: uInfo._canRedeem,
         });
       } else {
         setUserInfo(null);
@@ -326,7 +335,7 @@ export default function MarketDetail() {
   const refreshData = useCallback(async () => {
     if (!marketAddress) return;
     try {
-      const lens = new ethers.Contract(LENS_ADDRESS, LENS_ABI, readProvider);
+      const lens = new ethers.Contract(HYBRID_LENS_ADDRESS, HYBRID_LENS_ABI, readProvider);
       const d = await lens.getMarketDetail(marketAddress);
 
       const parsed = {
@@ -336,17 +345,21 @@ export default function MarketDetail() {
         impliedProbabilitiesWad: [...d.impliedProbabilitiesWad],
         stage: Number(d.stage), winningOutcome: Number(d.winningOutcome),
         createdAt: Number(d.createdAt), marketDeadline: Number(d.marketDeadline),
+        resolutionTime: Number(d.resolutionTime),
         bWad: d.bWad, totalVolumeWei: d.totalVolumeWei,
         participants: Number(d.participants), resolvedPoolWei: d.resolvedPoolWei,
-        resolutionDeadline: Number(d.resolutionDeadline),
         cancelReason: d.cancelReason || '', cancelProofUri: d.cancelProofUri || '',
+        resolutionSource: d.resolutionSource || '',
+        fallbackResolutionSource: d.fallbackResolutionSource || '',
+        invalidCondition: d.invalidCondition || '',
+        resolutionManager: d.resolutionManager || ethers.ZeroAddress,
       };
       setDetail(parsed);
 
       const [bal, uInfo] = await Promise.all([
         readProvider.getBalance(marketAddress).catch(() => parsed.totalVolumeWei),
         userAddress
-          ? new ethers.Contract(marketAddress, MARKET_ABI, readProvider).getUserInfo(userAddress).catch(() => null)
+          ? new ethers.Contract(marketAddress, MARKET_V2_ABI, readProvider).getUserInfo(userAddress).catch(() => null)
           : Promise.resolve(null),
       ]);
 
@@ -354,9 +367,9 @@ export default function MarketDetail() {
 
       if (uInfo) {
         setUserInfo({
-          shares: [...uInfo._shares], netDeposited: uInfo._netDeposited,
-          redeemed: uInfo._redeemed, refunded: uInfo._refunded,
-          canRedeem: uInfo._canRedeem, canRefund: uInfo._canRefund,
+          shares: [...uInfo._shares],
+          redeemed: uInfo._redeemed,
+          canRedeem: uInfo._canRedeem,
         });
       } else {
         setUserInfo(null);
@@ -699,7 +712,7 @@ export default function MarketDetail() {
     };
   }, [detail, slug]);
 
-  const currentInputKey = `${tradeTab}:${selectedOutcome}:${shareAmount}`;
+  const currentInputKey = `${executionMode}:${tradeTab}:${selectedOutcome}:${shareAmount}:${limitPrice}`;
 
   // Preview
   useEffect(() => {
@@ -709,50 +722,70 @@ export default function MarketDetail() {
       if (!shareAmount || parseFloat(shareAmount) <= 0) {
         setPreviewCost(null);
         setEstimatedShares(null);
+        setExecutionSource('');
         setPreviewKey('');
         setPreviewLoading(false);
         return;
       }
+      if (executionMode === 'limit') {
+        setPreviewCost(null);
+        setEstimatedShares(null);
+        setExecutionSource('');
+        setPreviewKey(inputKey);
+        setPreviewLoading(false);
+        return;
+      }
       if (tradeTab === 'buy') {
-        if (!detail) { setEstimatedShares(null); setPreviewLoading(false); return; }
+        if (!detail || !marketAddress) { setEstimatedShares(null); setPreviewLoading(false); return; }
         try {
           const budgetUSDC = parseFloat(shareAmount);
           const shares = findSharesForCost(detail.totalSharesWad, detail.bWad, selectedOutcome, budgetUSDC);
+          const sharesWad = ethers.parseEther(Math.max(0, shares).toFixed(18));
+          const router = new ethers.Contract(MARKET_ROUTER_ADDRESS, MARKET_ROUTER_ABI, readProvider);
+          const preview = await router.previewTrade(marketAddress, selectedOutcome, 0, sharesWad, 8);
           setEstimatedShares(shares);
-          setPreviewCost(null);
+          setPreviewCost(preview.costWei ?? preview[4]);
+          setExecutionSource(`${formatWad(preview.orderBookSharesWad ?? preview[2])} CLOB + ${formatWad(preview.lmsrSharesWad ?? preview[3])} LMSR`);
           setPreviewKey(inputKey);
+        } catch {
+          setEstimatedShares(null);
+          setPreviewCost(null);
+          setExecutionSource('');
         } finally {
           setPreviewLoading(false);
         }
       } else {
         if (!marketAddress) { setPreviewCost(null); setPreviewLoading(false); return; }
         try {
-          const market = new ethers.Contract(marketAddress, MARKET_ABI, readProvider);
+          const router = new ethers.Contract(MARKET_ROUTER_ADDRESS, MARKET_ROUTER_ABI, readProvider);
           const sharesWad = ethers.parseEther(shareAmount);
-          const proceeds = await market.previewSell(selectedOutcome, sharesWad);
-          setPreviewCost(proceeds);
+          const preview = await router.previewTrade(marketAddress, selectedOutcome, 1, sharesWad, 8);
+          setPreviewCost(preview.proceedsWei ?? preview[5]);
+          setExecutionSource(`${formatWad(preview.orderBookSharesWad ?? preview[2])} CLOB + ${formatWad(preview.lmsrSharesWad ?? preview[3])} LMSR`);
           setEstimatedShares(null);
           setPreviewKey(inputKey);
         } catch {
           setPreviewCost(null);
+          setExecutionSource('');
         } finally {
           setPreviewLoading(false);
         }
       }
     }, 300);
     return () => clearTimeout(timer);
-  }, [marketAddress, shareAmount, selectedOutcome, tradeTab, readProvider, detail]);
+  }, [marketAddress, shareAmount, selectedOutcome, tradeTab, executionMode, limitPrice, readProvider, detail]);
 
   const handleBuy = async () => {
     if (!signer || !marketAddress || estimatedShares === null || !shareAmount) return;
     setTxPending(true); setTxMessage(null);
     const outcomeName = detail?.outcomeLabels[selectedOutcome] || `Outcome ${selectedOutcome}`;
     try {
-      const market = new ethers.Contract(marketAddress, MARKET_ABI, signer);
+      const router = new ethers.Contract(MARKET_ROUTER_ADDRESS, MARKET_ROUTER_ABI, signer);
       const sharesWad = ethers.parseEther(estimatedShares.toFixed(18));
       const usdcInput = ethers.parseEther(shareAmount);
       const maxCost = applyBuySlippage(usdcInput, slippage);
-      const tx = await market.buy(selectedOutcome, sharesWad, maxCost, { value: maxCost });
+      const deadline = Math.floor(Date.now() / 1000) + 300;
+      const tx = await router.buy(marketAddress, selectedOutcome, sharesWad, sharesWad, maxCost, 8, deadline, { value: maxCost });
       showToast({ type: 'pending', title: `Buying ${outcomeName}...`, message: `${shareAmount} USDC submitted`, txHash: tx.hash });
       setTxMessage({ type: 'success', text: 'Transaction submitted. Waiting for confirmation...' });
       await tx.wait();
@@ -774,10 +807,11 @@ export default function MarketDetail() {
     setTxPending(true); setTxMessage(null);
     const outcomeName = detail?.outcomeLabels[selectedOutcome] || `Outcome ${selectedOutcome}`;
     try {
-      const market = new ethers.Contract(marketAddress, MARKET_ABI, signer);
+      const router = new ethers.Contract(MARKET_ROUTER_ADDRESS, MARKET_ROUTER_ABI, signer);
       const sharesWad = ethers.parseEther(shareAmount);
       const minReceive = applySellSlippage(previewCost, slippage);
-      const tx = await market.sell(selectedOutcome, sharesWad, minReceive);
+      const deadline = Math.floor(Date.now() / 1000) + 300;
+      const tx = await router.sell(marketAddress, selectedOutcome, sharesWad, minReceive, 8, deadline);
       showToast({ type: 'pending', title: `Selling ${outcomeName}...`, message: `${shareAmount} shares submitted`, txHash: tx.hash });
       setTxMessage({ type: 'success', text: 'Transaction submitted. Waiting for confirmation...' });
       await tx.wait();
@@ -794,11 +828,41 @@ export default function MarketDetail() {
     } finally { setTxPending(false); }
   };
 
+  const handlePlaceLimitOrder = async () => {
+    if (!signer || !marketAddress || !shareAmount || !limitPrice) return;
+    setTxPending(true); setTxMessage(null);
+    const outcomeName = detail?.outcomeLabels[selectedOutcome] || `Outcome ${selectedOutcome}`;
+    try {
+      const orderBook = new ethers.Contract(ORDER_BOOK_ADDRESS, ORDER_BOOK_ABI, signer);
+      const sharesWad = ethers.parseEther(shareAmount);
+      const priceWad = ethers.parseEther(limitPrice);
+      const expiryMinutes = Math.max(0, Math.floor(parseFloat(limitExpiryMinutes || '0')));
+      const expiry = expiryMinutes > 0 ? Math.floor(Date.now() / 1000) + expiryMinutes * 60 : 0;
+      const side = tradeTab === 'buy' ? 0 : 1;
+      const escrow = tradeTab === 'buy' ? (sharesWad * priceWad) / ethers.parseEther('1') : 0n;
+      const value = tradeTab === 'buy' ? applyBuySlippage(escrow, 1) : 0n;
+      const tx = await orderBook.placeLimitOrder(marketAddress, selectedOutcome, side, priceWad, sharesWad, expiry, { value });
+      showToast({ type: 'pending', title: `Placing ${tradeTab === 'buy' ? 'bid' : 'ask'}...`, message: `${shareAmount} ${outcomeName} at ${limitPrice} USDC`, txHash: tx.hash });
+      setTxMessage({ type: 'success', text: 'Limit order submitted. Waiting for confirmation...' });
+      await tx.wait();
+      showToast({ type: 'success', title: 'Limit Order Placed', message: `${outcomeName} order is live on the CLOB`, txHash: tx.hash });
+      setTxMessage({ type: 'success', text: 'Limit order placed successfully.' });
+      setShareAmount('');
+      await new Promise(r => setTimeout(r, 1500));
+      await refreshData();
+      setRefreshTrigger(c => c + 1);
+    } catch (err) {
+      const errMsg = parseContractError(err);
+      showToast({ type: 'error', title: 'Limit Order Failed', message: errMsg });
+      setTxMessage({ type: 'error', text: errMsg });
+    } finally { setTxPending(false); }
+  };
+
   const handleRedeem = async () => {
     if (!signer || !marketAddress) return;
     setTxPending(true); setTxMessage(null);
     try {
-      const market = new ethers.Contract(marketAddress, MARKET_ABI, signer);
+      const market = new ethers.Contract(marketAddress, MARKET_V2_ABI, signer);
       const tx = await market.redeem();
       showToast({ type: 'pending', title: 'Claiming Winnings...', message: 'Transaction submitted', txHash: tx.hash });
       setTxMessage({ type: 'success', text: 'Redeem transaction submitted...' });
@@ -818,8 +882,8 @@ export default function MarketDetail() {
     if (!signer || !marketAddress) return;
     setTxPending(true); setTxMessage(null);
     try {
-      const market = new ethers.Contract(marketAddress, MARKET_ABI, signer);
-      const tx = await market.refund();
+      const market = new ethers.Contract(marketAddress, MARKET_V2_ABI, signer);
+      const tx = await market.redeem();
       showToast({ type: 'pending', title: 'Claiming Refund...', message: 'Transaction submitted', txHash: tx.hash });
       setTxMessage({ type: 'success', text: 'Refund transaction submitted...' });
       await tx.wait();
@@ -838,7 +902,7 @@ export default function MarketDetail() {
     if (!signer || !marketAddress) return;
     setTxPending(true); setTxMessage(null);
     try {
-      const market = new ethers.Contract(marketAddress, MARKET_ABI, signer);
+      const market = new ethers.Contract(marketAddress, MARKET_V2_ABI, signer);
       const tx = await market.triggerExpiry();
       showToast({ type: 'pending', title: 'Triggering Expiry...', message: 'Transaction submitted', txHash: tx.hash });
       setTxMessage({ type: 'success', text: 'Expiry transaction submitted...' });
@@ -884,7 +948,8 @@ export default function MarketDetail() {
   const isCancelledOrExpired = isCancelled || isExpired;
   const now = Math.floor(Date.now() / 1000);
   const tradingEnded = now > detail.marketDeadline;
-  const inGracePeriod = isActive && tradingEnded && now <= detail.resolutionDeadline;
+  const resolutionDeadline = detail.resolutionTime + 3 * 24 * 60 * 60;
+  const inGracePeriod = isActive && tradingEnded && now <= resolutionDeadline;
 
   let estimatedPayout: bigint | null = null;
   let totalPositionPayout: bigint | null = null;
@@ -1178,12 +1243,12 @@ export default function MarketDetail() {
                   <div className="flex-1">
                     <p className="text-sm font-semibold text-amber-400 mb-1">Awaiting Resolution</p>
                     <p className="text-xs text-dark-400 leading-relaxed">
-                      Trading has ended. The admin has until {formatDate(detail.resolutionDeadline)} to resolve.
+                      Trading has ended. Resolution proposals can be finalized until {formatDate(resolutionDeadline)} before expiry.
                       If not resolved, the market will auto-expire and all participants can claim full refunds.
                     </p>
                     <div className="mt-2.5 flex items-center gap-2">
                       <span className="text-2xs text-dark-500 font-medium">Resolution deadline:</span>
-                      <Countdown deadline={detail.resolutionDeadline} compact className="text-xs text-amber-400 font-medium" />
+                      <Countdown deadline={resolutionDeadline} compact className="text-xs text-amber-400 font-medium" />
                     </div>
                   </div>
                 </div>
@@ -1654,7 +1719,41 @@ export default function MarketDetail() {
               <div className="card p-5 border-white/[0.12] bg-gradient-to-b from-white/[0.025] to-transparent shadow-[0_16px_46px_rgba(0,0,0,0.45)]">
                 <div className="mb-4">
                   <h3 className="section-header mb-1">Trade</h3>
-                  <p className="text-2xs text-white/50">Enter amount, review preview, then confirm in wallet</p>
+                  <p className="text-2xs text-white/50">Choose instant best execution or place a CLOB limit order.</p>
+                </div>
+
+                <div className="grid grid-cols-2 gap-2 mb-3">
+                  <button
+                    onClick={() => { setExecutionMode('instant'); setShareAmount(''); setPreviewCost(null); setEstimatedShares(null); }}
+                    className={`p-2.5 rounded-xl text-xs font-semibold border transition-all ${
+                      executionMode === 'instant'
+                        ? 'bg-primary-500/15 text-primary-300 border-primary-500/30'
+                        : 'bg-dark-900/40 text-dark-400 border-white/[0.08] hover:text-white'
+                    }`}
+                  >
+                    Instant Route
+                  </button>
+                  <button
+                    onClick={() => { setExecutionMode('limit'); setShareAmount(''); setPreviewCost(null); setEstimatedShares(null); }}
+                    className={`p-2.5 rounded-xl text-xs font-semibold border transition-all ${
+                      executionMode === 'limit'
+                        ? 'bg-cyan-500/15 text-cyan-300 border-cyan-500/30'
+                        : 'bg-dark-900/40 text-dark-400 border-white/[0.08] hover:text-white'
+                    }`}
+                  >
+                    Limit Order
+                  </button>
+                </div>
+
+                <div className="mb-5 p-3 rounded-xl border border-white/[0.08] bg-dark-900/35">
+                  <p className="text-2xs uppercase tracking-[0.12em] text-white/45 font-semibold mb-1">
+                    {executionMode === 'instant' ? 'CLOB + LMSR router' : 'CLOB maker order'}
+                  </p>
+                  <p className="text-xs text-white/60">
+                    {executionMode === 'instant'
+                      ? 'The router fills better CLOB liquidity first and automatically falls back to LMSR.'
+                      : 'Your bid escrows USDC. Your ask escrows shares until filled, cancelled, or expired.'}
+                  </p>
                 </div>
 
                 {/* Buy/Sell tabs */}
@@ -1742,9 +1841,13 @@ export default function MarketDetail() {
                 {/* Amount input */}
                 <div className="flex items-center justify-between mb-1.5">
                   <label className="text-2xs font-semibold text-dark-500 uppercase tracking-wider flex items-center gap-1.5">
-                    {tradeTab === 'buy' ? <><UsdcIcon size={12} />Amount (USDC)</> : 'Shares to Sell'}
+                    {executionMode === 'limit'
+                      ? 'Shares'
+                      : tradeTab === 'buy'
+                        ? <><UsdcIcon size={12} />Amount (USDC)</>
+                        : 'Shares to Sell'}
                   </label>
-                  {tradeTab === 'buy' && userBalance !== null && (
+                  {tradeTab === 'buy' && executionMode === 'instant' && userBalance !== null && (
                     <span className="text-2xs text-dark-400 font-medium flex items-center gap-1">
                       <svg className="w-3 h-3 text-dark-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                         <path strokeLinecap="round" strokeLinejoin="round" d="M21 12a2.25 2.25 0 00-2.25-2.25H15a3 3 0 11-6 0H5.25A2.25 2.25 0 003 12m18 0v6a2.25 2.25 0 01-2.25 2.25H5.25A2.25 2.25 0 013 18v-6m18 0V9M3 12V9m18 0a2.25 2.25 0 00-2.25-2.25H5.25A2.25 2.25 0 003 9m18 0V6a2.25 2.25 0 00-2.25-2.25H5.25A2.25 2.25 0 003 6v3" />
@@ -1768,13 +1871,13 @@ export default function MarketDetail() {
                     type="number"
                     value={shareAmount}
                     onChange={(e) => setShareAmount(e.target.value)}
-                    placeholder={tradeTab === 'buy' ? '0.00' : '0'}
+                    placeholder={executionMode === 'limit' ? '0' : tradeTab === 'buy' ? '0.00' : '0'}
                     min="0"
-                    step={tradeTab === 'buy' ? '0.01' : '0.1'}
+                    step={executionMode === 'limit' ? '0.1' : tradeTab === 'buy' ? '0.01' : '0.1'}
                     className="input-field text-sm pr-16 font-medium"
                   />
                   <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1.5">
-                    {tradeTab === 'buy' && userBalance !== null && userBalance > 0n && (
+                    {tradeTab === 'buy' && executionMode === 'instant' && userBalance !== null && userBalance > 0n && (
                       <button
                         onClick={() => {
                           const gasBufferWei = ethers.parseEther('0.01');
@@ -1802,13 +1905,44 @@ export default function MarketDetail() {
                       </button>
                     )}
                     <span className="text-2xs text-dark-500 font-medium flex items-center gap-1">
-                      {tradeTab === 'buy' && <UsdcIcon size={12} />}
-                      {tradeTab === 'buy' ? 'USDC' : 'shares'}
+                      {tradeTab === 'buy' && executionMode === 'instant' && <UsdcIcon size={12} />}
+                      {executionMode === 'limit' ? 'shares' : tradeTab === 'buy' ? 'USDC' : 'shares'}
                     </span>
                   </div>
                 </div>
 
+                {executionMode === 'limit' && (
+                  <div className="grid grid-cols-2 gap-2 mb-4">
+                    <label className="block">
+                      <span className="text-2xs font-semibold text-dark-500 uppercase tracking-wider block mb-1.5">Limit price</span>
+                      <input
+                        type="number"
+                        value={limitPrice}
+                        onChange={(e) => setLimitPrice(e.target.value)}
+                        placeholder="0.50"
+                        min="0.01"
+                        max="1"
+                        step="0.01"
+                        className="input-field text-sm"
+                      />
+                    </label>
+                    <label className="block">
+                      <span className="text-2xs font-semibold text-dark-500 uppercase tracking-wider block mb-1.5">Expiry min</span>
+                      <input
+                        type="number"
+                        value={limitExpiryMinutes}
+                        onChange={(e) => setLimitExpiryMinutes(e.target.value)}
+                        placeholder="1440"
+                        min="0"
+                        step="15"
+                        className="input-field text-sm"
+                      />
+                    </label>
+                  </div>
+                )}
+
                 {/* Slippage */}
+                {executionMode === 'instant' && (
                 <div className="flex items-center justify-between mb-4">
                   <label className="text-2xs text-dark-500 font-medium">Slippage</label>
                   <div className="flex items-center gap-0.5">
@@ -1827,12 +1961,15 @@ export default function MarketDetail() {
                     ))}
                   </div>
                 </div>
+                )}
 
                 {/* Buy preview */}
-                {tradeTab === 'buy' && estimatedShares !== null && shareAmount && (
+                {executionMode === 'instant' && tradeTab === 'buy' && estimatedShares !== null && shareAmount && (
                   <div className="p-3 rounded-xl bg-dark-900/40 border border-white/[0.06] mb-4 space-y-2">
                     <PreviewRow label="Est. Shares" value={previewLoading ? '...' : `${estimatedShares.toFixed(4)}`} />
                     <PreviewRow label="Avg Price" value={previewLoading ? '...' : `${avgPrice.toFixed(4)} USDC`} />
+                    {previewCost !== null && <PreviewRow label="Router Cost" value={`${formatUSDC(previewCost)} USDC`} />}
+                    {executionSource && <PreviewRow label="Route" value={executionSource} muted />}
                     {estimatedPayout !== null && (
                       <>
                         <PreviewRow label="Est. Payout if Wins" value={`${formatUSDC(estimatedPayout)} USDC`} accent={profit >= 0 ? 'green' : 'red'} />
@@ -1856,9 +1993,10 @@ export default function MarketDetail() {
                 )}
 
                 {/* Sell preview */}
-                {tradeTab === 'sell' && previewCost !== null && shareAmount && (
+                {executionMode === 'instant' && tradeTab === 'sell' && previewCost !== null && shareAmount && (
                   <div className="p-3 rounded-xl bg-dark-900/40 border border-white/[0.06] mb-4 space-y-2">
                     <PreviewRow label="Est. Proceeds" value={previewLoading ? '...' : `${formatUSDC(previewCost)} USDC`} />
+                    {executionSource && <PreviewRow label="Route" value={executionSource} muted />}
                     <div className="divider" />
                     <PreviewRow
                       label={`Min Receive (${slippage}% slip.)`}
@@ -1869,26 +2007,38 @@ export default function MarketDetail() {
                 )}
 
                 {/* Submit */}
-                <button
-                  onClick={tradeTab === 'buy' ? handleBuy : handleSell}
-                  disabled={txPending || !shareAmount || parseFloat(shareAmount) <= 0 || previewLoading || previewKey !== currentInputKey || (tradeTab === 'buy' ? estimatedShares === null : previewCost === null)}
-                  className={`w-full py-3.5 rounded-xl font-semibold text-sm transition-all active:scale-[0.97] ${
-                    tradeTab === 'buy'
-                      ? 'bg-gradient-to-r from-emerald-600 to-emerald-500 hover:from-emerald-500 hover:to-emerald-400 text-white shadow-glow-yes disabled:from-emerald-600/20 disabled:to-emerald-500/20 disabled:text-emerald-400/40 disabled:shadow-none'
-                      : 'bg-gradient-to-r from-red-600 to-red-500 hover:from-red-500 hover:to-red-400 text-white shadow-glow-no disabled:from-red-600/20 disabled:to-red-500/20 disabled:text-red-400/40 disabled:shadow-none'
-                  }`}
-                >
-                  {txPending ? (
-                    <span className="flex items-center justify-center gap-2">
-                      <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                      Processing...
-                    </span>
-                  ) : tradeTab === 'buy' ? (
-                    `Buy ${detail.outcomeLabels[selectedOutcome]} for ${shareAmount || '0'} USDC`
-                  ) : (
-                    `Sell ${detail.outcomeLabels[selectedOutcome]} Shares`
-                  )}
-                </button>
+                {executionMode === 'instant' && (
+                  <button
+                    onClick={tradeTab === 'buy' ? handleBuy : handleSell}
+                    disabled={txPending || !shareAmount || parseFloat(shareAmount) <= 0 || previewLoading || previewKey !== currentInputKey || (tradeTab === 'buy' ? estimatedShares === null : previewCost === null)}
+                    className={`w-full py-3.5 rounded-xl font-semibold text-sm transition-all active:scale-[0.97] ${
+                      tradeTab === 'buy'
+                        ? 'bg-gradient-to-r from-emerald-600 to-emerald-500 hover:from-emerald-500 hover:to-emerald-400 text-white shadow-glow-yes disabled:from-emerald-600/20 disabled:to-emerald-500/20 disabled:text-emerald-400/40 disabled:shadow-none'
+                        : 'bg-gradient-to-r from-red-600 to-red-500 hover:from-red-500 hover:to-red-400 text-white shadow-glow-no disabled:from-red-600/20 disabled:to-red-500/20 disabled:text-red-400/40 disabled:shadow-none'
+                    }`}
+                  >
+                    {txPending ? (
+                      <span className="flex items-center justify-center gap-2">
+                        <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                        Processing...
+                      </span>
+                    ) : tradeTab === 'buy' ? (
+                      `Buy ${detail.outcomeLabels[selectedOutcome]} for ${shareAmount || '0'} USDC`
+                    ) : (
+                      `Sell ${detail.outcomeLabels[selectedOutcome]} Shares`
+                    )}
+                  </button>
+                )}
+
+                {executionMode === 'limit' && (
+                  <button
+                    onClick={handlePlaceLimitOrder}
+                    disabled={txPending || !shareAmount || !limitPrice || parseFloat(shareAmount) <= 0 || parseFloat(limitPrice) <= 0 || parseFloat(limitPrice) > 1}
+                    className="w-full py-3.5 rounded-xl font-semibold text-sm transition-all active:scale-[0.97] bg-gradient-to-r from-cyan-600 to-blue-500 hover:from-cyan-500 hover:to-blue-400 text-white disabled:from-cyan-600/20 disabled:to-blue-500/20 disabled:text-cyan-400/40 mt-2"
+                  >
+                    {txPending ? 'Processing...' : `Place ${tradeTab === 'buy' ? 'Bid' : 'Ask'} Order`}
+                  </button>
+                )}
 
                 {txMessage && (
                   <div className={`mt-3 p-3 rounded-xl text-xs ${
@@ -1954,31 +2104,20 @@ export default function MarketDetail() {
 
                 <div className="p-3 rounded-xl bg-dark-900/30 border border-white/[0.06] mb-4">
                   <div className="flex justify-between text-sm">
-                    <span className="text-dark-500 font-medium">Net Deposited</span>
-                    <span className="font-bold text-white tabular-nums flex items-center gap-1"><UsdcIcon size={14} />{formatCompactUSDC(userInfo.netDeposited)} USDC</span>
+                    <span className="text-dark-500 font-medium">Claim status</span>
+                    <span className="font-bold text-white tabular-nums">{userInfo.redeemed ? 'Claimed' : 'Open'}</span>
                   </div>
                 </div>
 
                 {userInfo.canRedeem && (
                   <button onClick={handleRedeem} disabled={txPending} className="w-full btn-yes py-3 text-sm pulse-glow">
-                    {txPending ? 'Processing...' : 'Claim Winnings'}
-                  </button>
-                )}
-
-                {userInfo.canRefund && (
-                  <button onClick={handleRefund} disabled={txPending} className="w-full btn-primary py-3 text-sm">
-                    {txPending ? 'Processing...' : 'Claim Refund'}
+                    {txPending ? 'Processing...' : isResolved ? 'Claim Winnings' : 'Claim Invalid/Expired Payout'}
                   </button>
                 )}
 
                 {userInfo.redeemed && (
                   <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-center">
-                    <p className="text-xs text-emerald-400 font-medium">Winnings already claimed</p>
-                  </div>
-                )}
-                {userInfo.refunded && (
-                  <div className="p-3 rounded-xl bg-blue-500/10 border border-blue-500/20 text-center">
-                    <p className="text-xs text-blue-400 font-medium">Refund already claimed</p>
+                    <p className="text-xs text-emerald-400 font-medium">Payout already claimed</p>
                   </div>
                 )}
               </div>

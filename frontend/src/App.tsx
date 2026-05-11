@@ -9,6 +9,7 @@ import MobileBottomNav from './components/MobileBottomNav';
 import ToastContainer from './components/Toast';
 import Home from './pages/user/Home';
 import MarketDetail from './pages/user/MarketDetail';
+import Propose from './pages/user/Propose';
 import Portfolio from './pages/user/Portfolio';
 import ProfileHome from './pages/user/ProfileHome';
 import ProfileSettings from './pages/user/ProfileSettings';
@@ -28,6 +29,7 @@ const sharedRoutes = (
     <Route path="/" element={<Home />} />
     <Route path="/analytics" element={<Analytics />} />
     <Route path="/market/:slug" element={<MarketDetail />} />
+    <Route path="/propose" element={<Propose />} />
     <Route path="/portfolio" element={<Portfolio />} />
     <Route path="/profile" element={<ProfileHome />} />
     <Route path="/profile/settings" element={<ProfileSettings />} />

@@ -2,8 +2,8 @@ import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { ethers } from 'ethers';
 import { useWallet } from '../../context/WalletContext';
-import { FACTORY_ADDRESS, LENS_ADDRESS, STAGE, STAGE_LABELS, STAGE_COLORS } from '../../config/network';
-import { FACTORY_ABI, LENS_ABI, MARKET_ABI } from '../../config/abis';
+import { HYBRID_FACTORY_ADDRESS, HYBRID_LENS_ADDRESS, STAGE, STAGE_LABELS, STAGE_COLORS } from '../../config/network';
+import { HYBRID_FACTORY_ABI, HYBRID_LENS_ABI, MARKET_V2_ABI } from '../../config/abis';
 import MarketCard, { MarketSummaryData } from '../../components/MarketCard';
 import { SkeletonCard } from '../../components/LoadingSpinner';
 import EmptyState from '../../components/EmptyState';
@@ -72,8 +72,8 @@ export default function Home() {
   const fetchMarkets = useCallback(async () => {
     try {
       setLoading(true);
-      const factory = new ethers.Contract(FACTORY_ADDRESS, FACTORY_ABI, readProvider);
-      const lens = new ethers.Contract(LENS_ADDRESS, LENS_ABI, readProvider);
+      const factory = new ethers.Contract(HYBRID_FACTORY_ADDRESS, HYBRID_FACTORY_ABI, readProvider);
+      const lens = new ethers.Contract(HYBRID_LENS_ADDRESS, HYBRID_LENS_ABI, readProvider);
 
       const totalMarkets = await factory.totalMarkets();
       const total = Number(totalMarkets);
@@ -196,7 +196,7 @@ export default function Home() {
           const batch = missing.slice(i, i + BATCH_SIZE);
           const entries = await Promise.all(batch.map(async (m) => {
             try {
-              const mc = new ethers.Contract(m.market, MARKET_ABI, readProvider);
+              const mc = new ethers.Contract(m.market, MARKET_V2_ABI, readProvider);
               const desc = await mc.description();
               fetchedMarketsRef.current.add(m.market);
               return [m.market, desc as string] as const;
