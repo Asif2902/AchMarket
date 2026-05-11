@@ -13,6 +13,7 @@ const MAX_BOND_WEI = process.env.RESOLUTION_MAX_BOND_WEI || "1000000000000000000
 const BOND_BPS = process.env.RESOLUTION_BOND_BPS || "100"; // 1%
 const RESOLVER_REWARD_WEI = process.env.RESOLUTION_REWARD_WEI || "0";
 const RESOLVER_REWARD_POOL_WEI = process.env.RESOLUTION_REWARD_POOL_WEI || "0";
+const FACTORY_LIQUIDITY_RESERVE_WEI = process.env.FACTORY_LIQUIDITY_RESERVE_WEI || "0";
 
 async function main() {
   const [deployer] = await hre.ethers.getSigners();
@@ -108,6 +109,10 @@ async function main() {
 
   if (RESOLVER_REWARD_POOL_WEI !== "0") {
     await (await deployer.sendTransaction({ to: resolverAddr, value: RESOLVER_REWARD_POOL_WEI })).wait();
+  }
+
+  if (FACTORY_LIQUIDITY_RESERVE_WEI !== "0") {
+    await (await deployer.sendTransaction({ to: factoryAddr, value: FACTORY_LIQUIDITY_RESERVE_WEI })).wait();
   }
 
   console.log("\n=== V2 Hybrid Deployment Summary ===");

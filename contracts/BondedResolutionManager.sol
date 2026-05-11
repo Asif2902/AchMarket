@@ -247,7 +247,7 @@ contract BondedResolutionManager is Ownable, ReentrancyGuard {
 
         proposal.finalized = true;
         activeProposalForMarket[proposal.market] = 0;
-        IResolvableMarket(proposal.market).resolveByManager(proposal.outcome, proposal.proofUri);
+        IResolvableMarket(proposal.market).resolveByManager(proposal.outcome, proposal.proofUri, proposal.resolver);
 
         reputation[proposal.resolver].score += 10;
         reputation[proposal.resolver].resolverWins++;
@@ -266,17 +266,17 @@ contract BondedResolutionManager is Ownable, ReentrancyGuard {
         activeProposalForMarket[proposal.market] = 0;
 
         if (ruling == Ruling.ResolverWins) {
-            IResolvableMarket(proposal.market).resolveByManager(proposal.outcome, proposal.proofUri);
+            IResolvableMarket(proposal.market).resolveByManager(proposal.outcome, proposal.proofUri, proposal.resolver);
             _applyReputation(proposal.resolver, proposal.challenger, true);
             _settleDisputedBonds(proposal.resolver, proposal.challenger, proposal.bondWei);
             emit ProposalFinalized(proposalId, ruling, proposal.outcome);
         } else if (ruling == Ruling.ChallengerWins) {
-            IResolvableMarket(proposal.market).resolveByManager(proposal.counterOutcome, proposal.counterEvidenceUri);
+            IResolvableMarket(proposal.market).resolveByManager(proposal.counterOutcome, proposal.counterEvidenceUri, proposal.challenger);
             _applyReputation(proposal.challenger, proposal.resolver, false);
             _settleDisputedBonds(proposal.challenger, proposal.resolver, proposal.bondWei);
             emit ProposalFinalized(proposalId, ruling, proposal.counterOutcome);
         } else {
-            IResolvableMarket(proposal.market).cancelByManager("Invalid market after arbitration", proposal.counterEvidenceUri);
+            IResolvableMarket(proposal.market).cancelByManager("Invalid market after arbitration", proposal.counterEvidenceUri, proposal.challenger);
             reputation[proposal.resolver].score -= 5;
             reputation[proposal.resolver].resolverLosses++;
             reputation[proposal.challenger].score += 5;
@@ -324,7 +324,7 @@ contract BondedResolutionManager is Ownable, ReentrancyGuard {
             emit ProposalVoided(proposalId, reason);
         }
 
-        IResolvableMarket(market).cancelByManager(reason, proofUri);
+        IResolvableMarket(market).cancelByManager(reason, proofUri, address(0));
     }
 
     function voteReputation(uint256 proposalId, bool supportsResolver, string calldata reason) external {
@@ -374,13 +374,7 @@ contract BondedResolutionManager is Ownable, ReentrancyGuard {
     }
 
     function _settleDisputedBonds(address winner, address, uint256 bondWei) internal {
-        uint256 winnerBonus = (bondWei * 50) / 100;
-        uint256 treasuryShare = (bondWei * 30) / 100;
-        uint256 reserveShare = bondWei - winnerBonus - treasuryShare;
-
-        _sendValue(payable(winner), bondWei + winnerBonus + _availableReward(bondWei * 2), "Resolver: winner payout failed");
-        if (treasuryShare > 0) _sendValue(payable(treasury), treasuryShare, "Resolver: treasury payout failed");
-        if (reserveShare > 0) _sendValue(payable(reserve), reserveShare, "Resolver: reserve payout failed");
+        _sendValue(payable(winner), (bondWei * 2) + _availableReward(bondWei * 2), "Resolver: winner payout failed");
     }
 
     function _availableReward(uint256 lockedWei) internal view returns (uint256 reward) {

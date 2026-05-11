@@ -583,7 +583,6 @@ export default function CreateMarket() {
     try {
       const factory = new ethers.Contract(HYBRID_FACTORY_ADDRESS, HYBRID_FACTORY_ABI, signer);
       const bWad = ethers.parseEther(bValue);
-      const seedValue = ethers.parseEther(requiredSeedEth.toFixed(18));
       const encodedDescription = subcategory.trim().length > 0
         ? `${description.trim()}:::${subcategory.trim()}`
         : description.trim();
@@ -600,7 +599,6 @@ export default function CreateMarket() {
         resolutionTime,
         fallbackResolutionSource.trim(),
         invalidCondition.trim(),
-        { value: seedValue },
       );
       keepUploadedImageOnCloseRef.current = true;
 
@@ -1144,7 +1142,7 @@ export default function CreateMarket() {
                 {requiredSeedEth.toFixed(4)} USDC
               </p>
               <p className="text-xs text-dark-500 mt-1">
-                The v2 factory seeds LMSR solvency at creation using b * ln(outcomes).
+                Funded from the factory liquidity reserve. The owner wallet does not pay this per market.
               </p>
             </div>
           </div>
@@ -1636,7 +1634,7 @@ export default function CreateMarket() {
                 <span className="text-white">{bValue}</span>
               </div>
               <div>
-                <span className="text-dark-400">Required seed: </span>
+                <span className="text-dark-400">Factory-funded seed: </span>
                 <span className="text-white">{requiredSeedEth.toFixed(4)} USDC</span>
               </div>
               <div>

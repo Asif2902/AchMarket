@@ -98,7 +98,7 @@ export default function FeeManagement() {
           <div className="w-10 h-10 rounded-xl bg-primary-500/10 border border-primary-500/20 flex items-center justify-center mx-auto mb-3">
             <span className="text-lg font-bold text-primary-400">%</span>
           </div>
-          <p className="text-2xl sm:text-3xl font-bold text-primary-400 tabular-nums">0.25%</p>
+          <p className="text-2xl sm:text-3xl font-bold text-primary-400 tabular-nums">0.75%</p>
           <p className="text-xs text-dark-400 mt-1">Fee Rate</p>
         </div>
         <div className="card p-5 text-center">
@@ -137,7 +137,7 @@ export default function FeeManagement() {
                 <tr className="border-b border-white/[0.08] text-dark-400 text-left">
                   <th className="pb-3 pr-4 font-medium text-xs uppercase tracking-wider">Market</th>
                   <th className="pb-3 pr-4 font-medium text-xs uppercase tracking-wider text-right">Prize Pool</th>
-                  <th className="pb-3 font-medium text-xs uppercase tracking-wider text-right">Fee (0.25%)</th>
+                  <th className="pb-3 font-medium text-xs uppercase tracking-wider text-right">Fee (0.75%)</th>
                 </tr>
               </thead>
               <tbody>

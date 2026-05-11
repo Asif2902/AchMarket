@@ -6,6 +6,7 @@ import {Clones} from "@openzeppelin/contracts/proxy/Clones.sol";
 import {PredictionMarketV2} from "./PredictionMarketV2.sol";
 import {MarketRouter} from "./MarketRouter.sol";
 import {HybridOrderBook} from "./HybridOrderBook.sol";
+import {LMSRMath} from "./LMSRMath.sol";
 import {IResolutionManager} from "./interfaces/IResolutionManager.sol";
 
 /// @title HybridMarketFactory
@@ -45,6 +46,7 @@ contract HybridMarketFactory is Ownable {
     event MarketResolutionManagerUpdated(address indexed market, address indexed resolutionManager);
     event MarketRegistered(address indexed market, uint256 indexed marketId);
     event CreationPausedUpdated(bool paused);
+    event LiquidityReserveFunded(address indexed sender, uint256 amountWei);
 
     constructor(
         address _owner,
@@ -72,16 +74,18 @@ contract HybridMarketFactory is Ownable {
         uint256 _resolutionTime,
         string calldata _fallbackResolutionSource,
         string calldata _invalidCondition
-    ) external payable onlyOwner returns (address market) {
+    ) external onlyOwner returns (address market) {
         require(!creationPaused, "FactoryV2: creation paused");
         _validateCreation(_title, _description, _category, _outcomeLabels, _bWad, _durationSeconds);
+        uint256 seedWei = requiredSeed(_outcomeLabels.length, _bWad);
+        require(address(this).balance >= seedWei, "FactoryV2: liquidity reserve low");
 
         address[] memory operators = new address[](2);
         operators[0] = address(router);
         operators[1] = address(orderBook);
 
         market = Clones.clone(marketImplementation);
-        PredictionMarketV2(payable(market)).initialize{value: msg.value}(
+        PredictionMarketV2(payable(market)).initialize{value: seedWei}(
             address(this),
             _title,
             _description,
@@ -225,6 +229,14 @@ contract HybridMarketFactory is Ownable {
         return markets.length;
     }
 
+    function requiredSeed(uint256 outcomeCount, int256 bWad) public pure returns (uint256) {
+        return uint256(LMSRMath.initialLiquidity(outcomeCount, bWad));
+    }
+
+    function liquidityReserve() external view returns (uint256) {
+        return address(this).balance;
+    }
+
     function getMarkets(uint256 offset, uint256 limit) external view returns (address[] memory slice) {
         uint256 total = markets.length;
         if (offset >= total) return new address[](0);
@@ -292,5 +304,7 @@ contract HybridMarketFactory is Ownable {
         marketImplementation = _marketImplementation;
     }
 
-    receive() external payable {}
+    receive() external payable {
+        emit LiquidityReserveFunded(msg.sender, msg.value);
+    }
 }

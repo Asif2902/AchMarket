@@ -66,6 +66,8 @@ async function deployHybridFixture() {
   await router.setMarketRegistrar(await factory.getAddress());
   await resolver.setMarketRegistrar(await factory.getAddress());
 
+  await owner.sendTransaction({ to: await factory.getAddress(), value: ethers.parseEther("1000") });
+
   const duration = 30 * 24 * 60 * 60;
   const block = await ethers.provider.getBlock("latest");
   await (await factory.createMarket(
@@ -80,7 +82,6 @@ async function deployHybridFixture() {
     block.timestamp + duration + 60,
     "https://example.com/fallback",
     "Source unavailable or market wording invalid",
-    { value: ethers.parseEther("1000") }
   )).wait();
 
   const marketAddress = await factory.markets(0);
@@ -299,7 +300,6 @@ describe("Hybrid CLOB + LMSR", function () {
       block.timestamp + 24 * 60 * 60 + 60,
       "https://example.com/fallback",
       "Invalid",
-      { value: ethers.parseEther("1000") }
     )).to.be.revertedWith("FactoryV2: creation paused");
   });
 });

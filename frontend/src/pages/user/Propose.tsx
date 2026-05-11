@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState, type ChangeEvent } from 'react';
 import { ethers } from 'ethers';
 import { Link, useSearchParams } from 'react-router-dom';
 import { useWallet } from '../../context/WalletContext';
@@ -6,6 +6,8 @@ import { HYBRID_FACTORY_ADDRESS, HYBRID_LENS_ADDRESS, RESOLUTION_MANAGER_ADDRESS
 import { HYBRID_FACTORY_ABI, HYBRID_LENS_ABI, RESOLUTION_MANAGER_ABI } from '../../config/abis';
 import { makeMarketSlug, parseContractError } from '../../utils/format';
 import { showToast } from '../../components/Toast';
+import { compressMarketImage } from '../../utils/marketImage';
+import { uploadMarketMedia } from '../../services/marketMedia';
 
 type MarketOption = {
   market: string;
@@ -35,7 +37,7 @@ type Proposal = {
 };
 
 export default function Propose() {
-  const { signer, readProvider, isConnected, isCorrectNetwork, connect, switchNetwork } = useWallet();
+  const { address, signer, readProvider, isConnected, isCorrectNetwork, switchNetwork } = useWallet();
   const [searchParams] = useSearchParams();
   const requestedMarket = searchParams.get('market') || '';
 
@@ -47,6 +49,7 @@ export default function Propose() {
   const [challengeWindowSeconds, setChallengeWindowSeconds] = useState(0);
   const [loading, setLoading] = useState(true);
   const [txPending, setTxPending] = useState(false);
+  const [uploadingField, setUploadingField] = useState<string | null>(null);
   const [status, setStatus] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   const [outcome, setOutcome] = useState('0');
@@ -56,6 +59,33 @@ export default function Propose() {
   const [counterOutcome, setCounterOutcome] = useState('0');
   const [counterEvidenceUri, setCounterEvidenceUri] = useState('');
   const [counterReason, setCounterReason] = useState('');
+
+  const uploadProofImage = async (
+    event: ChangeEvent<HTMLInputElement>,
+    target: 'evidence' | 'proof' | 'counterEvidence',
+  ) => {
+    const selected = event.target.files?.[0];
+    event.target.value = '';
+    if (!selected) return;
+    if (!address || !signer) {
+      setStatus({ type: 'error', text: 'Connect wallet from the header to upload evidence.' });
+      return;
+    }
+    setUploadingField(target);
+    setStatus(null);
+    try {
+      const compressed = await compressMarketImage(selected);
+      const uploaded = await uploadMarketMedia(compressed.file, address, signer, 'resolution-proof');
+      if (target === 'evidence') setEvidenceUri(uploaded.url);
+      if (target === 'proof') setProofUri(uploaded.url);
+      if (target === 'counterEvidence') setCounterEvidenceUri(uploaded.url);
+      setStatus({ type: 'success', text: `Uploaded compressed proof image (${Math.round(uploaded.byteLength / 1024)} KB).` });
+    } catch (err) {
+      setStatus({ type: 'error', text: err instanceof Error ? err.message : 'Failed to upload proof image.' });
+    } finally {
+      setUploadingField(null);
+    }
+  };
 
   const market = useMemo(
     () => markets.find((m) => m.market.toLowerCase() === selectedMarket.toLowerCase()) || null,
@@ -247,7 +277,9 @@ export default function Propose() {
       </div>
 
       {!isConnected ? (
-        <button onClick={connect} className="btn-primary">Connect wallet</button>
+        <div className="card p-6 text-dark-300">
+          Connect your wallet from the header to propose or challenge outcomes.
+        </div>
       ) : !isCorrectNetwork ? (
         <button onClick={switchNetwork} className="btn-primary">Switch to ARC Testnet</button>
       ) : loading ? (
@@ -279,8 +311,22 @@ export default function Propose() {
                   <select value={outcome} onChange={(e) => setOutcome(e.target.value)} className="input-field">
                     {(market?.outcomeLabels || []).map((label, i) => <option key={label} value={i}>{label}</option>)}
                   </select>
-                  <input value={evidenceUri} onChange={(e) => setEvidenceUri(e.target.value)} className="input-field" placeholder="Evidence link, official result URL, or IPFS URI" />
-                  <input value={proofUri} onChange={(e) => setProofUri(e.target.value)} className="input-field" placeholder="Screenshot/IPFS proof URI" />
+                  <EvidenceInput
+                    label="Evidence"
+                    value={evidenceUri}
+                    onChange={setEvidenceUri}
+                    onUpload={(e) => uploadProofImage(e, 'evidence')}
+                    uploading={uploadingField === 'evidence'}
+                    placeholder="Official result URL, API snapshot URL, or uploaded image URL"
+                  />
+                  <EvidenceInput
+                    label="Screenshot proof"
+                    value={proofUri}
+                    onChange={setProofUri}
+                    onUpload={(e) => uploadProofImage(e, 'proof')}
+                    uploading={uploadingField === 'proof'}
+                    placeholder="Upload screenshot or paste proof URL"
+                  />
                   <textarea value={reason} onChange={(e) => setReason(e.target.value)} rows={4} className="input-field resize-none" placeholder="Short reason" />
                   <button onClick={propose} disabled={txPending || !selectedMarket || !evidenceUri.trim() || !proofUri.trim() || !reason.trim()} className="btn-primary w-full py-3">
                     {txPending ? 'Submitting...' : `Propose with ${ethers.formatEther(requiredBond)} USDC bond`}
@@ -306,7 +352,14 @@ export default function Propose() {
                     <select value={counterOutcome} onChange={(e) => setCounterOutcome(e.target.value)} className="input-field">
                       {(market?.outcomeLabels || []).map((label, i) => <option key={label} value={i}>{label}</option>)}
                     </select>
-                    <input value={counterEvidenceUri} onChange={(e) => setCounterEvidenceUri(e.target.value)} className="input-field" placeholder="Counter-evidence link or IPFS URI" />
+                    <EvidenceInput
+                      label="Counter-evidence"
+                      value={counterEvidenceUri}
+                      onChange={setCounterEvidenceUri}
+                      onUpload={(e) => uploadProofImage(e, 'counterEvidence')}
+                      uploading={uploadingField === 'counterEvidence'}
+                      placeholder="Upload counter-proof or paste evidence URL"
+                    />
                     <textarea value={counterReason} onChange={(e) => setCounterReason(e.target.value)} rows={3} className="input-field resize-none" placeholder="Short challenge reason" />
                     <button onClick={challenge} disabled={txPending || !counterEvidenceUri.trim() || !counterReason.trim()} className="btn-secondary w-full py-3">
                       {txPending ? 'Submitting...' : `Challenge with ${ethers.formatEther(requiredBond)} USDC bond`}
@@ -340,6 +393,36 @@ export default function Propose() {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+function EvidenceInput({
+  label,
+  value,
+  onChange,
+  onUpload,
+  uploading,
+  placeholder,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  onUpload: (event: ChangeEvent<HTMLInputElement>) => void;
+  uploading: boolean;
+  placeholder: string;
+}) {
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-1.5">
+        <label className="text-xs text-dark-400">{label}</label>
+        <label className="text-xs text-primary-400 hover:text-primary-300 cursor-pointer">
+          {uploading ? 'Uploading...' : 'Upload image'}
+          <input type="file" accept="image/*" className="hidden" onChange={onUpload} disabled={uploading} />
+        </label>
+      </div>
+      <input value={value} onChange={(e) => onChange(e.target.value)} className="input-field" placeholder={placeholder} />
+      <p className="text-2xs text-dark-500 mt-1">Uploads use the same signed R2 flow and WebP compression as market/profile images.</p>
     </div>
   );
 }

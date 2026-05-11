@@ -15,7 +15,8 @@ contract PredictionMarketV2 is ReentrancyGuard {
         Expired
     }
 
-    uint256 public constant PLATFORM_FEE_BPS = 25;
+    uint256 public constant PLATFORM_FEE_BPS = 75;
+    uint256 public constant RESOLVER_REWARD_BPS = 25;
     uint256 public constant RESOLUTION_GRACE_PERIOD = 3 days;
 
     address private _owner;
@@ -84,6 +85,7 @@ contract PredictionMarketV2 is ReentrancyGuard {
     event DeadlineEdited(uint256 newDeadline);
     event Redeemed(address indexed user, uint256 amountWei);
     event FeeCollected(address indexed recipient, uint256 amountWei);
+    event ResolverRewardPaid(address indexed recipient, uint256 amountWei);
 
     modifier onlyOperator() {
         require(authorizedOperator[msg.sender], "PMV2: not operator");
@@ -299,7 +301,7 @@ contract PredictionMarketV2 is ReentrancyGuard {
         return true;
     }
 
-    function resolveByManager(uint256 _winningOutcome, string calldata _proofUri)
+    function resolveByManager(uint256 _winningOutcome, string calldata _proofUri, address rewardRecipient)
         external
         onlyResolutionManager
     {
@@ -310,12 +312,12 @@ contract PredictionMarketV2 is ReentrancyGuard {
         winningOutcome = _winningOutcome;
         proofUri = _proofUri;
         stage = Stage.Resolved;
-        _finalizePayout(uint256(totalSharesWad[_winningOutcome]));
+        _finalizePayout(uint256(totalSharesWad[_winningOutcome]), rewardRecipient);
 
         emit MarketResolved(_winningOutcome, _proofUri);
     }
 
-    function cancelByManager(string calldata reason, string calldata _proofUri)
+    function cancelByManager(string calldata reason, string calldata _proofUri, address rewardRecipient)
         external
         onlyResolutionManager
     {
@@ -326,7 +328,7 @@ contract PredictionMarketV2 is ReentrancyGuard {
         cancelReason = reason;
         cancelProofUri = _proofUri;
         stage = Stage.Cancelled;
-        _finalizePayout(_invalidPayoutLiability());
+        _finalizePayout(_invalidPayoutLiability(), rewardRecipient);
 
         emit MarketCancelled(reason, _proofUri);
     }
@@ -339,7 +341,7 @@ contract PredictionMarketV2 is ReentrancyGuard {
         cancelReason = reason;
         cancelProofUri = _proofUri;
         stage = Stage.Cancelled;
-        _finalizePayout(_invalidPayoutLiability());
+        _finalizePayout(_invalidPayoutLiability(), address(0));
 
         emit MarketCancelled(reason, _proofUri);
     }
@@ -537,18 +539,25 @@ contract PredictionMarketV2 is ReentrancyGuard {
         require(isTradingOpen(), "PMV2: trading closed");
     }
 
-    function _finalizePayout(uint256 claimWei) internal {
+    function _finalizePayout(uint256 claimWei, address rewardRecipient) internal {
         uint256 pool = address(this).balance;
         require(pool >= claimWei, "PMV2: insolvent");
 
         totalClaimWei = claimWei;
         uint256 surplus = pool - claimWei;
         uint256 fee = (surplus * PLATFORM_FEE_BPS) / 10_000;
+        uint256 resolverReward = rewardRecipient == address(0) ? 0 : (surplus * RESOLVER_REWARD_BPS) / 10_000;
+        if (resolverReward > fee) resolverReward = fee;
+        uint256 protocolFee = fee - resolverReward;
         resolvedPoolWei = pool - fee;
 
-        if (fee > 0) {
-            _sendValue(payable(_owner), fee, "PMV2: fee failed");
-            emit FeeCollected(_owner, fee);
+        if (protocolFee > 0) {
+            _sendValue(payable(_owner), protocolFee, "PMV2: fee failed");
+            emit FeeCollected(_owner, protocolFee);
+        }
+        if (resolverReward > 0) {
+            _sendValue(payable(rewardRecipient), resolverReward, "PMV2: reward failed");
+            emit ResolverRewardPaid(rewardRecipient, resolverReward);
         }
     }
 

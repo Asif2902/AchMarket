@@ -7,6 +7,6 @@ interface IResolvableMarket {
     function totalVolumeWei() external view returns (uint256);
     function resolutionTime() external view returns (uint256);
     function hasParticipated(address user) external view returns (bool);
-    function resolveByManager(uint256 winningOutcome, string calldata proofUri) external;
-    function cancelByManager(string calldata reason, string calldata proofUri) external;
+    function resolveByManager(uint256 winningOutcome, string calldata proofUri, address rewardRecipient) external;
+    function cancelByManager(string calldata reason, string calldata proofUri, address rewardRecipient) external;
 }

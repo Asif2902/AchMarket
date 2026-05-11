@@ -65,6 +65,11 @@ interface ProbHistoryPoint {
   [key: string]: number;
 }
 
+interface DepthLevel {
+  price: bigint;
+  shares: bigint;
+}
+
 function ensureMetaTag(kind: 'name' | 'property', key: string): HTMLMetaElement {
   const selector = `meta[${kind}="${key}"]`;
   const existing = document.head.querySelector(selector);
@@ -170,6 +175,9 @@ export default function MarketDetail() {
   const [estimatedShares, setEstimatedShares] = useState<number | null>(null);
   const [previewCost, setPreviewCost] = useState<bigint | null>(null);
   const [executionSource, setExecutionSource] = useState('');
+  const [orderBookBids, setOrderBookBids] = useState<DepthLevel[]>([]);
+  const [orderBookAsks, setOrderBookAsks] = useState<DepthLevel[]>([]);
+  const [orderBookLoading, setOrderBookLoading] = useState(false);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewKey, setPreviewKey] = useState('');
   const [txPending, setTxPending] = useState(false);
@@ -517,6 +525,45 @@ export default function MarketDetail() {
   }, [marketAddress, detail?.market, detail?.outcomeLabels, detail?.totalSharesWad, detail?.bWad, detail?.createdAt]);
 
   useEffect(() => { fetchAll(); }, [fetchAll]);
+
+  useEffect(() => {
+    if (!marketAddress) {
+      setOrderBookBids([]);
+      setOrderBookAsks([]);
+      return;
+    }
+
+    let cancelled = false;
+    const fetchDepth = async () => {
+      setOrderBookLoading(true);
+      try {
+        const orderBook = new ethers.Contract(ORDER_BOOK_ADDRESS, ORDER_BOOK_ABI, readProvider);
+        const [bidDepth, askDepth] = await Promise.all([
+          orderBook.getDepth(marketAddress, selectedOutcome, 0, 10),
+          orderBook.getDepth(marketAddress, selectedOutcome, 1, 10),
+        ]);
+        if (cancelled) return;
+        const parseDepth = (depth: { pricesWad?: bigint[]; sharesWad?: bigint[] } | [bigint[], bigint[]]): DepthLevel[] => {
+          const prices = 'pricesWad' in depth ? depth.pricesWad || [] : depth[0];
+          const shares = 'sharesWad' in depth ? depth.sharesWad || [] : depth[1];
+          return prices
+            .map((price, i) => ({ price, shares: shares[i] || 0n }))
+            .filter((level) => level.price > 0n && level.shares > 0n);
+        };
+        setOrderBookBids(parseDepth(bidDepth));
+        setOrderBookAsks(parseDepth(askDepth));
+      } catch (err) {
+        if (!cancelled) {
+          setOrderBookBids([]);
+          setOrderBookAsks([]);
+        }
+      } finally {
+        if (!cancelled) setOrderBookLoading(false);
+      }
+    };
+
+    void fetchDepth();
+  }, [marketAddress, selectedOutcome, refreshTrigger, readProvider]);
 
   useEffect(() => {
     if (!marketAddress) {
@@ -971,8 +1018,8 @@ export default function MarketDetail() {
     const costWei = ethers.parseEther(usdcInput.toString());
     // Use actual contract balance (more accurate than totalVolumeWei if sells occurred)
     const poolAfterTrade = poolBalance + costWei;
-    // Apply 0.25% resolution fee (matches contract's resolve() logic)
-    const resolvedPool = poolAfterTrade * 9975n / 10000n;
+    // Apply the 0.75% settlement fee. 0.25% is paid to the successful resolver when applicable.
+    const resolvedPool = poolAfterTrade * 9925n / 10000n;
     if (totalWinShares > 0n) {
       // Payout for THIS trade's new shares only
       estimatedPayout = (sharesWad * resolvedPool) / totalWinShares;
@@ -1608,7 +1655,7 @@ export default function MarketDetail() {
                       <p className="text-base font-bold text-white mt-0.5 flex items-center gap-1.5"><UsdcIcon size={16} />{formatCompactUSDC(detail.resolvedPoolWei)} USDC</p>
                     </div>
                     <div>
-                      <span className="text-2xs text-dark-500 font-medium uppercase tracking-wider">Platform Fee (0.25%)</span>
+                      <span className="text-2xs text-dark-500 font-medium uppercase tracking-wider">Settlement Fee (0.75%)</span>
                       <p className="text-base font-bold text-dark-400 mt-0.5 flex items-center gap-1.5"><UsdcIcon size={16} className="opacity-50" />{formatCompactUSDC(fee)} USDC</p>
                     </div>
                   </div>
@@ -1844,6 +1891,46 @@ export default function MarketDetail() {
                     <p className="text-xs font-semibold text-white mt-1 tabular-nums">{formatWad(selectedOwnedShares)}</p>
                   </div>
                 </div>
+
+                {executionMode === 'limit' && (
+                  <div className="mb-4 rounded-2xl border border-white/[0.08] bg-[#060b11]/80 overflow-hidden">
+                    <div className="flex items-center justify-between px-3 py-2 border-b border-white/[0.06]">
+                      <div>
+                        <p className="text-2xs uppercase tracking-[0.12em] text-white/45 font-semibold">CLOB Depth</p>
+                        <p className="text-xs text-white/65">FIFO price levels for {selectedOutcomeLabel}</p>
+                      </div>
+                      <span className="text-2xs text-cyan-300 px-2 py-1 rounded-md bg-cyan-500/10 border border-cyan-500/20">CEX mode</span>
+                    </div>
+                    <div className="grid grid-cols-3 px-3 py-2 text-2xs uppercase tracking-[0.12em] text-dark-500 border-b border-white/[0.06]">
+                      <span>Price</span>
+                      <span className="text-right">Shares</span>
+                      <span className="text-right">Total</span>
+                    </div>
+                    <div className="max-h-56 overflow-hidden">
+                      {orderBookLoading ? (
+                        <p className="px-3 py-5 text-xs text-dark-500 text-center">Loading order book...</p>
+                      ) : (
+                        <>
+                          <DepthRows levels={[...orderBookAsks].reverse()} side="ask" />
+                          <div className="px-3 py-2 border-y border-white/[0.06] bg-dark-900/60 flex items-center justify-between">
+                            <span className="text-2xs uppercase tracking-[0.12em] text-dark-500">Spread</span>
+                            <span className="text-xs font-mono text-white">
+                              {orderBookBids[0] && orderBookAsks[0]
+                                ? `${(Number(ethers.formatEther(orderBookAsks[0].price - orderBookBids[0].price))).toFixed(4)} USDC`
+                                : 'No two-sided book'}
+                            </span>
+                          </div>
+                          <DepthRows levels={orderBookBids} side="bid" />
+                          {orderBookBids.length === 0 && orderBookAsks.length === 0 && (
+                            <p className="px-3 py-5 text-xs text-dark-500 text-center">
+                              No CLOB liquidity yet. Your order can become the first visible bid/ask.
+                            </p>
+                          )}
+                        </>
+                      )}
+                    </div>
+                  </div>
+                )}
 
                 {/* Amount input */}
                 <div className="flex items-center justify-between mb-1.5">
@@ -2401,6 +2488,28 @@ function PreviewRow({ label, value, accent, muted }: { label: string; value: str
       }`}>
         {value}
       </span>
+    </div>
+  );
+}
+
+function DepthRows({ levels, side }: { levels: DepthLevel[]; side: 'bid' | 'ask' }) {
+  if (levels.length === 0) return null;
+  const color = side === 'bid' ? 'text-emerald-300' : 'text-red-300';
+  const bg = side === 'bid' ? 'bg-emerald-500/[0.04]' : 'bg-red-500/[0.04]';
+  return (
+    <div>
+      {levels.map((level, index) => {
+        const price = Number(ethers.formatEther(level.price));
+        const shares = Number(ethers.formatEther(level.shares));
+        const total = price * shares;
+        return (
+          <div key={`${side}-${level.price.toString()}-${index}`} className={`grid grid-cols-3 px-3 py-1.5 text-xs font-mono ${bg}`}>
+            <span className={color}>{price.toFixed(2)}</span>
+            <span className="text-right text-white/75">{shares.toFixed(3)}</span>
+            <span className="text-right text-white/45">{total.toFixed(3)}</span>
+          </div>
+        );
+      })}
     </div>
   );
 }
