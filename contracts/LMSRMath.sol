@@ -33,12 +33,22 @@ library LMSRMath {
     function costFunction(int256[] memory q, int256 b)
         internal pure returns (int256 cost)
     {
-        int256 sumExp;
-        for (uint256 i = 0; i < q.length; ) {
-            sumExp += expWad((q[i] / b) * WAD + (q[i] % b) * WAD / b);
+        require(q.length > 0, "LMSR: empty outcomes");
+        require(b > 0, "LMSR: b must be positive");
+
+        int256 maxScaled = _scaledShare(q[0], b);
+        for (uint256 i = 1; i < q.length; ) {
+            int256 scaled = _scaledShare(q[i], b);
+            if (scaled > maxScaled) maxScaled = scaled;
             unchecked { i++; }
         }
-        cost = (b * lnWad(sumExp)) / WAD;
+
+        int256 sumExp;
+        for (uint256 i = 0; i < q.length; ) {
+            sumExp += expWad(_scaledShare(q[i], b) - maxScaled);
+            unchecked { i++; }
+        }
+        cost = (b * (maxScaled + lnWad(sumExp))) / WAD;
     }
 
     /// @notice Cost (positive = pay in, negative = receive out) to change
@@ -54,6 +64,7 @@ library LMSRMath {
         int256   delta,
         int256   b
     ) internal pure returns (int256 deltaCost) {
+        require(idx < q.length, "LMSR: invalid outcome");
         int256 cOld = costFunction(q, b);
 
         int256[] memory qNew = _copy(q);
@@ -70,15 +81,35 @@ library LMSRMath {
         uint256  idx,
         int256   b
     ) internal pure returns (int256 prob) {
+        require(idx < q.length, "LMSR: invalid outcome");
+        require(b > 0, "LMSR: b must be positive");
+
+        int256 maxScaled = _scaledShare(q[0], b);
+        for (uint256 i = 1; i < q.length; ) {
+            int256 scaled = _scaledShare(q[i], b);
+            if (scaled > maxScaled) maxScaled = scaled;
+            unchecked { i++; }
+        }
+
         int256 ei;
         int256 sumExp;
         for (uint256 i = 0; i < q.length; ) {
-            int256 e = expWad((q[i] * WAD) / b);
+            int256 e = expWad(_scaledShare(q[i], b) - maxScaled);
             sumExp += e;
             if (i == idx) ei = e;
             unchecked { i++; }
         }
         prob = (ei * WAD) / sumExp;
+    }
+
+    /// @notice LMSR seed capital needed to cover the market maker's worst-case loss.
+    function initialLiquidity(uint256 outcomeCount, int256 b)
+        internal pure returns (int256 liquidity)
+    {
+        require(outcomeCount >= 2, "LMSR: need outcomes");
+        require(b > 0, "LMSR: b must be positive");
+        require(outcomeCount <= uint256(type(int256).max) / uint256(WAD), "LMSR: too many outcomes");
+        liquidity = (b * lnWad(int256(outcomeCount) * WAD)) / WAD;
     }
 
     /*//////////////////////////////////////////////////////////////
@@ -93,6 +124,10 @@ library LMSRMath {
             dst[i] = src[i];
             unchecked { i++; }
         }
+    }
+
+    function _scaledShare(int256 q, int256 b) internal pure returns (int256) {
+        return (q / b) * WAD + ((q % b) * WAD) / b;
     }
 
     /*//////////////////////////////////////////////////////////////

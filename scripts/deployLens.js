@@ -1,34 +1,38 @@
 const hre = require("hardhat");
 
-const FACTORY_ADDRESS = '0x914afD6779AC6aD050D36c7323AfC0ab130B9e5F';
-const EXPECTED_CHAIN_ID = 5042002;
+const EXPECTED_CHAIN_ID = Number(process.env.EXPECTED_CHAIN_ID || 5042002);
 
 async function main() {
+  const factoryAddress = process.env.HYBRID_FACTORY_ADDRESS;
+  const routerAddress = process.env.MARKET_ROUTER_ADDRESS;
+  const orderBookAddress = process.env.ORDER_BOOK_ADDRESS;
+
+  if (!factoryAddress) throw new Error("HYBRID_FACTORY_ADDRESS is required.");
+  if (!routerAddress) throw new Error("MARKET_ROUTER_ADDRESS is required.");
+  if (!orderBookAddress) throw new Error("ORDER_BOOK_ADDRESS is required.");
+
   const [deployer] = await hre.ethers.getSigners();
-  console.log("Deploying with account:", deployer.address);
+  const network = await hre.ethers.provider.getNetwork();
+  const chainId = Number(network.chainId);
+  if (chainId !== EXPECTED_CHAIN_ID) {
+    throw new Error(`Wrong network: expected chainId ${EXPECTED_CHAIN_ID}, got ${chainId}.`);
+  }
 
   const provider = hre.ethers.provider;
-  const rpcChain = await provider.getNetwork();
-  const chainId = Number(rpcChain.chainId);
-  console.log("Current network chainId:", chainId);
-
-  if (chainId !== EXPECTED_CHAIN_ID) {
-    throw new Error(`Wrong network: expected chainId ${EXPECTED_CHAIN_ID}, got ${chainId}. Aborting deployment of PredictionMarketLens.`);
+  for (const [name, address] of [
+    ["HYBRID_FACTORY_ADDRESS", factoryAddress],
+    ["MARKET_ROUTER_ADDRESS", routerAddress],
+    ["ORDER_BOOK_ADDRESS", orderBookAddress],
+  ]) {
+    const code = await provider.getCode(address);
+    if (code === "0x") throw new Error(`No contract code at ${name} ${address}.`);
   }
 
-  const factoryCode = await provider.getCode(FACTORY_ADDRESS);
-  if (factoryCode === '0x') {
-    throw new Error(`No contract code at FACTORY_ADDRESS ${FACTORY_ADDRESS} on chain ${chainId}. Aborting deployment of PredictionMarketLens.`);
-  }
-
-  console.log("Deploying Lens only (Factory:", FACTORY_ADDRESS, ")...");
-
-  const Lens = await hre.ethers.getContractFactory("PredictionMarketLens");
-  const lens = await Lens.deploy(FACTORY_ADDRESS);
+  console.log("Deploying HybridMarketLens with account:", deployer.address);
+  const Lens = await hre.ethers.getContractFactory("HybridMarketLens");
+  const lens = await Lens.deploy(factoryAddress, routerAddress, orderBookAddress);
   await lens.waitForDeployment();
-  const lensAddr = await lens.getAddress();
-
-  console.log("PredictionMarketLens deployed to:", lensAddr);
+  console.log("HybridMarketLens deployed to:", await lens.getAddress());
 }
 
 main()
