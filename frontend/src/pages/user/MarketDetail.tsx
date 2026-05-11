@@ -740,6 +740,13 @@ export default function MarketDetail() {
         try {
           const budgetUSDC = parseFloat(shareAmount);
           const shares = findSharesForCost(detail.totalSharesWad, detail.bWad, selectedOutcome, budgetUSDC);
+          if (shares === null) {
+            setEstimatedShares(null);
+            setPreviewCost(null);
+            setExecutionSource('');
+            setPreviewKey(inputKey);
+            return;
+          }
           const sharesWad = ethers.parseEther(Math.max(0, shares).toFixed(18));
           const router = new ethers.Contract(MARKET_ROUTER_ADDRESS, MARKET_ROUTER_ABI, readProvider);
           const preview = await router.previewTrade(marketAddress, selectedOutcome, 0, sharesWad, 8);
