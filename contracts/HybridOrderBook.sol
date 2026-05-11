@@ -34,6 +34,8 @@ contract HybridOrderBook is Ownable, ReentrancyGuard {
 
     uint256 public constant WAD = 1e18;
     uint256 public constant MAX_BPS = 10_000;
+    uint256 public constant MAX_PRICE_LEVELS = 1_000;
+    uint256 public constant MAX_FEE_BPS = 100;
 
     uint256 public nextOrderId = 1;
     address public router;
@@ -67,6 +69,7 @@ contract HybridOrderBook is Ownable, ReentrancyGuard {
         uint256 expiry
     );
     event OrderCancelled(uint256 indexed orderId, address indexed owner, uint256 remainingSharesWad, uint256 refundWei);
+    event OrderPruned(uint256 indexed orderId, address indexed market, uint256 indexed outcome, Side side, uint256 priceWad);
     event OrderFilled(
         uint256 indexed orderId,
         address indexed market,
@@ -130,7 +133,7 @@ contract HybridOrderBook is Ownable, ReentrancyGuard {
     }
 
     function setMakerFeeBps(uint256 _makerFeeBps) external onlyOwner {
-        require(_makerFeeBps <= 100, "OB: maker fee too high");
+        require(_makerFeeBps <= MAX_FEE_BPS, "OB: maker fee too high");
         makerFeeBps = _makerFeeBps;
         emit MakerFeeUpdated(_makerFeeBps);
     }
@@ -417,12 +420,40 @@ contract HybridOrderBook is Ownable, ReentrancyGuard {
         return _availableAtLevel(market, outcome, Side(sideRaw), priceWad);
     }
 
+    function pruneExpiredOrder(uint256 orderId) external nonReentrant {
+        Order storage order = orders[orderId];
+        require(order.active, "OB: inactive order");
+        require(_isExpired(order), "OB: not expired");
+
+        uint256 remaining = order.remainingSharesWad;
+        uint256 refundWei = order.escrowWei;
+        address owner = order.owner;
+        address market = order.market;
+        uint256 outcome = order.outcome;
+        Side side = order.side;
+        uint256 priceWad = order.priceWad;
+
+        order.active = false;
+        order.remainingSharesWad = 0;
+        order.escrowWei = 0;
+        _decreaseLevel(market, outcome, side, priceWad, remaining);
+
+        if (side == Side.Bid) {
+            if (refundWei > 0) _sendValue(payable(owner), refundWei, "OB: escrow refund failed");
+        } else if (remaining > 0) {
+            require(IHybridMarket(market).moveShares(address(this), owner, outcome, remaining), "OB: share return failed");
+        }
+
+        emit OrderPruned(orderId, market, outcome, side, priceWad);
+    }
+
     function _setConstraints(
         uint256 _tickSizeWad,
         uint256 _minOrderSharesWad,
         uint256 _maxPriceDeviationBps
     ) internal {
         require(_tickSizeWad > 0 && _tickSizeWad <= WAD && WAD % _tickSizeWad == 0, "OB: invalid tick");
+        require(WAD / _tickSizeWad <= MAX_PRICE_LEVELS, "OB: too many levels");
         require(_minOrderSharesWad > 0, "OB: invalid min order");
         require(_maxPriceDeviationBps <= MAX_BPS, "OB: invalid deviation");
         tickSizeWad = _tickSizeWad;

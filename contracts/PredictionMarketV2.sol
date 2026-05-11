@@ -1,13 +1,12 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import {LMSRMath} from "./LMSRMath.sol";
 
 /// @title PredictionMarketV2
 /// @notice Solvent LMSR market designed to be executed through MarketRouter and HybridOrderBook.
-contract PredictionMarketV2 is Ownable, ReentrancyGuard {
+contract PredictionMarketV2 is ReentrancyGuard {
     enum Stage {
         Active,
         Suspended,
@@ -18,6 +17,9 @@ contract PredictionMarketV2 is Ownable, ReentrancyGuard {
 
     uint256 public constant PLATFORM_FEE_BPS = 25;
     uint256 public constant RESOLUTION_GRACE_PERIOD = 3 days;
+
+    address private _owner;
+    bool private _initialized;
 
     string public title;
     string public description;
@@ -55,6 +57,15 @@ contract PredictionMarketV2 is Ownable, ReentrancyGuard {
     uint256 public participantCount;
 
     event ResolutionManagerUpdated(address indexed resolutionManager);
+    event OwnershipTransferred(address indexed previousOwner, address indexed newOwner);
+    event MarketInitialized(
+        address indexed owner,
+        address indexed resolutionManager,
+        uint256 outcomeCount,
+        int256 bWad,
+        uint256 marketDeadline,
+        uint256 resolutionTime
+    );
     event ResolutionRulesUpdated(
         string resolutionSource,
         uint256 resolutionTime,
@@ -79,6 +90,11 @@ contract PredictionMarketV2 is Ownable, ReentrancyGuard {
         _;
     }
 
+    modifier onlyOwner() {
+        require(msg.sender == _owner, "PMV2: not owner");
+        _;
+    }
+
     modifier onlyEditable() {
         require(
             (stage == Stage.Active || stage == Stage.Suspended) && block.timestamp <= marketDeadline,
@@ -92,7 +108,11 @@ contract PredictionMarketV2 is Ownable, ReentrancyGuard {
         _;
     }
 
-    constructor(
+    constructor() {
+        _initialized = true;
+    }
+
+    function initialize(
         address _owner,
         string memory _title,
         string memory _description,
@@ -107,7 +127,9 @@ contract PredictionMarketV2 is Ownable, ReentrancyGuard {
         string memory _invalidCondition,
         address _resolutionManager,
         address[] memory _operators
-    ) payable Ownable(_owner) {
+    ) external payable {
+        require(!_initialized, "PMV2: initialized");
+        _initialized = true;
         require(_owner != address(0), "PMV2: zero owner");
         require(_resolutionManager != address(0), "PMV2: zero resolver");
         require(_bWad > 0, "PMV2: b must be > 0");
@@ -121,6 +143,7 @@ contract PredictionMarketV2 is Ownable, ReentrancyGuard {
         uint256 requiredSeed = uint256(LMSRMath.initialLiquidity(_outcomeLabels.length, _bWad));
         require(msg.value >= requiredSeed, "PMV2: insufficient seed");
 
+        _transferOwnership(_owner);
         title = _title;
         description = _description;
         category = _category;
@@ -149,6 +172,17 @@ contract PredictionMarketV2 is Ownable, ReentrancyGuard {
             emit OperatorUpdated(_operators[i], true);
             unchecked { i++; }
         }
+
+        emit MarketInitialized(_owner, _resolutionManager, outcomeCount, _bWad, marketDeadline, _resolutionTime);
+    }
+
+    function owner() public view returns (address) {
+        return _owner;
+    }
+
+    function transferOwnership(address newOwner) external onlyOwner {
+        require(newOwner != address(0), "PMV2: zero owner");
+        _transferOwnership(newOwner);
     }
 
     function setAuthorizedOperator(address operator, bool allowed) external onlyOwner {
@@ -513,8 +547,8 @@ contract PredictionMarketV2 is Ownable, ReentrancyGuard {
         resolvedPoolWei = pool - fee;
 
         if (fee > 0) {
-            _sendValue(payable(owner()), fee, "PMV2: fee failed");
-            emit FeeCollected(owner(), fee);
+            _sendValue(payable(_owner), fee, "PMV2: fee failed");
+            emit FeeCollected(_owner, fee);
         }
     }
 
@@ -546,6 +580,11 @@ contract PredictionMarketV2 is Ownable, ReentrancyGuard {
             hasParticipated[user] = true;
             participantCount++;
         }
+    }
+
+    function _transferOwnership(address newOwner) internal {
+        emit OwnershipTransferred(_owner, newOwner);
+        _owner = newOwner;
     }
 
     function _sendValue(address payable to, uint256 amount, string memory errorMessage) internal {

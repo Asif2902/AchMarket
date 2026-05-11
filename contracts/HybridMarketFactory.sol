@@ -2,10 +2,10 @@
 pragma solidity ^0.8.20;
 
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
+import {Clones} from "@openzeppelin/contracts/proxy/Clones.sol";
 import {PredictionMarketV2} from "./PredictionMarketV2.sol";
 import {MarketRouter} from "./MarketRouter.sol";
 import {HybridOrderBook} from "./HybridOrderBook.sol";
-import {LMSRMath} from "./LMSRMath.sol";
 import {IResolutionManager} from "./interfaces/IResolutionManager.sol";
 
 /// @title HybridMarketFactory
@@ -19,6 +19,8 @@ contract HybridMarketFactory is Ownable {
     MarketRouter public router;
     HybridOrderBook public orderBook;
     address public defaultResolutionManager;
+    address public marketImplementation;
+    bool public creationPaused;
 
     int256 public minBWad = 1_000e18;
     int256 public maxBWad = 1_000_000e18;
@@ -39,16 +41,20 @@ contract HybridMarketFactory is Ownable {
     event RouterUpdated(address indexed router);
     event OrderBookUpdated(address indexed orderBook);
     event DefaultResolutionManagerUpdated(address indexed resolutionManager);
+    event MarketImplementationUpdated(address indexed implementation);
     event MarketResolutionManagerUpdated(address indexed market, address indexed resolutionManager);
     event MarketRegistered(address indexed market, uint256 indexed marketId);
+    event CreationPausedUpdated(bool paused);
 
     constructor(
         address _owner,
+        address _marketImplementation,
         address _router,
         address _orderBook,
         address _defaultResolutionManager
     ) Ownable(_owner) {
         require(_owner != address(0), "FactoryV2: zero owner");
+        _setMarketImplementation(_marketImplementation);
         _setRouter(_router);
         _setOrderBook(_orderBook);
         _setDefaultResolutionManager(_defaultResolutionManager);
@@ -67,13 +73,15 @@ contract HybridMarketFactory is Ownable {
         string calldata _fallbackResolutionSource,
         string calldata _invalidCondition
     ) external payable onlyOwner returns (address market) {
+        require(!creationPaused, "FactoryV2: creation paused");
         _validateCreation(_title, _description, _category, _outcomeLabels, _bWad, _durationSeconds);
 
         address[] memory operators = new address[](2);
         operators[0] = address(router);
         operators[1] = address(orderBook);
 
-        PredictionMarketV2 pm = new PredictionMarketV2{value: msg.value}(
+        market = Clones.clone(marketImplementation);
+        PredictionMarketV2(payable(market)).initialize{value: msg.value}(
             address(this),
             _title,
             _description,
@@ -90,7 +98,6 @@ contract HybridMarketFactory is Ownable {
             operators
         );
 
-        market = address(pm);
         _registerMarket(market);
         _wireMarket(market, defaultResolutionManager);
 
@@ -109,6 +116,7 @@ contract HybridMarketFactory is Ownable {
 
     function registerExistingMarket(address market, address resolutionManager) external onlyOwner {
         require(market != address(0), "FactoryV2: zero market");
+        require(resolutionManager != address(0), "FactoryV2: zero resolver");
         require(!isMarket[market], "FactoryV2: already registered");
         _registerMarket(market);
         _wireMarket(market, resolutionManager);
@@ -128,6 +136,16 @@ contract HybridMarketFactory is Ownable {
     function setDefaultResolutionManager(address _resolutionManager) external onlyOwner {
         _setDefaultResolutionManager(_resolutionManager);
         emit DefaultResolutionManagerUpdated(_resolutionManager);
+    }
+
+    function setCreationPaused(bool paused) external onlyOwner {
+        creationPaused = paused;
+        emit CreationPausedUpdated(paused);
+    }
+
+    function setMarketImplementation(address _marketImplementation) external onlyOwner {
+        _setMarketImplementation(_marketImplementation);
+        emit MarketImplementationUpdated(_marketImplementation);
     }
 
     function setMarketResolutionManager(address market, address resolutionManager) external onlyOwner {
@@ -220,10 +238,6 @@ contract HybridMarketFactory is Ownable {
         }
     }
 
-    function requiredSeed(int256 bWad, uint256 outcomeCount) external pure returns (uint256) {
-        return uint256(LMSRMath.initialLiquidity(outcomeCount, bWad));
-    }
-
     function _registerMarket(address market) internal {
         marketIndex[market] = markets.length;
         markets.push(market);
@@ -270,6 +284,12 @@ contract HybridMarketFactory is Ownable {
     function _setDefaultResolutionManager(address _resolutionManager) internal {
         require(_resolutionManager != address(0), "FactoryV2: zero resolver");
         defaultResolutionManager = _resolutionManager;
+    }
+
+    function _setMarketImplementation(address _marketImplementation) internal {
+        require(_marketImplementation != address(0), "FactoryV2: zero implementation");
+        require(_marketImplementation.code.length > 0, "FactoryV2: implementation has no code");
+        marketImplementation = _marketImplementation;
     }
 
     receive() external payable {}

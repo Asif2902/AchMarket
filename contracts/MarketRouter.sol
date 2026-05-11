@@ -29,6 +29,8 @@ contract MarketRouter is Ownable, ReentrancyGuard {
 
     uint256 public constant WAD = 1e18;
     uint256 public constant MAX_BPS = 10_000;
+    uint256 public constant MAX_FEE_BPS = 100;
+    uint256 public constant MAX_HOPS_LIMIT = 128;
 
     HybridOrderBook public orderBook;
     address public feeRecipient;
@@ -49,6 +51,7 @@ contract MarketRouter is Ownable, ReentrancyGuard {
     event ClobPausedUpdated(bool paused);
     event FeesUpdated(uint256 orderBookTakerFeeBps, uint256 lmsrTakerFeeBps);
     event ExecutionConfigUpdated(uint256 chunkSizeWad, uint256 maxTradeSharesWad, uint256 defaultMaxHops);
+    event OrderBookFallback(address indexed market, uint256 indexed outcome, TradeSide side, uint256 remainingSharesWad);
     event HybridTrade(
         address indexed trader,
         address indexed market,
@@ -76,7 +79,7 @@ contract MarketRouter is Ownable, ReentrancyGuard {
         require(_feeRecipient != address(0), "Router: zero fee recipient");
         require(_chunkSizeWad > 0, "Router: zero chunk");
         require(_maxTradeSharesWad >= _chunkSizeWad, "Router: invalid max trade");
-        require(_defaultMaxHops > 0, "Router: zero max hops");
+        require(_defaultMaxHops > 0 && _defaultMaxHops <= MAX_HOPS_LIMIT, "Router: invalid max hops");
 
         orderBook = HybridOrderBook(_orderBook);
         feeRecipient = _feeRecipient;
@@ -119,8 +122,8 @@ contract MarketRouter is Ownable, ReentrancyGuard {
     }
 
     function setFees(uint256 _orderBookTakerFeeBps, uint256 _lmsrTakerFeeBps) external onlyOwner {
-        require(_orderBookTakerFeeBps <= 100, "Router: OB fee too high");
-        require(_lmsrTakerFeeBps <= 100, "Router: LMSR fee too high");
+        require(_orderBookTakerFeeBps <= MAX_FEE_BPS, "Router: OB fee too high");
+        require(_lmsrTakerFeeBps <= MAX_FEE_BPS, "Router: LMSR fee too high");
         orderBookTakerFeeBps = _orderBookTakerFeeBps;
         lmsrTakerFeeBps = _lmsrTakerFeeBps;
         emit FeesUpdated(_orderBookTakerFeeBps, _lmsrTakerFeeBps);
@@ -133,7 +136,7 @@ contract MarketRouter is Ownable, ReentrancyGuard {
     ) external onlyOwner {
         require(_chunkSizeWad > 0, "Router: zero chunk");
         require(_maxTradeSharesWad >= _chunkSizeWad, "Router: invalid max trade");
-        require(_defaultMaxHops > 0, "Router: zero max hops");
+        require(_defaultMaxHops > 0 && _defaultMaxHops <= MAX_HOPS_LIMIT, "Router: invalid max hops");
         chunkSizeWad = _chunkSizeWad;
         maxTradeSharesWad = _maxTradeSharesWad;
         defaultMaxHops = _defaultMaxHops;
@@ -184,6 +187,7 @@ contract MarketRouter is Ownable, ReentrancyGuard {
                             filledFromOrderBook = true;
                         }
                     } catch {
+                        emit OrderBookFallback(market, outcome, TradeSide.Buy, remaining);
                         break;
                     }
                 }
@@ -257,6 +261,7 @@ contract MarketRouter is Ownable, ReentrancyGuard {
                             filledFromOrderBook = true;
                         }
                     } catch {
+                        emit OrderBookFallback(market, outcome, TradeSide.Sell, remaining);
                         break;
                     }
                 }

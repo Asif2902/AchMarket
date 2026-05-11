@@ -25,10 +25,12 @@ async function main() {
   }
 
   const feeRecipient = process.env.FEE_RECIPIENT || deployer.address;
+  const owner = process.env.PROTOCOL_OWNER || deployer.address;
   const treasury = process.env.RESOLUTION_TREASURY || feeRecipient;
   const reserve = process.env.RESOLUTION_RESERVE || feeRecipient;
 
   console.log("Deploying v2 hybrid stack with account:", deployer.address);
+  console.log("Protocol owner:", owner);
   console.log("Chain ID:", chainId);
   console.log("Fee recipient:", feeRecipient);
   console.log("Resolution treasury:", treasury);
@@ -71,8 +73,19 @@ async function main() {
   await resolver.waitForDeployment();
   const resolverAddr = await resolver.getAddress();
 
+  const MarketImplementation = await hre.ethers.getContractFactory("PredictionMarketV2");
+  const marketImplementation = await MarketImplementation.deploy();
+  await marketImplementation.waitForDeployment();
+  const marketImplementationAddr = await marketImplementation.getAddress();
+
   const Factory = await hre.ethers.getContractFactory("HybridMarketFactory");
-  const factory = await Factory.deploy(deployer.address, routerAddr, orderBookAddr, resolverAddr);
+  const factory = await Factory.deploy(
+    deployer.address,
+    marketImplementationAddr,
+    routerAddr,
+    orderBookAddr,
+    resolverAddr
+  );
   await factory.waitForDeployment();
   const factoryAddr = await factory.getAddress();
 
@@ -86,18 +99,25 @@ async function main() {
   await (await router.setMarketRegistrar(factoryAddr)).wait();
   await (await resolver.setMarketRegistrar(factoryAddr)).wait();
 
+  if (owner.toLowerCase() !== deployer.address.toLowerCase()) {
+    await (await orderBook.transferOwnership(owner)).wait();
+    await (await router.transferOwnership(owner)).wait();
+    await (await resolver.transferOwnership(owner)).wait();
+    await (await factory.transferOwnership(owner)).wait();
+  }
+
   if (RESOLVER_REWARD_POOL_WEI !== "0") {
     await (await deployer.sendTransaction({ to: resolverAddr, value: RESOLVER_REWARD_POOL_WEI })).wait();
   }
 
   console.log("\n=== V2 Hybrid Deployment Summary ===");
   console.log("HybridMarketFactory    :", factoryAddr);
-  console.log("PredictionMarketV2 impl: deployed per market by factory");
+  console.log("PredictionMarketV2 impl:", marketImplementationAddr);
   console.log("MarketRouter           :", routerAddr);
   console.log("HybridOrderBook        :", orderBookAddr);
   console.log("BondedResolutionManager:", resolverAddr);
   console.log("HybridMarketLens       :", lensAddr);
-  console.log("Owner                  :", deployer.address);
+  console.log("Owner                  :", owner);
 }
 
 main()

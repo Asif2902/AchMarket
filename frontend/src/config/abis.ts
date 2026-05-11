@@ -127,6 +127,8 @@ export const MARKET_V2_ABI = [
   "event SharesBought(address indexed trader, uint256 indexed outcomeIndex, uint256 sharesWad, uint256 costWei)",
   "event SharesSold(address indexed trader, uint256 indexed outcomeIndex, uint256 sharesWad, uint256 proceedsWei)",
   "event SharesMoved(address indexed from, address indexed to, uint256 indexed outcomeIndex, uint256 sharesWad)",
+  "event MarketInitialized(address indexed owner, address indexed resolutionManager, uint256 outcomeCount, int256 bWad, uint256 marketDeadline, uint256 resolutionTime)",
+  "event OwnershipTransferred(address indexed previousOwner, address indexed newOwner)",
 ] as const;
 
 export const MARKET_ROUTER_ABI = [
@@ -134,6 +136,8 @@ export const MARKET_ROUTER_ABI = [
   "function feeRecipient() view returns (address)",
   "function orderBookTakerFeeBps() view returns (uint256)",
   "function lmsrTakerFeeBps() view returns (uint256)",
+  "function MAX_HOPS_LIMIT() view returns (uint256)",
+  "function MAX_FEE_BPS() view returns (uint256)",
   "function chunkSizeWad() view returns (uint256)",
   "function maxTradeSharesWad() view returns (uint256)",
   "function defaultMaxHops() view returns (uint256)",
@@ -148,6 +152,7 @@ export const MARKET_ROUTER_ABI = [
   "function setFees(uint256 _orderBookTakerFeeBps, uint256 _lmsrTakerFeeBps)",
   "function setExecutionConfig(uint256 _chunkSizeWad, uint256 _maxTradeSharesWad, uint256 _defaultMaxHops)",
   "event HybridTrade(address indexed trader, address indexed market, uint256 indexed outcome, uint8 side, uint256 requestedSharesWad, uint256 filledSharesWad, uint256 orderBookSharesWad, uint256 lmsrSharesWad, uint256 costWei, uint256 proceedsWei, uint256 feeWei)",
+  "event OrderBookFallback(address indexed market, uint256 indexed outcome, uint8 side, uint256 remainingSharesWad)",
 ] as const;
 
 export const ORDER_BOOK_ABI = [
@@ -156,12 +161,15 @@ export const ORDER_BOOK_ABI = [
   "function tickSizeWad() view returns (uint256)",
   "function minOrderSharesWad() view returns (uint256)",
   "function maxPriceDeviationBps() view returns (uint256)",
+  "function MAX_PRICE_LEVELS() view returns (uint256)",
+  "function MAX_FEE_BPS() view returns (uint256)",
   "function makerFeeBps() view returns (uint256)",
   "function paused() view returns (bool)",
   "function allowedMarket(address market) view returns (bool)",
   "function orders(uint256 orderId) view returns (uint256 id, address market, uint256 outcome, address owner, uint8 side, uint256 priceWad, uint256 remainingSharesWad, uint256 escrowWei, uint256 expiry, bool active)",
   "function placeLimitOrder(address market, uint256 outcome, uint8 side, uint256 priceWad, uint256 sharesWad, uint256 expiry) payable returns (uint256 orderId)",
   "function cancelOrder(uint256 orderId)",
+  "function pruneExpiredOrder(uint256 orderId)",
   "function getBestBid(address market, uint256 outcome) view returns (uint256 priceWad, uint256 sharesWad, uint256 orderId)",
   "function getBestAsk(address market, uint256 outcome) view returns (uint256 priceWad, uint256 sharesWad, uint256 orderId)",
   "function getDepth(address market, uint256 outcome, uint8 side, uint256 maxLevels) view returns (uint256[] pricesWad, uint256[] sharesWad)",
@@ -172,6 +180,7 @@ export const ORDER_BOOK_ABI = [
   "function setOrderConstraints(uint256 _tickSizeWad, uint256 _minOrderSharesWad, uint256 _maxPriceDeviationBps)",
   "event OrderPlaced(uint256 indexed orderId, address indexed market, address indexed owner, uint256 outcome, uint8 side, uint256 priceWad, uint256 sharesWad, uint256 expiry)",
   "event OrderCancelled(uint256 indexed orderId, address indexed owner, uint256 remainingSharesWad, uint256 refundWei)",
+  "event OrderPruned(uint256 indexed orderId, address indexed market, uint256 indexed outcome, uint8 side, uint256 priceWad)",
   "event OrderFilled(uint256 indexed orderId, address indexed market, address indexed taker, uint256 outcome, uint8 side, uint256 sharesWad, uint256 notionalWei, uint256 makerFeeWei)",
 ] as const;
 
@@ -183,24 +192,28 @@ export const HYBRID_FACTORY_ABI = [
   "function router() view returns (address)",
   "function orderBook() view returns (address)",
   "function defaultResolutionManager() view returns (address)",
+  "function marketImplementation() view returns (address)",
+  "function creationPaused() view returns (bool)",
   "function minBWad() view returns (int256)",
   "function maxBWad() view returns (int256)",
   "function minDuration() view returns (uint256)",
   "function maxDuration() view returns (uint256)",
   "function getMarketCount() view returns (uint256)",
   "function getMarkets(uint256 offset, uint256 limit) view returns (address[])",
-  "function requiredSeed(int256 bWad, uint256 outcomeCount) pure returns (uint256)",
   "function createMarket(string _title, string _description, string _category, string _imageUri, string[] _outcomeLabels, int256 _bWad, uint256 _durationSeconds, string _resolutionSource, uint256 _resolutionTime, string _fallbackResolutionSource, string _invalidCondition) payable returns (address market)",
   "function setMarketResolutionManager(address market, address resolutionManager)",
   "function setRouter(address _router)",
   "function setOrderBook(address _orderBook)",
   "function setDefaultResolutionManager(address _resolutionManager)",
+  "function setMarketImplementation(address _marketImplementation)",
+  "function setCreationPaused(bool paused)",
   "function setMarketOperator(address market, address operator, bool allowed)",
   "function setMarketAllowed(address market, bool allowed)",
   "function editMarket(address market, string _title, string _description, string _category)",
   "function editResolutionRules(address market, string _resolutionSource, uint256 _resolutionTime, string _fallbackResolutionSource, string _invalidCondition)",
   "function emergencyCancelMarket(address market, string reason, string proofUri)",
   "event MarketCreated(address indexed market, uint256 indexed marketId, address indexed creator, string title, string category, uint256 outcomeCount, uint256 deadline, uint256 resolutionTime, address resolutionManager)",
+  "event CreationPausedUpdated(bool paused)",
 ] as const;
 
 export const HYBRID_LENS_ABI = [
@@ -208,6 +221,7 @@ export const HYBRID_LENS_ABI = [
   "function getMarketDetail(address market) view returns (tuple(address market, string title, string description, string category, string imageUri, string proofUri, string[] outcomeLabels, int256[] totalSharesWad, int256[] impliedProbabilitiesWad, uint8 stage, uint256 winningOutcome, uint256 createdAt, uint256 marketDeadline, uint256 resolutionTime, int256 bWad, uint256 totalVolumeWei, uint256 participants, uint256 resolvedPoolWei, string cancelReason, string cancelProofUri, string resolutionSource, string fallbackResolutionSource, string invalidCondition, address resolutionManager))",
   "function getOrderBookSnapshot(address market) view returns (tuple(uint256[] bestBidPriceWad, uint256[] bestBidSharesWad, uint256[] bestBidOrderId, uint256[] bestAskPriceWad, uint256[] bestAskSharesWad, uint256[] bestAskOrderId))",
   "function getUserPortfolio(address user) view returns (tuple(address market, string title, string category, string[] outcomeLabels, uint256[] sharesPerOutcome, bool canRedeem, bool hasRedeemed, uint8 stage)[])",
+  "function getUserPortfolioSlice(address user, uint256 offset, uint256 limit) view returns (tuple(address market, string title, string category, string[] outcomeLabels, uint256[] sharesPerOutcome, bool canRedeem, bool hasRedeemed, uint8 stage)[])",
 ] as const;
 
 export const RESOLUTION_MANAGER_ABI = [

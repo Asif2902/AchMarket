@@ -230,7 +230,28 @@ contract HybridMarketLens {
 
     function getUserPortfolio(address user) external view returns (UserPosition[] memory positions) {
         uint256 total = factory.totalMarkets();
-        address[] memory mkts = factory.getMarkets(0, total);
+        return _getUserPortfolioSlice(user, 0, total);
+    }
+
+    function getUserPortfolioSlice(address user, uint256 offset, uint256 limit)
+        external
+        view
+        returns (UserPosition[] memory positions)
+    {
+        return _getUserPortfolioSlice(user, offset, limit);
+    }
+
+    function _getUserPortfolioSlice(address user, uint256 offset, uint256 limit)
+        internal
+        view
+        returns (UserPosition[] memory positions)
+    {
+        uint256 total = factory.totalMarkets();
+        if (offset >= total) return new UserPosition[](0);
+
+        uint256 end = offset + limit > total ? total : offset + limit;
+        uint256 countToFetch = end - offset;
+        address[] memory mkts = factory.getMarkets(offset, countToFetch);
 
         uint256 count;
         for (uint256 i = 0; i < mkts.length; ) {
@@ -246,40 +267,44 @@ contract HybridMarketLens {
                 continue;
             }
 
-            PredictionMarketV2 pm = PredictionMarketV2(payable(mkts[i]));
-            (
-                uint256[] memory shares,
-                bool redeemed,
-                bool canRedeem
-            ) = pm.getUserInfo(user);
-            (
-                string memory title,
-                ,
-                string memory category,
-                ,
-                ,
-                string[] memory labels,
-                PredictionMarketV2.Stage stage,
-                ,
-                ,
-                ,
-                ,
-                ,
-                ,
-            ) = pm.getMarketInfo();
-
-            positions[idx++] = UserPosition({
-                market: mkts[i],
-                title: title,
-                category: category,
-                outcomeLabels: labels,
-                sharesPerOutcome: shares,
-                canRedeem: canRedeem,
-                hasRedeemed: redeemed,
-                stage: stage
-            });
+            positions[idx++] = _buildUserPosition(mkts[i], user);
             unchecked { i++; }
         }
+    }
+
+    function _buildUserPosition(address market, address user) internal view returns (UserPosition memory position) {
+        PredictionMarketV2 pm = PredictionMarketV2(payable(market));
+        (
+            uint256[] memory shares,
+            bool redeemed,
+            bool canRedeem
+        ) = pm.getUserInfo(user);
+        (
+            string memory title,
+            ,
+            string memory category,
+            ,
+            ,
+            string[] memory labels,
+            PredictionMarketV2.Stage stage,
+            ,
+            ,
+            ,
+            ,
+            ,
+            ,
+        ) = pm.getMarketInfo();
+
+        position = UserPosition({
+            market: market,
+            title: title,
+            category: category,
+            outcomeLabels: labels,
+            sharesPerOutcome: shares,
+            canRedeem: canRedeem,
+            hasRedeemed: redeemed,
+            stage: stage
+        });
     }
 
     function _userHasPosition(address market, address user) internal view returns (bool) {

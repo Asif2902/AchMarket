@@ -48,11 +48,27 @@ async function deployHybridFixture() {
   );
   await resolver.waitForDeployment();
 
-  const Market = await ethers.getContractFactory("PredictionMarketV2");
+  const MarketImplementation = await ethers.getContractFactory("PredictionMarketV2");
+  const marketImplementation = await MarketImplementation.deploy();
+  await marketImplementation.waitForDeployment();
+
+  const Factory = await ethers.getContractFactory("HybridMarketFactory");
+  const factory = await Factory.deploy(
+    owner.address,
+    await marketImplementation.getAddress(),
+    await router.getAddress(),
+    await orderBook.getAddress(),
+    await resolver.getAddress()
+  );
+  await factory.waitForDeployment();
+
+  await orderBook.setMarketRegistrar(await factory.getAddress());
+  await router.setMarketRegistrar(await factory.getAddress());
+  await resolver.setMarketRegistrar(await factory.getAddress());
+
   const duration = 30 * 24 * 60 * 60;
   const block = await ethers.provider.getBlock("latest");
-  const market = await Market.deploy(
-    owner.address,
+  await (await factory.createMarket(
     "Will ARC testnet stay cheap?",
     "Hybrid CLOB test market",
     "Crypto",
@@ -64,17 +80,13 @@ async function deployHybridFixture() {
     block.timestamp + duration + 60,
     "https://example.com/fallback",
     "Source unavailable or market wording invalid",
-    await resolver.getAddress(),
-    [await router.getAddress(), await orderBook.getAddress()],
     { value: ethers.parseEther("100") }
-  );
-  await market.waitForDeployment();
+  )).wait();
 
-  await router.setAllowedMarket(await market.getAddress(), true);
-  await orderBook.setAllowedMarket(await market.getAddress(), true);
-  await resolver.setMarketAllowed(await market.getAddress(), true);
+  const marketAddress = await factory.markets(0);
+  const market = await ethers.getContractAt("PredictionMarketV2", marketAddress);
 
-  return { owner, alice, bob, feeRecipient, orderBook, router, resolver, market, duration };
+  return { owner, alice, bob, feeRecipient, factory, orderBook, router, resolver, market, duration };
 }
 
 describe("Hybrid CLOB + LMSR", function () {
@@ -219,6 +231,76 @@ describe("Hybrid CLOB + LMSR", function () {
     const order = await orderBook.orders(1);
     expect(order.remainingSharesWad).to.equal(halfShare);
     expect(order.active).to.equal(true);
+  });
+
+  it("rejects tick sizes that would create too many on-chain price levels", async function () {
+    const [owner, , , feeRecipient] = await ethers.getSigners();
+    const OrderBook = await ethers.getContractFactory("HybridOrderBook");
+
+    await expect(OrderBook.deploy(
+      owner.address,
+      feeRecipient.address,
+      ethers.parseEther("0.0001"),
+      ethers.parseEther("0.1"),
+      10000
+    )).to.be.revertedWith("OB: too many levels");
+  });
+
+  it("lets anyone prune expired orders and returns escrowed shares", async function () {
+    const { alice, orderBook, router, market } = await deployHybridFixture();
+    const marketAddress = await market.getAddress();
+    const shares = ethers.parseEther("1");
+    const halfShare = ethers.parseEther("0.5");
+
+    await router.connect(alice).buy(
+      marketAddress,
+      0,
+      shares,
+      shares,
+      ethers.parseEther("10"),
+      8,
+      await latestDeadline(),
+      { value: ethers.parseEther("10") }
+    );
+
+    const expiry = await latestDeadline(60);
+    await orderBook.connect(alice).placeLimitOrder(
+      marketAddress,
+      0,
+      SIDE_ASK,
+      ethers.parseEther("0.5"),
+      halfShare,
+      expiry
+    );
+
+    await ethers.provider.send("evm_increaseTime", [61]);
+    await ethers.provider.send("evm_mine", []);
+    await orderBook.pruneExpiredOrder(1);
+
+    const order = await orderBook.orders(1);
+    expect(order.active).to.equal(false);
+    expect(await market.sharesOf(alice.address, 0)).to.equal(shares);
+  });
+
+  it("can pause market creation at the factory", async function () {
+    const { factory } = await deployHybridFixture();
+    await factory.setCreationPaused(true);
+
+    const block = await ethers.provider.getBlock("latest");
+    await expect(factory.createMarket(
+      "Paused market",
+      "Should fail",
+      "Test",
+      "",
+      ["Yes", "No"],
+      ethers.parseEther("10"),
+      24 * 60 * 60,
+      "https://example.com/source",
+      block.timestamp + 24 * 60 * 60 + 60,
+      "https://example.com/fallback",
+      "Invalid",
+      { value: ethers.parseEther("100") }
+    )).to.be.revertedWith("FactoryV2: creation paused");
   });
 });
 
