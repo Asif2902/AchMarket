@@ -1,4 +1,4 @@
-const hre = require("hardhat");
+import hre from "hardhat";
 
 const EXPECTED_CHAIN_ID = Number(process.env.EXPECTED_CHAIN_ID || 5042002);
 const TICK_SIZE_WAD = process.env.CLOB_TICK_SIZE_WAD || "10000000000000000"; // 0.01
@@ -16,10 +16,11 @@ const RESOLVER_REWARD_POOL_WEI = process.env.RESOLUTION_REWARD_POOL_WEI || "0";
 const FACTORY_LIQUIDITY_RESERVE_WEI = process.env.FACTORY_LIQUIDITY_RESERVE_WEI || "0";
 
 async function main() {
-  const [deployer] = await hre.ethers.getSigners();
+  const { ethers } = await hre.network.connect();
+  const [deployer] = await ethers.getSigners();
   if (!deployer) throw new Error("No deployer account configured. Set DEPLOYER_PRIVATE_KEY.");
 
-  const network = await hre.ethers.provider.getNetwork();
+  const network = await ethers.provider.getNetwork();
   const chainId = Number(network.chainId);
   if (chainId !== EXPECTED_CHAIN_ID) {
     throw new Error(`Wrong network: expected chainId ${EXPECTED_CHAIN_ID}, got ${chainId}.`);
@@ -37,7 +38,7 @@ async function main() {
   console.log("Resolution treasury:", treasury);
   console.log("Resolution reserve:", reserve);
 
-  const OrderBook = await hre.ethers.getContractFactory("HybridOrderBook");
+  const OrderBook = await ethers.getContractFactory("HybridOrderBook");
   const orderBook = await OrderBook.deploy(
     deployer.address,
     feeRecipient,
@@ -48,7 +49,7 @@ async function main() {
   await orderBook.waitForDeployment();
   const orderBookAddr = await orderBook.getAddress();
 
-  const Router = await hre.ethers.getContractFactory("MarketRouter");
+  const Router = await ethers.getContractFactory("MarketRouter");
   const router = await Router.deploy(
     deployer.address,
     orderBookAddr,
@@ -60,7 +61,7 @@ async function main() {
   await router.waitForDeployment();
   const routerAddr = await router.getAddress();
 
-  const Resolver = await hre.ethers.getContractFactory("BondedResolutionManager");
+  const Resolver = await ethers.getContractFactory("BondedResolutionManager");
   const resolver = await Resolver.deploy(
     deployer.address,
     treasury,
@@ -74,12 +75,12 @@ async function main() {
   await resolver.waitForDeployment();
   const resolverAddr = await resolver.getAddress();
 
-  const MarketImplementation = await hre.ethers.getContractFactory("PredictionMarketV2");
+  const MarketImplementation = await ethers.getContractFactory("PredictionMarketV2");
   const marketImplementation = await MarketImplementation.deploy();
   await marketImplementation.waitForDeployment();
   const marketImplementationAddr = await marketImplementation.getAddress();
 
-  const Factory = await hre.ethers.getContractFactory("HybridMarketFactory");
+  const Factory = await ethers.getContractFactory("HybridMarketFactory");
   const factory = await Factory.deploy(
     deployer.address,
     marketImplementationAddr,
@@ -90,7 +91,7 @@ async function main() {
   await factory.waitForDeployment();
   const factoryAddr = await factory.getAddress();
 
-  const Lens = await hre.ethers.getContractFactory("HybridMarketLens");
+  const Lens = await ethers.getContractFactory("HybridMarketLens");
   const lens = await Lens.deploy(factoryAddr, routerAddr, orderBookAddr);
   await lens.waitForDeployment();
   const lensAddr = await lens.getAddress();

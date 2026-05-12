@@ -572,7 +572,7 @@ contract PredictionMarketV2 is ReentrancyGuard {
         cancelReason = reason;
         cancelProofUri = proof;
         stage = Stage.Expired;
-        _finalizePayout(_invalidPayoutLiability());
+        _finalizePayout(_invalidPayoutLiability(), address(0));
         emit MarketCancelled(reason, proof);
     }
 

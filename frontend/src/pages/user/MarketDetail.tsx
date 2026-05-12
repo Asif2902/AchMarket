@@ -888,12 +888,12 @@ export default function MarketDetail() {
     const outcomeName = detail?.outcomeLabels[selectedOutcome] || `Outcome ${selectedOutcome}`;
     try {
       const orderBook = new ethers.Contract(ORDER_BOOK_ADDRESS, ORDER_BOOK_ABI, signer);
-      const sharesWad = ethers.parseEther(shareAmount);
-      const priceWad = ethers.parseEther(limitPrice);
+      const sharesWad: bigint = ethers.parseEther(shareAmount);
+      const priceWad: bigint = ethers.parseEther(limitPrice);
       const expiryMinutes = Math.max(0, Math.floor(parseFloat(limitExpiryMinutes || '0')));
       const expiry = expiryMinutes > 0 ? Math.floor(Date.now() / 1000) + expiryMinutes * 60 : 0;
       const side = tradeTab === 'buy' ? 0 : 1;
-      const escrow = tradeTab === 'buy' ? (sharesWad * priceWad) / ethers.parseEther('1') : 0n;
+      const escrow: bigint = tradeTab === 'buy' ? (sharesWad * priceWad) / 1_000_000_000_000_000_000n : 0n;
       const value = tradeTab === 'buy' ? applyBuySlippage(escrow, 1) : 0n;
       const tx = await orderBook.placeLimitOrder(marketAddress, selectedOutcome, side, priceWad, sharesWad, expiry, { value });
       showToast({ type: 'pending', title: `Placing ${tradeTab === 'buy' ? 'bid' : 'ask'}...`, message: `${shareAmount} ${outcomeName} at ${limitPrice} USDC`, txHash: tx.hash });
