@@ -70,6 +70,13 @@ interface DepthLevel {
   shares: bigint;
 }
 
+type DepthResult = {
+  pricesWad?: bigint[];
+  sharesWad?: bigint[];
+  0?: bigint[];
+  1?: bigint[];
+};
+
 function ensureMetaTag(kind: 'name' | 'property', key: string): HTMLMetaElement {
   const selector = `meta[${kind}="${key}"]`;
   const existing = document.head.querySelector(selector);
@@ -543,12 +550,12 @@ export default function MarketDetail() {
           orderBook.getDepth(marketAddress, selectedOutcome, 1, 10),
         ]);
         if (cancelled) return;
-        const parseDepth = (depth: { pricesWad?: bigint[]; sharesWad?: bigint[] } | [bigint[], bigint[]]): DepthLevel[] => {
-          const prices = 'pricesWad' in depth ? depth.pricesWad || [] : depth[0];
-          const shares = 'sharesWad' in depth ? depth.sharesWad || [] : depth[1];
+        const parseDepth = (depth: DepthResult): DepthLevel[] => {
+          const prices: bigint[] = depth.pricesWad ?? depth[0] ?? [];
+          const shares: bigint[] = depth.sharesWad ?? depth[1] ?? [];
           return prices
-            .map((price, i) => ({ price, shares: shares[i] || 0n }))
-            .filter((level) => level.price > 0n && level.shares > 0n);
+            .map((price: bigint, i: number) => ({ price, shares: shares[i] || 0n }))
+            .filter((level: DepthLevel) => level.price > 0n && level.shares > 0n);
         };
         setOrderBookBids(parseDepth(bidDepth));
         setOrderBookAsks(parseDepth(askDepth));
