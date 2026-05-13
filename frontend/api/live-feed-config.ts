@@ -64,7 +64,7 @@ interface LiveFeedPayload {
 let indexesReady = false;
 let cachedClient: MongoClient | null = null;
 let cachedReadProvider: JsonRpcProvider | null = null;
-let cachedFactoryContract: Contract | null = null;
+let cachedFactoryContracts: Contract[] | null = null;
 
 export const CORS_ALLOWED_ORIGINS: string[] = (process.env.CORS_ALLOWED_ORIGINS || '*')
   .split(',')
@@ -73,6 +73,11 @@ export const MONGO_URI: string = process.env.MONGO_URI || '';
 export const MONGO_DB_NAME: string = process.env.MONGO_DB_NAME || 'achmarket';
 export const RPC_URL: string = process.env.RPC_URL || 'https://arc-testnet.drpc.org/';
 export const FACTORY_ADDRESS: string = process.env.FACTORY_ADDRESS || '0x2e7De7485438F18a8eCc337eA451e1e7Dc75AeBb';
+const KNOWN_FACTORY_ADDRESSES = [
+  FACTORY_ADDRESS,
+  '0x2e7De7485438F18a8eCc337eA451e1e7Dc75AeBb',
+  '0xd7b122B12caCB299249f89be7F241a47f762f283',
+];
 
 if (process.env.NODE_ENV === 'production') {
   if (!process.env.RPC_URL) console.error('RPC_URL is required in production.');
@@ -211,25 +216,35 @@ function getReadProvider(): JsonRpcProvider {
   return cachedReadProvider;
 }
 
-function getFactoryContract(): Contract {
-  if (!cachedFactoryContract) {
-    cachedFactoryContract = new Contract(FACTORY_ADDRESS, FACTORY_OWNER_ABI, getReadProvider());
+function getFactoryContracts(): Contract[] {
+  if (!cachedFactoryContracts) {
+    const uniqueAddresses = Array.from(new Set(KNOWN_FACTORY_ADDRESSES.map((address) => getAddress(address))));
+    cachedFactoryContracts = uniqueAddresses.map((address) => new Contract(address, FACTORY_OWNER_ABI, getReadProvider()));
   }
-  return cachedFactoryContract;
+  return cachedFactoryContracts;
 }
 
 async function assertOwnerAddress(address: string): Promise<void> {
-  const ownerOnChain = normalizeAddress(await getFactoryContract().owner());
-  if (ownerOnChain !== address) {
-    throw new Error('Only the factory owner can manage live feed configs.');
+  for (const factory of getFactoryContracts()) {
+    try {
+      const ownerOnChain = normalizeAddress(await factory.owner());
+      if (ownerOnChain === address) return;
+    } catch {
+      // Try the next configured factory.
+    }
   }
+  throw new Error('Only the factory owner can manage live feed configs.');
 }
 
 async function assertKnownMarket(marketAddress: string): Promise<void> {
-  const exists = await getFactoryContract().isMarket(marketAddress);
-  if (!exists) {
-    throw new Error('Unknown market address.');
+  for (const factory of getFactoryContracts()) {
+    try {
+      if (await factory.isMarket(marketAddress)) return;
+    } catch {
+      // Try the next configured factory.
+    }
   }
+  throw new Error('Unknown market address.');
 }
 
 function toResponseConfig(doc: LiveFeedDoc | null) {

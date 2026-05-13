@@ -1,8 +1,8 @@
 import { useState, useEffect, useCallback, useRef, type ChangeEvent } from 'react';
 import { ethers } from 'ethers';
 import { useWallet } from '../../context/WalletContext';
-import { FACTORY_ADDRESS, LENS_ADDRESS, STAGE, STAGE_LABELS, STAGE_COLORS, NETWORK } from '../../config/network';
-import { FACTORY_ABI, LENS_ABI, MARKET_ABI } from '../../config/abis';
+import { HYBRID_FACTORY_ADDRESS, HYBRID_LENS_ADDRESS, STAGE, STAGE_LABELS, STAGE_COLORS, NETWORK } from '../../config/network';
+import { HYBRID_FACTORY_ABI, HYBRID_LENS_ABI, MARKET_ABI } from '../../config/abis';
 import ImageWithFallback from '../../components/ImageWithFallback';
 import ProbabilityBar from '../../components/ProbabilityBar';
 import Countdown from '../../components/Countdown';
@@ -35,7 +35,7 @@ export interface OwnerMarketData {
 
 const MARKET_INFO_ABI = [
   'function getMarketInfo() view returns (string _title, string _description, string _category, string _imageUri, string _proofUri, string[] _outcomeLabels, uint8 _stage, uint256 _winningOutcome, uint256 _createdAt, uint256 _marketDeadline, uint256 _totalVolumeWei, uint256 _participantCount, string _cancelReason, string _cancelProofUri)',
-  'function admin() view returns (address)',
+  'function owner() view returns (address)',
 ] as const;
 
 interface LensSummary {
@@ -49,8 +49,10 @@ interface LensSummary {
   stage: bigint;
   winningOutcome: bigint;
   marketDeadline: bigint;
+  resolutionTime: bigint;
   totalVolumeWei: bigint;
   participants: bigint;
+  mode: bigint;
   bWad: bigint;
 }
 
@@ -121,8 +123,8 @@ export function useOwnerMarkets() {
         setLoading(true);
       }
 
-      const factory = new ethers.Contract(FACTORY_ADDRESS, FACTORY_ABI, readProvider);
-      const lens = new ethers.Contract(LENS_ADDRESS, LENS_ABI, readProvider);
+      const factory = new ethers.Contract(HYBRID_FACTORY_ADDRESS, HYBRID_FACTORY_ABI, readProvider);
+      const lens = new ethers.Contract(HYBRID_LENS_ADDRESS, HYBRID_LENS_ABI, readProvider);
       const total = Number(await factory.totalMarkets());
       if (total === 0) {
         if (latestFetchKeyRef.current !== currentFetchToken) return;
@@ -138,16 +140,16 @@ export function useOwnerMarkets() {
       const infoInterface = new ethers.Interface(MARKET_INFO_ABI);
       const adminCalls = allSummaries.map((s) => ({
         to: s.market,
-        data: infoInterface.encodeFunctionData('admin', []),
+        data: infoInterface.encodeFunctionData('owner', []),
       }));
 
-      const adminResults = await Promise.all(
+      const ownerResults = await Promise.all(
         adminCalls.map(async (call) => {
           try {
             const result = await readProvider.call({ to: call.to, data: call.data });
-            const decoded = infoInterface.decodeFunctionResult('admin', result);
-            const adminAddr = decoded[0] as string;
-            return adminAddr.toLowerCase();
+            const decoded = infoInterface.decodeFunctionResult('owner', result);
+            const ownerAddr = decoded[0] as string;
+            return ownerAddr.toLowerCase();
           } catch (err) {
             throw err;
           }
@@ -155,7 +157,7 @@ export function useOwnerMarkets() {
       );
 
       const summaries = normalizedOwner
-        ? allSummaries.filter((s, i) => adminResults[i] === normalizedOwner)
+        ? allSummaries.filter((s, i) => ownerResults[i] === normalizedOwner)
         : allSummaries;
 
       const result: OwnerMarketData[] = summaries.map((s) => ({

@@ -299,6 +299,34 @@ export function parseMarketSlug(slug: string): number | null {
  * Parse contract revert reason from error.
  */
 export function parseContractError(error: unknown): string {
+  const visited = new Set<unknown>();
+  const unwrap = (value: unknown): string | null => {
+    if (!value || typeof value !== 'object' || visited.has(value)) return null;
+    visited.add(value);
+    const e = value as Record<string, unknown>;
+    if (e.reason && typeof e.reason === 'string') return e.reason;
+    if (e.shortMessage && typeof e.shortMessage === 'string' && !e.shortMessage.includes('could not coalesce error')) {
+      return e.shortMessage;
+    }
+    const nested = unwrap(e.error) || unwrap(e.info) || unwrap((e.info as Record<string, unknown> | undefined)?.error);
+    if (nested) return nested;
+    if (e.message && typeof e.message === 'string') {
+      const match = (e.message as string).match(/reason="([^"]+)"/);
+      if (match) return match[1];
+      const revertMatch = (e.message as string).match(/reverted with reason string '([^']+)'/);
+      if (revertMatch) return revertMatch[1];
+      const jsonMessageMatch = (e.message as string).match(/"message":"([^"]+)"/);
+      if (jsonMessageMatch) return jsonMessageMatch[1];
+      if ((e.message as string).includes('user rejected')) return 'Transaction rejected by user';
+      if ((e.message as string).includes('insufficient funds')) return 'Insufficient USDC balance';
+      return e.message as string;
+    }
+    return null;
+  };
+
+  const parsed = unwrap(error);
+  if (parsed) return parsed;
+
   if (error && typeof error === 'object') {
     const e = error as Record<string, unknown>;
     // ethers v6 error shapes

@@ -588,12 +588,18 @@ export default function CreateMarket() {
     setFeedSaving(false);
     try {
       const factory = new ethers.Contract(HYBRID_FACTORY_ADDRESS, HYBRID_FACTORY_ABI, signer);
+      const signerAddress = await signer.getAddress();
+      const ownerAddress = await factory.owner();
+      if (ownerAddress.toLowerCase() !== signerAddress.toLowerCase()) {
+        throw new Error(`Only the factory owner can create markets. Connected: ${signerAddress}`);
+      }
+
       const bWad = instantLiquidityEnabled ? ethers.parseEther(bValue) : 0n;
       const encodedDescription = subcategory.trim().length > 0
         ? `${description.trim()}:::${subcategory.trim()}`
         : description.trim();
 
-      const tx = await factory.createMarket(
+      const createArgs = [
         title.trim(),
         encodedDescription,
         actualCategory.trim(),
@@ -606,7 +612,10 @@ export default function CreateMarket() {
         resolutionTime,
         fallbackResolutionSource.trim(),
         invalidCondition.trim(),
-      );
+      ] as const;
+
+      await factory.createMarket.staticCall(...createArgs);
+      const tx = await factory.createMarket(...createArgs);
       keepUploadedImageOnCloseRef.current = true;
 
       setTxResult({ type: 'success', text: 'Transaction submitted. Waiting for confirmation...' });

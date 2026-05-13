@@ -110,6 +110,7 @@ export const MARKET_V2_ABI = [
   "function invalidCondition() view returns (string)",
   "function resolutionManager() view returns (address)",
   "function marketMode() view returns (uint8)",
+  "function resolvedPoolWei() view returns (uint256)",
   "function PLATFORM_FEE_BPS() view returns (uint256)",
   "function RESOLVER_REWARD_BPS() view returns (uint256)",
   "function sharesOf(address, uint256) view returns (uint256)",

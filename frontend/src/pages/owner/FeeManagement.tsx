@@ -1,8 +1,8 @@
 import { useState, useEffect } from 'react';
 import { ethers } from 'ethers';
 import { useWallet } from '../../context/WalletContext';
-import { FACTORY_ADDRESS, LENS_ADDRESS, STAGE } from '../../config/network';
-import { FACTORY_ABI, LENS_ABI, MARKET_ABI } from '../../config/abis';
+import { HYBRID_FACTORY_ADDRESS, HYBRID_LENS_ADDRESS, STAGE } from '../../config/network';
+import { HYBRID_FACTORY_ABI, HYBRID_LENS_ABI, MARKET_V2_ABI } from '../../config/abis';
 import { PageLoader } from '../../components/LoadingSpinner';
 import { formatUSDC, formatCompactUSDC } from '../../utils/format';
 
@@ -25,8 +25,8 @@ export default function FeeManagement() {
     (async () => {
       try {
         setLoading(true);
-        const factory = new ethers.Contract(FACTORY_ADDRESS, FACTORY_ABI, readProvider);
-        const lens = new ethers.Contract(LENS_ADDRESS, LENS_ABI, readProvider);
+        const factory = new ethers.Contract(HYBRID_FACTORY_ADDRESS, HYBRID_FACTORY_ABI, readProvider);
+        const lens = new ethers.Contract(HYBRID_LENS_ADDRESS, HYBRID_LENS_ABI, readProvider);
         const total = Number(await factory.totalMarkets());
         if (total === 0) { setLoading(false); return; }
 
@@ -40,7 +40,7 @@ export default function FeeManagement() {
         
         const results = await Promise.allSettled(
           resolvedSummaries.map(async (s: { market: string; title: string }) => {
-            const marketContract = new ethers.Contract(s.market, MARKET_ABI, readProvider);
+            const marketContract = new ethers.Contract(s.market, MARKET_V2_ABI, readProvider);
             const resolvedPoolWei = await marketContract.resolvedPoolWei();
             return { s, resolvedPoolWei };
           })
