@@ -14,6 +14,12 @@ contract MarketRouter is Ownable, ReentrancyGuard {
         Sell
     }
 
+    enum ExecutionSource {
+        CLOB,
+        LMSR,
+        HYBRID
+    }
+
     struct ExecutionResult {
         uint256 requestedSharesWad;
         uint256 filledSharesWad;
@@ -64,6 +70,18 @@ contract MarketRouter is Ownable, ReentrancyGuard {
         uint256 lmsrSharesWad,
         uint256 costWei,
         uint256 proceedsWei,
+        uint256 feeWei
+    );
+    event TradeExecuted(
+        address indexed trader,
+        address indexed market,
+        uint256 indexed outcomeId,
+        uint256 priceWad,
+        uint256 amountWad,
+        uint256 timestamp,
+        ExecutionSource executionSource,
+        TradeSide side,
+        uint256 notionalWei,
         uint256 feeWei
     );
 
@@ -429,6 +447,29 @@ contract MarketRouter is Ownable, ReentrancyGuard {
         TradeSide side,
         ExecutionResult memory result
     ) internal {
+        if (result.filledSharesWad > 0) {
+            uint256 grossNotionalWei = side == TradeSide.Buy
+                ? result.costWei - result.feeWei
+                : result.proceedsWei + result.feeWei;
+            ExecutionSource source = result.usedOrderBook && result.usedLmsr
+                ? ExecutionSource.HYBRID
+                : result.usedLmsr
+                    ? ExecutionSource.LMSR
+                    : ExecutionSource.CLOB;
+            emit TradeExecuted(
+                trader,
+                market,
+                outcome,
+                (grossNotionalWei * WAD) / result.filledSharesWad,
+                result.filledSharesWad,
+                block.timestamp,
+                source,
+                side,
+                grossNotionalWei,
+                result.feeWei
+            );
+        }
+
         emit HybridTrade(
             trader,
             market,

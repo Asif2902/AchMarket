@@ -71,12 +71,84 @@ interface DepthLevel {
   shares: bigint;
 }
 
+interface UserLimitOrder {
+  id: bigint;
+  market: string;
+  outcome: number;
+  owner: string;
+  side: 0 | 1;
+  priceWad: bigint;
+  remainingSharesWad: bigint;
+  escrowWei: bigint;
+  expiry: number;
+  active: boolean;
+  originalSharesWad: bigint;
+  status: number;
+}
+
 type DepthResult = {
   pricesWad?: bigint[];
   sharesWad?: bigint[];
   0?: bigint[];
   1?: bigint[];
 };
+
+const ORDER_STATUS_LABELS: Record<number, string> = {
+  0: 'Open',
+  1: 'Partially Filled',
+  2: 'Filled',
+  3: 'Cancelled',
+};
+
+function formatInputWad(value: bigint): string {
+  const formatted = ethers.formatEther(value);
+  return formatted.includes('.')
+    ? formatted.replace(/\.?0+$/, '')
+    : formatted;
+}
+
+function buildTradeHistory(detailData: MarketDetailData, events: TradeEvent[]): ProbHistoryPoint[] {
+  const outcomeCount = detailData.outcomeLabels.length;
+  if (events.length === 0 || outcomeCount === 0) return [];
+
+  const lastPrices: Array<number | null> = detailData.outcomeLabels.map(() => null);
+  const history: ProbHistoryPoint[] = [];
+
+  for (const event of events) {
+    if (event.outcomeIndex >= outcomeCount || event.priceWad === 0n) continue;
+    const tradedPrice = Number(ethers.formatEther(event.priceWad)) * 100;
+    lastPrices[event.outcomeIndex] = tradedPrice;
+    if (outcomeCount === 2) {
+      lastPrices[event.outcomeIndex === 0 ? 1 : 0] = 100 - tradedPrice;
+    }
+
+    const point: ProbHistoryPoint = { time: event.timestamp };
+    detailData.outcomeLabels.forEach((label, i) => {
+      const value = lastPrices[i];
+      if (value !== null) point[label] = Number(value.toFixed(1));
+    });
+    history.push(point);
+  }
+
+  return history;
+}
+
+function parseUserLimitOrder(order: Record<string, unknown>): UserLimitOrder {
+  return {
+    id: order.id as bigint,
+    market: order.market as string,
+    outcome: Number(order.outcome),
+    owner: order.owner as string,
+    side: Number(order.side) as 0 | 1,
+    priceWad: order.priceWad as bigint,
+    remainingSharesWad: order.remainingSharesWad as bigint,
+    escrowWei: order.escrowWei as bigint,
+    expiry: Number(order.expiry),
+    active: Boolean(order.active),
+    originalSharesWad: order.originalSharesWad as bigint,
+    status: Number(order.status),
+  };
+}
 
 function ensureMetaTag(kind: 'name' | 'property', key: string): HTMLMetaElement {
   const selector = `meta[${kind}="${key}"]`;
@@ -187,6 +259,10 @@ export default function MarketDetail() {
   const [orderBookBids, setOrderBookBids] = useState<DepthLevel[]>([]);
   const [orderBookAsks, setOrderBookAsks] = useState<DepthLevel[]>([]);
   const [orderBookLoading, setOrderBookLoading] = useState(false);
+  const [userOrders, setUserOrders] = useState<UserLimitOrder[]>([]);
+  const [userOrdersLoading, setUserOrdersLoading] = useState(false);
+  const [cancellingOrderId, setCancellingOrderId] = useState<bigint | null>(null);
+  const [inventoryAmount, setInventoryAmount] = useState('');
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewKey, setPreviewKey] = useState('');
   const [txPending, setTxPending] = useState(false);
@@ -255,9 +331,11 @@ export default function MarketDetail() {
       setAccurateVolume(null);
       setSelectedOutcome(0);
       setShareAmount('');
+      setInventoryAmount('');
       setEstimatedShares(null);
       setPreviewCost(null);
       setPreviewKey('');
+      setUserOrders([]);
       setLiveData(null);
       setLiveLoading(false);
       setLiveError(null);
@@ -399,56 +477,13 @@ export default function MarketDetail() {
 
   const fetchProbHistory = useCallback(async (addr: string, detailData: MarketDetailData) => {
     try {
-      const outcomeCount = detailData.outcomeLabels.length;
-      const history: ProbHistoryPoint[] = [];
-
-      const lastPrices = detailData.impliedProbabilitiesWad.map((p) => probToPercent(p));
-      const initialPoint: ProbHistoryPoint = { time: detailData.createdAt };
-      detailData.outcomeLabels.forEach((label, i) => {
-        initialPoint[label] = Number((lastPrices[i] ?? 100 / outcomeCount).toFixed(1));
-      });
-      history.push(initialPoint);
-
       const events = await fetchTradeEvents(addr);
       setAccurateVolume(computeVolumeFromEvents(events));
       setRecentTrades(events.slice(-12).reverse());
-
-      for (const event of events) {
-        if (event.outcomeIndex >= outcomeCount || event.priceWad === 0n) continue;
-        lastPrices[event.outcomeIndex] = Number(ethers.formatEther(event.priceWad)) * 100;
-        const point: ProbHistoryPoint = { time: event.timestamp };
-        detailData.outcomeLabels.forEach((label, i) => {
-          point[label] = Number((lastPrices[i] ?? 0).toFixed(1));
-        });
-        history.push(point);
-      }
-
-      const nowTs = Math.floor(Date.now() / 1000);
-      const nowPoint: ProbHistoryPoint = { time: nowTs };
-      detailData.outcomeLabels.forEach((label, i) => {
-        nowPoint[label] = Number((lastPrices[i] ?? 0).toFixed(1));
-      });
-      if (history.length === 0 || nowTs > history[history.length - 1].time) {
-        history.push(nowPoint);
-      }
-
-      setProbHistory(history);
+      setProbHistory(buildTradeHistory(detailData, events));
     } catch (err) {
       console.error('Failed to fetch prob history from BlockScout:', err);
-      const currentPrices = detailData.impliedProbabilitiesWad.map((p) => probToPercent(p));
-      const fallback: ProbHistoryPoint[] = [
-        (() => {
-          const p: ProbHistoryPoint = { time: detailData.createdAt };
-          detailData.outcomeLabels.forEach((l, i) => { p[l] = Number((currentPrices[i] ?? 0).toFixed(1)); });
-          return p;
-        })(),
-        (() => {
-          const p: ProbHistoryPoint = { time: Math.floor(Date.now() / 1000) };
-          detailData.outcomeLabels.forEach((l, i) => { p[l] = Number((currentPrices[i] ?? 0).toFixed(1)); });
-          return p;
-        })(),
-      ];
-      setProbHistory(fallback);
+      setProbHistory([]);
     }
   }, []);
 
@@ -468,36 +503,7 @@ export default function MarketDetail() {
         const newVolume = computeVolumeFromEvents(events);
         setAccurateVolume(newVolume);
         setRecentTrades(events.slice(-12).reverse());
-
-        const outcomeCount = detail.outcomeLabels.length;
-        const history: ProbHistoryPoint[] = [];
-        const lastPrices = detail.impliedProbabilitiesWad.map((p) => probToPercent(p));
-        const initialPoint: ProbHistoryPoint = { time: detail.createdAt };
-        detail.outcomeLabels.forEach((label, idx) => {
-          initialPoint[label] = Number((lastPrices[idx] ?? 100 / outcomeCount).toFixed(1));
-        });
-        history.push(initialPoint);
-
-        for (const event of events) {
-          if (event.outcomeIndex >= outcomeCount || event.priceWad === 0n) continue;
-          lastPrices[event.outcomeIndex] = Number(ethers.formatEther(event.priceWad)) * 100;
-          const point: ProbHistoryPoint = { time: event.timestamp };
-          detail.outcomeLabels.forEach((label, idx) => {
-            point[label] = Number((lastPrices[idx] ?? 0).toFixed(1));
-          });
-          history.push(point);
-        }
-
-        const nowTs = Math.floor(Date.now() / 1000);
-        const nowPoint: ProbHistoryPoint = { time: nowTs };
-        detail.outcomeLabels.forEach((label, idx) => {
-          nowPoint[label] = Number((lastPrices[idx] ?? 0).toFixed(1));
-        });
-        if (history.length === 0 || nowTs > history[history.length - 1].time) {
-          history.push(nowPoint);
-        }
-
-        if (!cancelled) setProbHistory(history);
+        if (!cancelled) setProbHistory(buildTradeHistory(detail, events));
       } catch (err) {
         console.error('Background poll failed:', err);
       } finally {
@@ -554,6 +560,38 @@ export default function MarketDetail() {
 
     void fetchDepth();
   }, [marketAddress, selectedOutcome, refreshTrigger, readProvider]);
+
+  useEffect(() => {
+    if (!marketAddress || !userAddress || !isConnected) {
+      setUserOrders([]);
+      setUserOrdersLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+    const fetchOrders = async () => {
+      setUserOrdersLoading(true);
+      try {
+        const orderBook = new ethers.Contract(ORDER_BOOK_ADDRESS, ORDER_BOOK_ABI, readProvider);
+        const orders = await orderBook.getUserOrders(userAddress, marketAddress, true, 0, 200);
+        if (cancelled) return;
+        setUserOrders((orders as Array<Record<string, unknown>>)
+          .map(parseUserLimitOrder)
+          .filter((order) => order.active && order.remainingSharesWad > 0n)
+          .sort((a, b) => Number(a.id - b.id)));
+      } catch (err) {
+        console.error('Failed to fetch user orders:', err);
+        if (!cancelled) setUserOrders([]);
+      } finally {
+        if (!cancelled) setUserOrdersLoading(false);
+      }
+    };
+
+    void fetchOrders();
+    return () => {
+      cancelled = true;
+    };
+  }, [marketAddress, userAddress, isConnected, refreshTrigger, readProvider]);
 
   useEffect(() => {
     if (!marketAddress) {
@@ -775,13 +813,13 @@ export default function MarketDetail() {
       if (tradeTab === 'buy') {
         if (!detail || !marketAddress) { setEstimatedShares(null); setPreviewLoading(false); return; }
         try {
-          const shares = parseFloat(shareAmount);
           const sharesWad = ethers.parseEther(shareAmount);
           const router = new ethers.Contract(MARKET_ROUTER_ADDRESS, MARKET_ROUTER_ABI, readProvider);
           const preview = await router.previewTrade(marketAddress, selectedOutcome, 0, sharesWad, 8);
           const filledShares = Number(ethers.formatEther(preview.filledSharesWad ?? preview[1]));
-          setEstimatedShares(filledShares || shares);
-          setPreviewCost(preview.costWei ?? preview[4]);
+          const costWei = preview.costWei ?? preview[4];
+          setEstimatedShares(filledShares > 0 && costWei > 0n ? filledShares : null);
+          setPreviewCost(filledShares > 0 && costWei > 0n ? costWei : null);
           const lmsrShares = preview.lmsrSharesWad ?? preview[3];
           setExecutionSource(lmsrShares > 0n
             ? `${formatWad(preview.orderBookSharesWad ?? preview[2])} CLOB + ${formatWad(lmsrShares)} instant`
@@ -800,7 +838,9 @@ export default function MarketDetail() {
           const router = new ethers.Contract(MARKET_ROUTER_ADDRESS, MARKET_ROUTER_ABI, readProvider);
           const sharesWad = ethers.parseEther(shareAmount);
           const preview = await router.previewTrade(marketAddress, selectedOutcome, 1, sharesWad, 8);
-          setPreviewCost(preview.proceedsWei ?? preview[5]);
+          const proceedsWei = preview.proceedsWei ?? preview[5];
+          const filledShares = preview.filledSharesWad ?? preview[1];
+          setPreviewCost(filledShares > 0n && proceedsWei > 0n ? proceedsWei : null);
           const lmsrShares = preview.lmsrSharesWad ?? preview[3];
           setExecutionSource(lmsrShares > 0n
             ? `${formatWad(preview.orderBookSharesWad ?? preview[2])} CLOB + ${formatWad(lmsrShares)} instant`
@@ -818,6 +858,15 @@ export default function MarketDetail() {
     return () => clearTimeout(timer);
   }, [marketAddress, shareAmount, selectedOutcome, tradeTab, executionMode, limitPrice, readProvider, detail]);
 
+  const refreshAfterTransaction = useCallback(async () => {
+    await refreshData();
+    setRefreshTrigger(c => c + 1);
+    window.setTimeout(() => {
+      void refreshData();
+      setRefreshTrigger(c => c + 1);
+    }, 3500);
+  }, [refreshData]);
+
   const handleBuy = async () => {
     if (!signer || !marketAddress || estimatedShares === null || !shareAmount || !previewCost) return;
     setTxPending(true); setTxMessage(null);
@@ -834,9 +883,7 @@ export default function MarketDetail() {
       showToast({ type: 'success', title: `Bought ${outcomeName}`, message: `${shareAmount} shares for ~${formatUSDC(previewCost)} USDC`, txHash: tx.hash });
       setTxMessage({ type: 'success', text: 'Shares purchased successfully!' });
       setShareAmount(''); setEstimatedShares(null);
-      await new Promise(r => setTimeout(r, 1500));
-      await refreshData();
-      setRefreshTrigger(c => c + 1);
+      await refreshAfterTransaction();
     } catch (err) {
       const errMsg = parseContractError(err);
       showToast({ type: 'error', title: `Buy ${outcomeName} Failed`, message: errMsg });
@@ -860,9 +907,7 @@ export default function MarketDetail() {
       showToast({ type: 'success', title: `Sold ${outcomeName}`, message: `${shareAmount} shares for ~${formatUSDC(previewCost)} USDC`, txHash: tx.hash });
       setTxMessage({ type: 'success', text: 'Shares sold successfully!' });
       setShareAmount('');
-      await new Promise(r => setTimeout(r, 1500));
-      await refreshData();
-      setRefreshTrigger(c => c + 1);
+      await refreshAfterTransaction();
     } catch (err) {
       const errMsg = parseContractError(err);
       showToast({ type: 'error', title: `Sell ${outcomeName} Failed`, message: errMsg });
@@ -890,12 +935,53 @@ export default function MarketDetail() {
       showToast({ type: 'success', title: 'Limit Order Placed', message: `${outcomeName} order is live on the CLOB`, txHash: tx.hash });
       setTxMessage({ type: 'success', text: 'Limit order placed successfully.' });
       setShareAmount('');
-      await new Promise(r => setTimeout(r, 1500));
-      await refreshData();
-      setRefreshTrigger(c => c + 1);
+      await refreshAfterTransaction();
     } catch (err) {
       const errMsg = parseContractError(err);
       showToast({ type: 'error', title: 'Limit Order Failed', message: errMsg });
+      setTxMessage({ type: 'error', text: errMsg });
+    } finally { setTxPending(false); }
+  };
+
+  const handleCancelOrder = async (orderId: bigint) => {
+    if (!signer) return;
+    setCancellingOrderId(orderId);
+    setTxMessage(null);
+    try {
+      const orderBook = new ethers.Contract(ORDER_BOOK_ADDRESS, ORDER_BOOK_ABI, signer);
+      const tx = await orderBook.cancelOrder(orderId);
+      showToast({ type: 'pending', title: 'Cancelling Order...', message: `Order #${orderId.toString()} submitted`, txHash: tx.hash });
+      setTxMessage({ type: 'success', text: `Cancel submitted for order #${orderId.toString()}.` });
+      await tx.wait();
+      showToast({ type: 'success', title: 'Order Cancelled', message: `Order #${orderId.toString()} is no longer open`, txHash: tx.hash });
+      setTxMessage({ type: 'success', text: `Order #${orderId.toString()} cancelled.` });
+      await refreshAfterTransaction();
+    } catch (err) {
+      const errMsg = parseContractError(err);
+      showToast({ type: 'error', title: 'Cancel Failed', message: errMsg });
+      setTxMessage({ type: 'error', text: errMsg });
+    } finally {
+      setCancellingOrderId(null);
+    }
+  };
+
+  const handleCreateShares = async () => {
+    if (!signer || !marketAddress || !inventoryAmount || parseFloat(inventoryAmount) <= 0) return;
+    setTxPending(true); setTxMessage(null);
+    try {
+      const sharesWad = ethers.parseEther(inventoryAmount);
+      const orderBook = new ethers.Contract(ORDER_BOOK_ADDRESS, ORDER_BOOK_ABI, signer);
+      const tx = await orderBook.createCompleteSet(marketAddress, sharesWad, { value: sharesWad });
+      showToast({ type: 'pending', title: 'Creating Shares...', message: `${inventoryAmount} complete sets submitted`, txHash: tx.hash });
+      setTxMessage({ type: 'success', text: 'Create Shares submitted. Waiting for confirmation...' });
+      await tx.wait();
+      showToast({ type: 'success', title: 'Shares Created', message: `Minted ${inventoryAmount} YES and NO shares`, txHash: tx.hash });
+      setTxMessage({ type: 'success', text: 'Inventory created. You can now place sell orders.' });
+      setInventoryAmount('');
+      await refreshAfterTransaction();
+    } catch (err) {
+      const errMsg = parseContractError(err);
+      showToast({ type: 'error', title: 'Create Shares Failed', message: errMsg });
       setTxMessage({ type: 'error', text: errMsg });
     } finally { setTxPending(false); }
   };
@@ -911,8 +997,7 @@ export default function MarketDetail() {
       await tx.wait();
       showToast({ type: 'success', title: 'Winnings Claimed!', message: 'Your winnings have been sent to your wallet', txHash: tx.hash });
       setTxMessage({ type: 'success', text: 'Winnings claimed successfully!' });
-      await new Promise(r => setTimeout(r, 1500));
-      await refreshData();
+      await refreshAfterTransaction();
     } catch (err) {
       const errMsg = parseContractError(err);
       showToast({ type: 'error', title: 'Claim Failed', message: errMsg });
@@ -931,8 +1016,7 @@ export default function MarketDetail() {
       await tx.wait();
       showToast({ type: 'success', title: 'Refund Claimed!', message: 'Your deposit has been returned to your wallet', txHash: tx.hash });
       setTxMessage({ type: 'success', text: 'Refund claimed successfully!' });
-      await new Promise(r => setTimeout(r, 1500));
-      await refreshData();
+      await refreshAfterTransaction();
     } catch (err) {
       const errMsg = parseContractError(err);
       showToast({ type: 'error', title: 'Refund Failed', message: errMsg });
@@ -951,8 +1035,7 @@ export default function MarketDetail() {
       await tx.wait();
       showToast({ type: 'success', title: 'Market Expired', message: 'Refunds are now available for all participants', txHash: tx.hash });
       setTxMessage({ type: 'success', text: 'Market expired! Refunds are now available.' });
-      await new Promise(r => setTimeout(r, 1500));
-      await refreshData();
+      await refreshAfterTransaction();
     } catch (err) {
       const errMsg = parseContractError(err);
       showToast({ type: 'error', title: 'Expiry Failed', message: errMsg });
@@ -999,11 +1082,10 @@ export default function MarketDetail() {
   let avgPrice = 0;
   let profit = 0;
   const hasExistingShares = userInfo?.shares[selectedOutcome] && userInfo.shares[selectedOutcome] > 0n;
-  if (estimatedShares !== null && shareAmount && tradeTab === 'buy') {
-    const usdcInput = parseFloat(shareAmount);
-    const sharesWad = BigInt(Math.round(estimatedShares * 1e18));
+  if (estimatedShares !== null && shareAmount && tradeTab === 'buy' && previewCost !== null) {
+    const sharesWad = ethers.parseEther(estimatedShares.toString());
     const totalWinShares = detail.totalSharesWad[selectedOutcome] + sharesWad;
-    const costWei = ethers.parseEther(usdcInput.toString());
+    const costWei = previewCost;
     // Use actual contract balance (more accurate than totalVolumeWei if sells occurred)
     const poolAfterTrade = poolBalance + costWei;
     // Apply the 0.75% settlement fee. 0.25% is paid to the successful resolver when applicable.
@@ -1012,7 +1094,7 @@ export default function MarketDetail() {
       // Payout for THIS trade's new shares only
       estimatedPayout = (sharesWad * resolvedPool) / totalWinShares;
       multiplier = Number(estimatedPayout) / Number(costWei);
-      avgPrice = estimatedShares > 0 ? usdcInput / estimatedShares : 0;
+      avgPrice = estimatedShares > 0 ? Number(ethers.formatEther(costWei)) / estimatedShares : 0;
       profit = Number(estimatedPayout - costWei) / 1e18;
       // Total position payout (existing + new shares) — shown separately if user has existing shares
       if (hasExistingShares) {
@@ -1028,6 +1110,22 @@ export default function MarketDetail() {
   const selectedOwnedShares = userInfo?.shares[selectedOutcome] ?? 0n;
   const selectedLimitPriceValue = limitPrice ? Number(limitPrice) : null;
   const liveConfigured = liveData && liveData.configured ? liveData : null;
+  const limitSharesWad: bigint = (() => {
+    try { return shareAmount && parseFloat(shareAmount) > 0 ? ethers.parseEther(shareAmount) : 0n; } catch { return 0n; }
+  })();
+  const limitPriceWad: bigint = (() => {
+    try { return limitPrice && parseFloat(limitPrice) > 0 ? ethers.parseEther(limitPrice) : 0n; } catch { return 0n; }
+  })();
+  const limitNotionalWei = limitSharesWad > 0n && limitPriceWad > 0n
+    ? (limitSharesWad * limitPriceWad) / 1_000_000_000_000_000_000n
+    : 0n;
+  const limitPayoutWei = limitSharesWad;
+  const sellAvgPrice = previewCost !== null && shareAmount && parseFloat(shareAmount) > 0
+    ? Number(ethers.formatEther(previewCost)) / parseFloat(shareAmount)
+    : 0;
+  const inventoryCostWei: bigint = (() => {
+    try { return inventoryAmount && parseFloat(inventoryAmount) > 0 ? ethers.parseEther(inventoryAmount) : 0n; } catch { return 0n; }
+  })();
 
   return (
     <div className="min-h-screen animate-fade-in">
@@ -1653,12 +1751,17 @@ export default function MarketDetail() {
             })()}
 
             {/* Probability history chart */}
-            {probHistory.length > 0 && (
+            {probHistory.length > 0 ? (
               <ProbabilityChart
                 history={probHistory}
                 outcomeLabels={detail.outcomeLabels}
                 createdAt={detail.createdAt}
               />
+            ) : (
+              <div className="card p-5 border border-white/[0.08]">
+                <h2 className="section-header mb-2">Price History</h2>
+                <p className="text-xs text-dark-400">No executed trades yet. The chart starts when a real fill is recorded.</p>
+              </div>
             )}
 
             {/* About / Description - collapsible */}
@@ -1905,8 +2008,10 @@ export default function MarketDetail() {
                             levels={[...orderBookAsks].reverse()}
                             side="ask"
                             selectedPrice={selectedLimitPriceValue}
-                            onSelectPrice={(price) => {
+                            onSelectLevel={(price, shares) => {
+                              setTradeTab('buy');
                               setLimitPrice(price.toFixed(2));
+                              setShareAmount(formatInputWad(shares));
                               setExecutionMode('limit');
                             }}
                           />
@@ -1916,7 +2021,12 @@ export default function MarketDetail() {
                               <div className="flex items-center gap-2">
                                 <button
                                   type="button"
-                                  onClick={() => setLimitPrice(Number(ethers.formatEther(orderBookBids[0].price)).toFixed(2))}
+                                  onClick={() => {
+                                    setTradeTab('sell');
+                                    setLimitPrice(Number(ethers.formatEther(orderBookBids[0].price)).toFixed(2));
+                                    setShareAmount(formatInputWad(orderBookBids[0].shares));
+                                    setExecutionMode('limit');
+                                  }}
                                   className="rounded-md border border-emerald-500/25 bg-emerald-500/10 px-2 py-1 text-xs font-mono text-emerald-300 transition-colors hover:bg-emerald-500/15"
                                 >
                                   Bid {Number(ethers.formatEther(orderBookBids[0].price)).toFixed(2)}
@@ -1926,7 +2036,12 @@ export default function MarketDetail() {
                                 </span>
                                 <button
                                   type="button"
-                                  onClick={() => setLimitPrice(Number(ethers.formatEther(orderBookAsks[0].price)).toFixed(2))}
+                                  onClick={() => {
+                                    setTradeTab('buy');
+                                    setLimitPrice(Number(ethers.formatEther(orderBookAsks[0].price)).toFixed(2));
+                                    setShareAmount(formatInputWad(orderBookAsks[0].shares));
+                                    setExecutionMode('limit');
+                                  }}
                                   className="rounded-md border border-red-500/25 bg-red-500/10 px-2 py-1 text-xs font-mono text-red-300 transition-colors hover:bg-red-500/15"
                                 >
                                   Ask {Number(ethers.formatEther(orderBookAsks[0].price)).toFixed(2)}
@@ -1940,8 +2055,10 @@ export default function MarketDetail() {
                             levels={orderBookBids}
                             side="bid"
                             selectedPrice={selectedLimitPriceValue}
-                            onSelectPrice={(price) => {
+                            onSelectLevel={(price, shares) => {
+                              setTradeTab('sell');
                               setLimitPrice(price.toFixed(2));
+                              setShareAmount(formatInputWad(shares));
                               setExecutionMode('limit');
                             }}
                           />
@@ -1957,6 +2074,53 @@ export default function MarketDetail() {
                 )}
 
                 <RecentTrades trades={recentTrades} outcomeLabels={detail.outcomeLabels} />
+
+                {detail.outcomeLabels.length === 2 && (
+                  <div className="mb-4 rounded-2xl border border-cyan-500/20 bg-cyan-500/[0.04] p-3">
+                    <div className="flex items-start justify-between gap-3 mb-3">
+                      <div>
+                        <p className="text-2xs uppercase tracking-[0.12em] text-cyan-300/80 font-semibold">Provide Inventory</p>
+                        <p className="text-xs text-white/60 mt-1">
+                          Deposit collateral to mint equal {detail.outcomeLabels[0]} and {detail.outcomeLabels[1]} shares for seeding asks.
+                        </p>
+                      </div>
+                      <span className="text-2xs rounded-md border border-cyan-400/20 bg-cyan-400/10 px-2 py-1 text-cyan-200">CLOB seed</span>
+                    </div>
+                    <div className="grid grid-cols-[1fr_auto] gap-2">
+                      <input
+                        type="number"
+                        value={inventoryAmount}
+                        onChange={(e) => setInventoryAmount(e.target.value)}
+                        placeholder="0"
+                        min="0"
+                        step="0.1"
+                        className="input-field text-sm"
+                      />
+                      <button
+                        type="button"
+                        onClick={handleCreateShares}
+                        disabled={txPending || inventoryCostWei <= 0n}
+                        className="px-3 rounded-xl bg-cyan-600/90 hover:bg-cyan-500 text-white text-xs font-semibold disabled:bg-cyan-600/20 disabled:text-cyan-300/40 transition-colors"
+                      >
+                        Create Shares
+                      </button>
+                    </div>
+                    {inventoryCostWei > 0n && (
+                      <div className="mt-2 grid grid-cols-2 gap-2 text-xs">
+                        <PreviewRow label="Deposit" value={`${formatUSDC(inventoryCostWei)} USDC`} />
+                        <PreviewRow label="Receive" value={`${formatWad(inventoryCostWei)} each`} />
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                <UserOpenOrders
+                  orders={userOrders}
+                  loading={userOrdersLoading}
+                  outcomeLabels={detail.outcomeLabels}
+                  cancellingOrderId={cancellingOrderId}
+                  onCancel={handleCancelOrder}
+                />
 
                 {/* Amount input */}
                 <div className="flex items-center justify-between mb-1.5">
@@ -2068,9 +2232,33 @@ export default function MarketDetail() {
                 </div>
                 )}
 
+                {executionMode === 'limit' && limitSharesWad > 0n && limitPriceWad > 0n && (
+                  <div className="p-3 rounded-xl bg-dark-900/40 border border-white/[0.06] mb-4 space-y-2">
+                    <PreviewRow label="Side" value={tradeTab === 'buy' ? 'Buy limit' : 'Sell limit'} />
+                    <PreviewRow label="Outcome" value={selectedOutcomeLabel} />
+                    <PreviewRow label="Price" value={`${Number(limitPrice).toFixed(2)} USDC`} />
+                    <PreviewRow label="Amount" value={`${formatWad(limitSharesWad)} shares`} />
+                    {tradeTab === 'buy' ? (
+                      <>
+                        <PreviewRow label="Estimated Cost" value={`${formatUSDC(limitNotionalWei)} USDC`} />
+                        <PreviewRow label="Max Loss" value={`${formatUSDC(limitNotionalWei)} USDC`} muted />
+                        <PreviewRow label="Payout if Wins" value={`${formatUSDC(limitPayoutWei)} USDC`} accent="green" />
+                      </>
+                    ) : (
+                      <>
+                        <PreviewRow label="Estimated Receive" value={`${formatUSDC(limitNotionalWei)} USDC`} />
+                        <PreviewRow label="Shares Locked" value={`${formatWad(limitSharesWad)} ${selectedOutcomeLabel}`} muted />
+                      </>
+                    )}
+                  </div>
+                )}
+
                 {/* Buy preview */}
                 {executionMode === 'instant' && tradeTab === 'buy' && estimatedShares !== null && shareAmount && (
                   <div className="p-3 rounded-xl bg-dark-900/40 border border-white/[0.06] mb-4 space-y-2">
+                    <PreviewRow label="Side" value="Buy" />
+                    <PreviewRow label="Outcome" value={selectedOutcomeLabel} />
+                    <PreviewRow label="Amount" value={`${formatWad(ethers.parseEther(shareAmount))} shares`} />
                     <PreviewRow label="Est. Shares" value={previewLoading ? '...' : `${estimatedShares.toFixed(4)}`} />
                     <PreviewRow label="Avg Price" value={previewLoading ? '...' : `${avgPrice.toFixed(4)} USDC`} />
                     {previewCost !== null && <PreviewRow label="Router Cost" value={`${formatUSDC(previewCost)} USDC`} />}
@@ -2090,7 +2278,7 @@ export default function MarketDetail() {
                     )}
                     <div className="divider" />
                     <PreviewRow
-                      label={`Max Cost (${slippage}% slip.)`}
+                      label={`Max Loss (${slippage}% slip.)`}
                       value={`${formatUSDC(previewCost !== null ? applyBuySlippage(previewCost, slippage) : 0n)} USDC`}
                       muted
                     />
@@ -2100,6 +2288,10 @@ export default function MarketDetail() {
                 {/* Sell preview */}
                 {executionMode === 'instant' && tradeTab === 'sell' && previewCost !== null && shareAmount && (
                   <div className="p-3 rounded-xl bg-dark-900/40 border border-white/[0.06] mb-4 space-y-2">
+                    <PreviewRow label="Side" value="Sell" />
+                    <PreviewRow label="Outcome" value={selectedOutcomeLabel} />
+                    <PreviewRow label="Amount" value={`${formatWad(ethers.parseEther(shareAmount))} shares`} />
+                    <PreviewRow label="Avg Price" value={`${sellAvgPrice.toFixed(4)} USDC`} />
                     <PreviewRow label="Est. Proceeds" value={previewLoading ? '...' : `${formatUSDC(previewCost)} USDC`} />
                     {executionSource && <PreviewRow label="Route" value={executionSource} muted />}
                     <div className="divider" />
@@ -2462,7 +2654,7 @@ function ProbabilityChart({
       {/* Trade count indicator */}
       <div className="px-5 pb-3 flex items-center justify-between">
         <span className="text-2xs text-dark-600">
-          {history.length - 1} trade{history.length - 1 !== 1 ? 's' : ''} recorded
+          {history.length} trade{history.length !== 1 ? 's' : ''} recorded
         </span>
         <span className="text-2xs text-dark-600">
           Powered by BlockScout
@@ -2507,12 +2699,12 @@ function DepthRows({
   levels,
   side,
   selectedPrice,
-  onSelectPrice,
+  onSelectLevel,
 }: {
   levels: DepthLevel[];
   side: 'bid' | 'ask';
   selectedPrice: number | null;
-  onSelectPrice: (price: number) => void;
+  onSelectLevel: (price: number, shares: bigint) => void;
 }) {
   if (levels.length === 0) return null;
   const color = side === 'bid' ? 'text-emerald-300' : 'text-red-300';
@@ -2528,7 +2720,7 @@ function DepthRows({
           <button
             key={`${side}-${level.price.toString()}-${index}`}
             type="button"
-            onClick={() => onSelectPrice(price)}
+            onClick={() => onSelectLevel(price, level.shares)}
             className={`grid w-full grid-cols-3 px-3 py-1.5 text-xs font-mono transition-colors hover:bg-white/[0.04] ${bg} ${
               isSelected ? 'ring-1 ring-inset ring-cyan-400/45 bg-cyan-500/[0.08]' : ''
             }`}
@@ -2564,7 +2756,7 @@ function RecentTrades({ trades, outcomeLabels }: { trades: TradeEvent[]; outcome
             const sideClass = trade.type === 'buy' ? 'text-emerald-300' : 'text-red-300';
             return (
               <div key={`${trade.txHash}-${trade.logIndex}`} className="grid grid-cols-4 px-3 py-1.5 text-xs font-mono animate-fade-in">
-                <span className={sideClass}>{trade.type.toUpperCase()}</span>
+                <span className={sideClass}>{trade.type.toUpperCase()} <span className="text-white/30">{trade.source}</span></span>
                 <span className="truncate text-white/70">{outcomeLabels[trade.outcomeIndex] ?? trade.outcomeIndex}</span>
                 <span className="text-right text-white">{Number(ethers.formatEther(trade.priceWad)).toFixed(2)}</span>
                 <span className="text-right text-white/50">{Number(ethers.formatEther(trade.sharesWad)).toFixed(3)}</span>
@@ -2573,6 +2765,78 @@ function RecentTrades({ trades, outcomeLabels }: { trades: TradeEvent[]; outcome
           })
         )}
       </div>
+    </div>
+  );
+}
+
+function UserOpenOrders({
+  orders,
+  loading,
+  outcomeLabels,
+  cancellingOrderId,
+  onCancel,
+}: {
+  orders: UserLimitOrder[];
+  loading: boolean;
+  outcomeLabels: string[];
+  cancellingOrderId: bigint | null;
+  onCancel: (orderId: bigint) => void;
+}) {
+  return (
+    <div className="mb-4 rounded-2xl border border-white/[0.08] bg-dark-900/35 overflow-hidden">
+      <div className="flex items-center justify-between px-3 py-2 border-b border-white/[0.06]">
+        <p className="text-2xs uppercase tracking-[0.12em] text-white/45 font-semibold">Open Limit Orders</p>
+        <span className="text-2xs text-dark-500">{orders.length} open</span>
+      </div>
+      {loading ? (
+        <p className="px-3 py-4 text-xs text-dark-500 text-center">Loading your orders...</p>
+      ) : orders.length === 0 ? (
+        <p className="px-3 py-4 text-xs text-dark-500 text-center">No open limit orders.</p>
+      ) : (
+        <div className="max-h-44 overflow-y-auto">
+          {orders.map((order) => {
+            const sideLabel = order.side === 0 ? 'Buy' : 'Sell';
+            const sideClass = order.side === 0 ? 'text-emerald-300' : 'text-red-300';
+            const status = order.status === 0 && order.remainingSharesWad < order.originalSharesWad
+              ? 'Partially Filled'
+              : (ORDER_STATUS_LABELS[order.status] ?? 'Open');
+            const remainingCost = (order.remainingSharesWad * order.priceWad) / 1_000_000_000_000_000_000n;
+            const isCancelling = cancellingOrderId === order.id;
+            return (
+              <div key={order.id.toString()} className="px-3 py-2 border-b border-white/[0.04] last:border-b-0">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2 text-xs">
+                      <span className={`font-semibold ${sideClass}`}>{sideLabel}</span>
+                      <span className="text-white truncate">{outcomeLabels[order.outcome] ?? `Outcome ${order.outcome}`}</span>
+                      <span className="text-dark-500">#{order.id.toString()}</span>
+                    </div>
+                    <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-2xs text-dark-400 font-mono">
+                      <span>{Number(ethers.formatEther(order.priceWad)).toFixed(2)} USDC</span>
+                      <span>{formatWad(order.remainingSharesWad)} / {formatWad(order.originalSharesWad)} shares</span>
+                      <span>{formatUSDC(remainingCost)} USDC open</span>
+                      <span>{order.expiry > 0 ? `Exp ${formatDate(order.expiry)}` : 'GTC'}</span>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <span className="hidden sm:inline-flex text-2xs rounded-md border border-white/[0.08] bg-white/[0.03] px-2 py-1 text-white/60">
+                      {status}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => onCancel(order.id)}
+                      disabled={isCancelling}
+                      className="rounded-lg border border-red-500/25 bg-red-500/10 px-2.5 py-1.5 text-2xs font-semibold text-red-300 hover:bg-red-500/15 disabled:opacity-50 transition-colors"
+                    >
+                      {isCancelling ? 'Canceling...' : 'Cancel'}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }

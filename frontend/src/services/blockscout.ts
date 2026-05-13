@@ -1,11 +1,11 @@
 import { ethers } from 'ethers';
-import { NETWORK, ORDER_BOOK_ADDRESS } from '../config/network';
+import { MARKET_ROUTER_ADDRESS, NETWORK, ORDER_BOOK_ADDRESS } from '../config/network';
 
 /* ─── Types ─── */
 
 export interface TradeEvent {
   type: 'buy' | 'sell';
-  source: 'CLOB' | 'LMSR';
+  source: 'CLOB' | 'LMSR' | 'HYBRID';
   trader: string;
   outcomeIndex: number;
   sharesWad: bigint;
@@ -35,7 +35,7 @@ interface BlockscoutLogEntry {
 
 const SHARES_BOUGHT_TOPIC = ethers.id('SharesBought(address,uint256,uint256,uint256)');
 const SHARES_SOLD_TOPIC = ethers.id('SharesSold(address,uint256,uint256,uint256)');
-const ORDERBOOK_TRADE_TOPIC = ethers.id('TradeExecuted(address,address,uint256,uint8,uint256,uint256,uint256,bool)');
+const EXECUTED_TRADE_TOPIC = ethers.id('TradeExecuted(address,address,uint256,uint256,uint256,uint256,uint8,uint8,uint256,uint256)');
 
 /* ─── Fetch trade events from BlockScout ─── */
 
@@ -48,7 +48,7 @@ export async function fetchTradeEvents(
 
   // Fetch buy and sell logs in parallel using topic0 filter
   const marketTopic = `0x${marketAddress.toLowerCase().replace(/^0x/, '').padStart(64, '0')}`;
-  const [buyRes, sellRes, clobRes] = await Promise.all([
+  const [buyRes, sellRes, routerTradeRes, orderBookTradeRes] = await Promise.all([
     fetch(
       `${baseUrl}?module=logs&action=getLogs&address=${marketAddress}&fromBlock=${fromBlock}&toBlock=latest&topic0=${SHARES_BOUGHT_TOPIC}`
     ),
@@ -56,33 +56,49 @@ export async function fetchTradeEvents(
       `${baseUrl}?module=logs&action=getLogs&address=${marketAddress}&fromBlock=${fromBlock}&toBlock=latest&topic0=${SHARES_SOLD_TOPIC}`
     ),
     fetch(
-      `${baseUrl}?module=logs&action=getLogs&address=${ORDER_BOOK_ADDRESS}&fromBlock=${fromBlock}&toBlock=latest&topic0=${ORDERBOOK_TRADE_TOPIC}&topic2=${marketTopic}`
+      `${baseUrl}?module=logs&action=getLogs&address=${MARKET_ROUTER_ADDRESS}&fromBlock=${fromBlock}&toBlock=latest&topic0=${EXECUTED_TRADE_TOPIC}&topic2=${marketTopic}`
+    ),
+    fetch(
+      `${baseUrl}?module=logs&action=getLogs&address=${ORDER_BOOK_ADDRESS}&fromBlock=${fromBlock}&toBlock=latest&topic0=${EXECUTED_TRADE_TOPIC}&topic2=${marketTopic}`
     ),
   ]);
 
-  const [buyData, sellData, clobData] = await Promise.all([buyRes.json(), sellRes.json(), clobRes.json()]);
+  const [buyData, sellData, routerTradeData, orderBookTradeData] = await Promise.all([
+    buyRes.json(),
+    sellRes.json(),
+    routerTradeRes.json(),
+    orderBookTradeRes.json(),
+  ]);
 
   const events: TradeEvent[] = [];
+  const executedTxs = new Set<string>();
 
-  // Parse buy events
+  for (const data of [routerTradeData, orderBookTradeData]) {
+    if (data.status === '1' && Array.isArray(data.result)) {
+      for (const log of data.result as BlockscoutLogEntry[]) {
+        const parsed = parseExecutedTradeLog(log);
+        if (parsed) {
+          events.push(parsed);
+          executedTxs.add(parsed.txHash.toLowerCase());
+        }
+      }
+    }
+  }
+
+  // Legacy LMSR events are kept as a fallback for older deployments. New router
+  // TradeExecuted logs are authoritative, so skip duplicated transaction hashes.
   if (buyData.status === '1' && Array.isArray(buyData.result)) {
     for (const log of buyData.result as BlockscoutLogEntry[]) {
+      if (executedTxs.has(log.transactionHash.toLowerCase())) continue;
       const parsed = parseTradeLog(log, 'buy');
       if (parsed) events.push(parsed);
     }
   }
 
-  // Parse sell events
   if (sellData.status === '1' && Array.isArray(sellData.result)) {
     for (const log of sellData.result as BlockscoutLogEntry[]) {
+      if (executedTxs.has(log.transactionHash.toLowerCase())) continue;
       const parsed = parseTradeLog(log, 'sell');
-      if (parsed) events.push(parsed);
-    }
-  }
-
-  if (clobData.status === '1' && Array.isArray(clobData.result)) {
-    for (const log of clobData.result as BlockscoutLogEntry[]) {
-      const parsed = parseOrderBookTradeLog(log);
       if (parsed) events.push(parsed);
     }
   }
@@ -182,7 +198,7 @@ function parseTradeLog(log: BlockscoutLogEntry, type: 'buy' | 'sell'): TradeEven
   }
 }
 
-function parseOrderBookTradeLog(log: BlockscoutLogEntry): TradeEvent | null {
+function parseExecutedTradeLog(log: BlockscoutLogEntry): TradeEvent | null {
   try {
     const traderTopic = log.topics[1];
     const outcomeTopic = log.topics[3];
@@ -191,25 +207,28 @@ function parseOrderBookTradeLog(log: BlockscoutLogEntry): TradeEvent | null {
     const trader = '0x' + traderTopic.slice(26);
     const outcomeIndex = parseInt(outcomeTopic, 16);
     const decoded = ethers.AbiCoder.defaultAbiCoder().decode(
-      ['uint8', 'uint256', 'uint256', 'uint256', 'bool'],
+      ['uint256', 'uint256', 'uint256', 'uint8', 'uint8', 'uint256', 'uint256'],
       log.data
     );
-    const side = Number(decoded[0]);
+    const priceWad = decoded[0] as bigint;
     const sharesWad = decoded[1] as bigint;
-    const notionalWei = decoded[2] as bigint;
-    const feeWei = decoded[3] as bigint;
-    const timestamp = parseInt(log.timeStamp, 16);
+    const timestamp = Number(decoded[2]);
+    const sourceRaw = Number(decoded[3]);
+    const side = Number(decoded[4]);
+    const notionalWei = decoded[5] as bigint;
+    const feeWei = decoded[6] as bigint;
     const blockNumber = parseInt(log.blockNumber, 16);
+    const source = sourceRaw === 2 ? 'HYBRID' : sourceRaw === 1 ? 'LMSR' : 'CLOB';
 
     return {
       type: side === 0 ? 'buy' : 'sell',
-      source: 'CLOB',
+      source,
       trader,
       outcomeIndex,
       sharesWad,
       costOrProceedsWei: notionalWei,
       feeWei,
-      priceWad: sharesWad > 0n ? (notionalWei * 1_000_000_000_000_000_000n) / sharesWad : 0n,
+      priceWad,
       timestamp,
       blockNumber,
       logIndex: parseInt(log.logIndex, 16),

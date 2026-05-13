@@ -13,6 +13,19 @@ contract HybridOrderBook is Ownable, ReentrancyGuard {
         Ask
     }
 
+    enum ExecutionSource {
+        CLOB,
+        LMSR,
+        HYBRID
+    }
+
+    enum OrderStatus {
+        Open,
+        PartiallyFilled,
+        Filled,
+        Cancelled
+    }
+
     struct Order {
         uint256 id;
         address market;
@@ -24,6 +37,8 @@ contract HybridOrderBook is Ownable, ReentrancyGuard {
         uint256 escrowWei;
         uint256 expiry;
         bool active;
+        uint256 originalSharesWad;
+        OrderStatus status;
     }
 
     struct OrderQueue {
@@ -51,6 +66,7 @@ contract HybridOrderBook is Ownable, ReentrancyGuard {
 
     mapping(address => bool) public allowedMarket;
     mapping(uint256 => Order) public orders;
+    mapping(address => uint256[]) private _ownerOrderIds;
     mapping(bytes32 => OrderQueue) private _queues;
 
     event RouterUpdated(address indexed router);
@@ -89,13 +105,16 @@ contract HybridOrderBook is Ownable, ReentrancyGuard {
     event TradeExecuted(
         address indexed trader,
         address indexed market,
-        uint256 indexed outcome,
+        uint256 indexed outcomeId,
+        uint256 priceWad,
+        uint256 amountWad,
+        uint256 timestamp,
+        ExecutionSource executionSource,
         Side side,
-        uint256 sharesWad,
         uint256 notionalWei,
-        uint256 feeWei,
-        bool isLimitOrder
+        uint256 feeWei
     );
+    event CompleteSetCreated(address indexed market, address indexed user, uint256 sharesWad, uint256 collateralWei);
     event OrderFilled(
         uint256 indexed orderId,
         address indexed market,
@@ -243,15 +262,14 @@ contract HybridOrderBook is Ownable, ReentrancyGuard {
 
         if (availableWei > 0) _sendValue(payable(msg.sender), availableWei, "OB: refund failed");
         if (matchedNotionalWei > 0) {
-            emit TradeExecuted(
+            _emitTradeExecuted(
                 msg.sender,
                 market,
                 outcome,
                 side,
                 sharesWad - remainingSharesWad,
                 matchedNotionalWei,
-                takerFeeWei,
-                true
+                takerFeeWei
             );
         }
     }
@@ -267,6 +285,7 @@ contract HybridOrderBook is Ownable, ReentrancyGuard {
         order.active = false;
         order.remainingSharesWad = 0;
         order.escrowWei = 0;
+        order.status = OrderStatus.Cancelled;
         _decreaseLevel(order.market, order.outcome, order.side, order.priceWad, remaining);
 
         if (order.side == Side.Bid) {
@@ -279,6 +298,21 @@ contract HybridOrderBook is Ownable, ReentrancyGuard {
         }
 
         emit OrderCancelled(orderId, order.owner, remaining, refundWei);
+    }
+
+    function createCompleteSet(address market, uint256 sharesWad) external payable nonReentrant returns (bool) {
+        require(!paused, "OB: paused");
+        require(allowedMarket[market], "OB: market not allowed");
+        require(IHybridMarket(market).isTradingOpen(), "OB: trading closed");
+        require(IHybridMarket(market).outcomeCount() == 2, "OB: binary only");
+        require(sharesWad > 0, "OB: zero shares");
+        require(msg.value == sharesWad, "OB: bad collateral");
+        require(
+            IHybridMarket(market).mintCompleteSet{value: msg.value}(msg.sender, 0, msg.sender, 1, sharesWad),
+            "OB: complete set failed"
+        );
+        emit CompleteSetCreated(market, msg.sender, sharesWad, msg.value);
+        return true;
     }
 
     function executeMarketOrder(
@@ -333,9 +367,7 @@ contract HybridOrderBook is Ownable, ReentrancyGuard {
             }
         }
 
-        if (sharesFilledWad > 0) {
-            emit TradeExecuted(trader, market, outcome, side, sharesFilledWad, notionalWei, feeWei, false);
-        }
+        // Router emits the user-facing aggregate TradeExecuted event for market orders.
     }
 
     function fillBestAsk(address market, uint256 outcome, address buyer, uint256 maxSharesWad)
@@ -531,6 +563,59 @@ contract HybridOrderBook is Ownable, ReentrancyGuard {
         return _availableAtLevel(market, outcome, Side(sideRaw), priceWad);
     }
 
+    function getUserOrderCount(address user) external view returns (uint256) {
+        return _ownerOrderIds[user].length;
+    }
+
+    function getUserOrderIds(address user, uint256 offset, uint256 limit)
+        external
+        view
+        returns (uint256[] memory orderIds)
+    {
+        uint256 total = _ownerOrderIds[user].length;
+        if (offset >= total) return new uint256[](0);
+
+        uint256 end = limit == 0 || offset + limit > total ? total : offset + limit;
+        uint256 count = end - offset;
+        orderIds = new uint256[](count);
+        for (uint256 i = 0; i < count; ) {
+            orderIds[i] = _ownerOrderIds[user][offset + i];
+            unchecked { i++; }
+        }
+    }
+
+    function getUserOrders(address user, address market, bool openOnly, uint256 offset, uint256 limit)
+        external
+        view
+        returns (Order[] memory userOrders)
+    {
+        uint256 total = _ownerOrderIds[user].length;
+        if (offset >= total) return new Order[](0);
+
+        uint256 end = limit == 0 || offset + limit > total ? total : offset + limit;
+        uint256 count;
+        for (uint256 i = offset; i < end; ) {
+            Order storage order = orders[_ownerOrderIds[user][i]];
+            bool marketMatches = market == address(0) || order.market == market;
+            bool statusMatches = !openOnly || (order.active && !_isExpired(order));
+            if (marketMatches && statusMatches) count++;
+            unchecked { i++; }
+        }
+
+        userOrders = new Order[](count);
+        uint256 cursor;
+        for (uint256 i = offset; i < end; ) {
+            Order storage order = orders[_ownerOrderIds[user][i]];
+            bool marketMatches = market == address(0) || order.market == market;
+            bool statusMatches = !openOnly || (order.active && !_isExpired(order));
+            if (marketMatches && statusMatches) {
+                userOrders[cursor] = order;
+                cursor++;
+            }
+            unchecked { i++; }
+        }
+    }
+
     function pruneExpiredOrder(uint256 orderId) external nonReentrant {
         Order storage order = orders[orderId];
         require(order.active, "OB: inactive order");
@@ -547,6 +632,7 @@ contract HybridOrderBook is Ownable, ReentrancyGuard {
         order.active = false;
         order.remainingSharesWad = 0;
         order.escrowWei = 0;
+        order.status = OrderStatus.Cancelled;
         _decreaseLevel(market, outcome, side, priceWad, remaining);
 
         if (side == Side.Bid) {
@@ -579,8 +665,11 @@ contract HybridOrderBook is Ownable, ReentrancyGuard {
             remainingSharesWad: sharesWad,
             escrowWei: escrowWei,
             expiry: expiry,
-            active: true
+            active: true,
+            originalSharesWad: sharesWad,
+            status: OrderStatus.Open
         });
+        _ownerOrderIds[owner_].push(orderId);
 
         OrderQueue storage queue = _queues[_queueKey(market, outcome, side, priceWad)];
         queue.orderIds.push(orderId);
@@ -810,6 +899,30 @@ contract HybridOrderBook is Ownable, ReentrancyGuard {
         if (amountWei > 0) _sendValue(payable(feeRecipient), amountWei, "OB: fee failed");
     }
 
+    function _emitTradeExecuted(
+        address trader,
+        address market,
+        uint256 outcome,
+        Side side,
+        uint256 sharesWad,
+        uint256 notionalWei,
+        uint256 feeWei
+    ) internal {
+        if (sharesWad == 0) return;
+        emit TradeExecuted(
+            trader,
+            market,
+            outcome,
+            (notionalWei * WAD) / sharesWad,
+            sharesWad,
+            block.timestamp,
+            ExecutionSource.CLOB,
+            side,
+            notionalWei,
+            feeWei
+        );
+    }
+
     function _refundInactiveBidDust(Order storage order) internal {
         if (!order.active && order.side == Side.Bid && order.escrowWei > 0) {
             uint256 dustRefund = order.escrowWei;
@@ -963,6 +1076,9 @@ contract HybridOrderBook is Ownable, ReentrancyGuard {
         _decreaseLevel(order.market, order.outcome, order.side, order.priceWad, sharesWad);
         if (order.remainingSharesWad == 0) {
             order.active = false;
+            order.status = OrderStatus.Filled;
+        } else {
+            order.status = OrderStatus.PartiallyFilled;
         }
     }
 
