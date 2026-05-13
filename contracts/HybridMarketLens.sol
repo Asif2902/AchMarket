@@ -27,6 +27,7 @@ contract HybridMarketLens {
         uint256 resolutionTime;
         uint256 totalVolumeWei;
         uint256 participants;
+        PredictionMarketV2.MarketMode mode;
         int256 bWad;
     }
 
@@ -48,6 +49,7 @@ contract HybridMarketLens {
         int256 bWad;
         uint256 totalVolumeWei;
         uint256 participants;
+        PredictionMarketV2.MarketMode mode;
         uint256 resolvedPoolWei;
         string cancelReason;
         string cancelProofUri;
@@ -131,6 +133,7 @@ contract HybridMarketLens {
                 resolutionTime: pm.resolutionTime(),
                 totalVolumeWei: volume,
                 participants: participants,
+                mode: pm.marketMode(),
                 bWad: pm.b()
             });
 
@@ -189,6 +192,7 @@ contract HybridMarketLens {
             bWad: pm.b(),
             totalVolumeWei: volume,
             participants: participants,
+            mode: pm.marketMode(),
             resolvedPoolWei: pm.resolvedPoolWei(),
             cancelReason: cancelReason,
             cancelProofUri: cancelProofUri,

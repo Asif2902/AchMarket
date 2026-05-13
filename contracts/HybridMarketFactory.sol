@@ -10,7 +10,7 @@ import {LMSRMath} from "./LMSRMath.sol";
 import {IResolutionManager} from "./interfaces/IResolutionManager.sol";
 
 /// @title HybridMarketFactory
-/// @notice Deploys and wires v2 LMSR+CLOB markets with replaceable resolution managers.
+/// @notice Deploys and wires v2 CLOB-first markets with optional LMSR support.
 contract HybridMarketFactory is Ownable {
     address[] public markets;
     mapping(address => bool) public isMarket;
@@ -37,7 +37,10 @@ contract HybridMarketFactory is Ownable {
         uint256 outcomeCount,
         uint256 deadline,
         uint256 resolutionTime,
-        address resolutionManager
+        address resolutionManager,
+        PredictionMarketV2.MarketMode mode,
+        int256 bWad,
+        uint256 seedWei
     );
     event RouterUpdated(address indexed router);
     event OrderBookUpdated(address indexed orderBook);
@@ -68,6 +71,7 @@ contract HybridMarketFactory is Ownable {
         string calldata _category,
         string calldata _imageUri,
         string[] calldata _outcomeLabels,
+        uint8 _modeRaw,
         int256 _bWad,
         uint256 _durationSeconds,
         string calldata _resolutionSource,
@@ -76,9 +80,13 @@ contract HybridMarketFactory is Ownable {
         string calldata _invalidCondition
     ) external onlyOwner returns (address market) {
         require(!creationPaused, "FactoryV2: creation paused");
-        _validateCreation(_title, _description, _category, _outcomeLabels, _bWad, _durationSeconds);
-        uint256 seedWei = requiredSeed(_outcomeLabels.length, _bWad);
-        require(address(this).balance >= seedWei, "FactoryV2: liquidity reserve low");
+        require(_modeRaw <= uint8(PredictionMarketV2.MarketMode.HYBRID_CLOB_LMSR), "FactoryV2: bad mode");
+        PredictionMarketV2.MarketMode mode = PredictionMarketV2.MarketMode(_modeRaw);
+        _validateCreation(_title, _description, _category, _outcomeLabels, mode, _bWad, _durationSeconds);
+        uint256 seedWei = mode == PredictionMarketV2.MarketMode.HYBRID_CLOB_LMSR
+            ? requiredSeed(_outcomeLabels.length, _bWad)
+            : 0;
+        if (seedWei > 0) require(address(this).balance >= seedWei, "FactoryV2: liquidity reserve low");
 
         address[] memory operators = new address[](2);
         operators[0] = address(router);
@@ -92,6 +100,7 @@ contract HybridMarketFactory is Ownable {
             _category,
             _imageUri,
             _outcomeLabels,
+            mode,
             _bWad,
             _durationSeconds,
             _resolutionSource,
@@ -114,7 +123,10 @@ contract HybridMarketFactory is Ownable {
             _outcomeLabels.length,
             block.timestamp + _durationSeconds,
             _resolutionTime,
-            defaultResolutionManager
+            defaultResolutionManager,
+            mode,
+            _bWad,
+            seedWei
         );
     }
 
@@ -268,6 +280,7 @@ contract HybridMarketFactory is Ownable {
         string calldata _description,
         string calldata _category,
         string[] calldata _outcomeLabels,
+        PredictionMarketV2.MarketMode _mode,
         int256 _bWad,
         uint256 _durationSeconds
     ) internal view {
@@ -275,8 +288,13 @@ contract HybridMarketFactory is Ownable {
         require(bytes(_description).length > 0, "FactoryV2: empty description");
         require(bytes(_category).length > 0, "FactoryV2: empty category");
         require(_outcomeLabels.length >= 2, "FactoryV2: need outcomes");
-        require(_bWad >= minBWad, "FactoryV2: b too small");
-        require(_bWad <= maxBWad, "FactoryV2: b too large");
+        if (_mode == PredictionMarketV2.MarketMode.CLOB_ONLY) {
+            require(_outcomeLabels.length == 2, "FactoryV2: CLOB needs binary");
+            require(_bWad == 0, "FactoryV2: CLOB b must be 0");
+        } else {
+            require(_bWad >= minBWad, "FactoryV2: b too small");
+            require(_bWad <= maxBWad, "FactoryV2: b too large");
+        }
         require(
             _durationSeconds >= minDuration && _durationSeconds <= maxDuration,
             "FactoryV2: invalid duration"

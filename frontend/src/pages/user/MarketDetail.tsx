@@ -10,7 +10,7 @@ import ProbabilityBar, { getOutcomeColor } from '../../components/ProbabilityBar
 import Countdown from '../../components/Countdown';
 import { PageLoader } from '../../components/LoadingSpinner';
 import UsdcIcon from '../../components/UsdcIcon';
-import { fetchTradeEvents, computeVolumeFromEvents } from '../../services/blockscout';
+import { fetchTradeEvents, computeVolumeFromEvents, type TradeEvent } from '../../services/blockscout';
 import {
   formatUSDC, formatCompactUSDC, formatCompact, formatWad, formatProbability, probToPercent, formatDate,
   applyBuySlippage, applySellSlippage, parseContractError, resolveImageUri,
@@ -45,6 +45,7 @@ interface MarketDetailData {
   bWad: bigint;
   totalVolumeWei: bigint;
   participants: number;
+  mode: number;
   resolvedPoolWei: bigint;
   cancelReason: string;
   cancelProofUri: string;
@@ -167,6 +168,7 @@ export default function MarketDetail() {
   const [detail, setDetail] = useState<MarketDetailData | null>(null);
   const [userInfo, setUserInfo] = useState<UserInfo | null>(null);
   const [probHistory, setProbHistory] = useState<ProbHistoryPoint[]>([]);
+  const [recentTrades, setRecentTrades] = useState<TradeEvent[]>([]);
   const [accurateVolume, setAccurateVolume] = useState<bigint | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -249,6 +251,7 @@ export default function MarketDetail() {
       setMarketAddress(null);
       setError(null);
       setProbHistory([]);
+      setRecentTrades([]);
       setAccurateVolume(null);
       setSelectedOutcome(0);
       setShareAmount('');
@@ -288,7 +291,7 @@ export default function MarketDetail() {
         createdAt: Number(d.createdAt), marketDeadline: Number(d.marketDeadline),
         resolutionTime: Number(d.resolutionTime),
         bWad: d.bWad, totalVolumeWei: d.totalVolumeWei,
-        participants: Number(d.participants), resolvedPoolWei: d.resolvedPoolWei,
+        participants: Number(d.participants), mode: Number(d.mode ?? 1), resolvedPoolWei: d.resolvedPoolWei,
         cancelReason: d.cancelReason || '', cancelProofUri: d.cancelProofUri || '',
         resolutionSource: d.resolutionSource || '',
         fallbackResolutionSource: d.fallbackResolutionSource || '',
@@ -362,7 +365,7 @@ export default function MarketDetail() {
         createdAt: Number(d.createdAt), marketDeadline: Number(d.marketDeadline),
         resolutionTime: Number(d.resolutionTime),
         bWad: d.bWad, totalVolumeWei: d.totalVolumeWei,
-        participants: Number(d.participants), resolvedPoolWei: d.resolvedPoolWei,
+        participants: Number(d.participants), mode: Number(d.mode ?? 1), resolvedPoolWei: d.resolvedPoolWei,
         cancelReason: d.cancelReason || '', cancelProofUri: d.cancelProofUri || '',
         resolutionSource: d.resolutionSource || '',
         fallbackResolutionSource: d.fallbackResolutionSource || '',
@@ -397,46 +400,34 @@ export default function MarketDetail() {
   const fetchProbHistory = useCallback(async (addr: string, detailData: MarketDetailData) => {
     try {
       const outcomeCount = detailData.outcomeLabels.length;
-      const bWad = detailData.bWad;
-      const shares = new Array(outcomeCount).fill(0n);
       const history: ProbHistoryPoint[] = [];
 
-      // Initial point at market creation — uniform probabilities
-      const uniformProb = 100 / outcomeCount;
+      const lastPrices = detailData.impliedProbabilitiesWad.map((p) => probToPercent(p));
       const initialPoint: ProbHistoryPoint = { time: detailData.createdAt };
-      detailData.outcomeLabels.forEach((label) => {
-        initialPoint[label] = Number(uniformProb.toFixed(1));
+      detailData.outcomeLabels.forEach((label, i) => {
+        initialPoint[label] = Number((lastPrices[i] ?? 100 / outcomeCount).toFixed(1));
       });
       history.push(initialPoint);
 
-      // Fetch trade events from BlockScout API (reliable, includes timestamps)
       const events = await fetchTradeEvents(addr);
-
-      // Compute accurate volume from all trade events (buys + sells)
       setAccurateVolume(computeVolumeFromEvents(events));
+      setRecentTrades(events.slice(-12).reverse());
 
       for (const event of events) {
-        if (event.type === 'buy') {
-          shares[event.outcomeIndex] = shares[event.outcomeIndex] + event.sharesWad;
-        } else {
-          shares[event.outcomeIndex] = shares[event.outcomeIndex] - event.sharesWad;
-        }
-        const probs = computeProbabilities(shares, bWad);
+        if (event.outcomeIndex >= outcomeCount || event.priceWad === 0n) continue;
+        lastPrices[event.outcomeIndex] = Number(ethers.formatEther(event.priceWad)) * 100;
         const point: ProbHistoryPoint = { time: event.timestamp };
         detailData.outcomeLabels.forEach((label, i) => {
-          point[label] = Number((probs[i] * 100).toFixed(1));
+          point[label] = Number((lastPrices[i] ?? 0).toFixed(1));
         });
         history.push(point);
       }
 
-      // Add a "now" point with current probabilities so the chart extends to present
       const nowTs = Math.floor(Date.now() / 1000);
-      const currentProbs = computeProbabilities(detailData.totalSharesWad, bWad);
       const nowPoint: ProbHistoryPoint = { time: nowTs };
       detailData.outcomeLabels.forEach((label, i) => {
-        nowPoint[label] = Number((currentProbs[i] * 100).toFixed(1));
+        nowPoint[label] = Number((lastPrices[i] ?? 0).toFixed(1));
       });
-      // Only add if it's after the last event
       if (history.length === 0 || nowTs > history[history.length - 1].time) {
         history.push(nowPoint);
       }
@@ -444,17 +435,16 @@ export default function MarketDetail() {
       setProbHistory(history);
     } catch (err) {
       console.error('Failed to fetch prob history from BlockScout:', err);
-      // Fallback: show current state as a single-point chart
-      const currentProbs = computeProbabilities(detailData.totalSharesWad, detailData.bWad);
+      const currentPrices = detailData.impliedProbabilitiesWad.map((p) => probToPercent(p));
       const fallback: ProbHistoryPoint[] = [
         (() => {
           const p: ProbHistoryPoint = { time: detailData.createdAt };
-          detailData.outcomeLabels.forEach((l, i) => { p[l] = Number((currentProbs[i] * 100).toFixed(1)); });
+          detailData.outcomeLabels.forEach((l, i) => { p[l] = Number((currentPrices[i] ?? 0).toFixed(1)); });
           return p;
         })(),
         (() => {
           const p: ProbHistoryPoint = { time: Math.floor(Date.now() / 1000) };
-          detailData.outcomeLabels.forEach((l, i) => { p[l] = Number((currentProbs[i] * 100).toFixed(1)); });
+          detailData.outcomeLabels.forEach((l, i) => { p[l] = Number((currentPrices[i] ?? 0).toFixed(1)); });
           return p;
         })(),
       ];
@@ -477,38 +467,31 @@ export default function MarketDetail() {
         if (cancelled) return;
         const newVolume = computeVolumeFromEvents(events);
         setAccurateVolume(newVolume);
+        setRecentTrades(events.slice(-12).reverse());
 
         const outcomeCount = detail.outcomeLabels.length;
-        const bWad = detail.bWad;
-        const shares = new Array(outcomeCount).fill(0n);
         const history: ProbHistoryPoint[] = [];
-
-        const uniformProb = 100 / outcomeCount;
+        const lastPrices = detail.impliedProbabilitiesWad.map((p) => probToPercent(p));
         const initialPoint: ProbHistoryPoint = { time: detail.createdAt };
-        detail.outcomeLabels.forEach((label) => {
-          initialPoint[label] = Number(uniformProb.toFixed(1));
+        detail.outcomeLabels.forEach((label, idx) => {
+          initialPoint[label] = Number((lastPrices[idx] ?? 100 / outcomeCount).toFixed(1));
         });
         history.push(initialPoint);
 
         for (const event of events) {
-          if (event.type === 'buy') {
-            shares[event.outcomeIndex] = shares[event.outcomeIndex] + event.sharesWad;
-          } else {
-            shares[event.outcomeIndex] = shares[event.outcomeIndex] - event.sharesWad;
-          }
-          const probs = computeProbabilities(shares, bWad);
+          if (event.outcomeIndex >= outcomeCount || event.priceWad === 0n) continue;
+          lastPrices[event.outcomeIndex] = Number(ethers.formatEther(event.priceWad)) * 100;
           const point: ProbHistoryPoint = { time: event.timestamp };
           detail.outcomeLabels.forEach((label, idx) => {
-            point[label] = Number((probs[idx] * 100).toFixed(1));
+            point[label] = Number((lastPrices[idx] ?? 0).toFixed(1));
           });
           history.push(point);
         }
 
         const nowTs = Math.floor(Date.now() / 1000);
-        const currentProbs = computeProbabilities(detail.totalSharesWad, bWad);
         const nowPoint: ProbHistoryPoint = { time: nowTs };
         detail.outcomeLabels.forEach((label, idx) => {
-          nowPoint[label] = Number((currentProbs[idx] * 100).toFixed(1));
+          nowPoint[label] = Number((lastPrices[idx] ?? 0).toFixed(1));
         });
         if (history.length === 0 || nowTs > history[history.length - 1].time) {
           history.push(nowPoint);
@@ -529,7 +512,7 @@ export default function MarketDetail() {
       cancelled = true;
       clearTimeout(timeoutId);
     };
-  }, [marketAddress, detail?.market, detail?.outcomeLabels, detail?.totalSharesWad, detail?.bWad, detail?.createdAt]);
+  }, [marketAddress, detail?.market, detail?.outcomeLabels, detail?.impliedProbabilitiesWad, detail?.createdAt]);
 
   useEffect(() => { fetchAll(); }, [fetchAll]);
 
@@ -792,21 +775,17 @@ export default function MarketDetail() {
       if (tradeTab === 'buy') {
         if (!detail || !marketAddress) { setEstimatedShares(null); setPreviewLoading(false); return; }
         try {
-          const budgetUSDC = parseFloat(shareAmount);
-          const shares = findSharesForCost(detail.totalSharesWad, detail.bWad, selectedOutcome, budgetUSDC);
-          if (shares === null) {
-            setEstimatedShares(null);
-            setPreviewCost(null);
-            setExecutionSource('');
-            setPreviewKey(inputKey);
-            return;
-          }
-          const sharesWad = ethers.parseEther(Math.max(0, shares).toFixed(18));
+          const shares = parseFloat(shareAmount);
+          const sharesWad = ethers.parseEther(shareAmount);
           const router = new ethers.Contract(MARKET_ROUTER_ADDRESS, MARKET_ROUTER_ABI, readProvider);
           const preview = await router.previewTrade(marketAddress, selectedOutcome, 0, sharesWad, 8);
-          setEstimatedShares(shares);
+          const filledShares = Number(ethers.formatEther(preview.filledSharesWad ?? preview[1]));
+          setEstimatedShares(filledShares || shares);
           setPreviewCost(preview.costWei ?? preview[4]);
-          setExecutionSource(`${formatWad(preview.orderBookSharesWad ?? preview[2])} CLOB + ${formatWad(preview.lmsrSharesWad ?? preview[3])} LMSR`);
+          const lmsrShares = preview.lmsrSharesWad ?? preview[3];
+          setExecutionSource(lmsrShares > 0n
+            ? `${formatWad(preview.orderBookSharesWad ?? preview[2])} CLOB + ${formatWad(lmsrShares)} instant`
+            : `${formatWad(preview.orderBookSharesWad ?? preview[2])} CLOB`);
           setPreviewKey(inputKey);
         } catch {
           setEstimatedShares(null);
@@ -822,7 +801,10 @@ export default function MarketDetail() {
           const sharesWad = ethers.parseEther(shareAmount);
           const preview = await router.previewTrade(marketAddress, selectedOutcome, 1, sharesWad, 8);
           setPreviewCost(preview.proceedsWei ?? preview[5]);
-          setExecutionSource(`${formatWad(preview.orderBookSharesWad ?? preview[2])} CLOB + ${formatWad(preview.lmsrSharesWad ?? preview[3])} LMSR`);
+          const lmsrShares = preview.lmsrSharesWad ?? preview[3];
+          setExecutionSource(lmsrShares > 0n
+            ? `${formatWad(preview.orderBookSharesWad ?? preview[2])} CLOB + ${formatWad(lmsrShares)} instant`
+            : `${formatWad(preview.orderBookSharesWad ?? preview[2])} CLOB`);
           setEstimatedShares(null);
           setPreviewKey(inputKey);
         } catch {
@@ -837,20 +819,19 @@ export default function MarketDetail() {
   }, [marketAddress, shareAmount, selectedOutcome, tradeTab, executionMode, limitPrice, readProvider, detail]);
 
   const handleBuy = async () => {
-    if (!signer || !marketAddress || estimatedShares === null || !shareAmount) return;
+    if (!signer || !marketAddress || estimatedShares === null || !shareAmount || !previewCost) return;
     setTxPending(true); setTxMessage(null);
     const outcomeName = detail?.outcomeLabels[selectedOutcome] || `Outcome ${selectedOutcome}`;
     try {
       const router = new ethers.Contract(MARKET_ROUTER_ADDRESS, MARKET_ROUTER_ABI, signer);
-      const sharesWad = ethers.parseEther(estimatedShares.toFixed(18));
-      const usdcInput = ethers.parseEther(shareAmount);
-      const maxCost = applyBuySlippage(usdcInput, slippage);
+      const sharesWad = ethers.parseEther(shareAmount);
+      const maxCost = applyBuySlippage(previewCost, slippage);
       const deadline = Math.floor(Date.now() / 1000) + 300;
       const tx = await router.buy(marketAddress, selectedOutcome, sharesWad, sharesWad, maxCost, 8, deadline, { value: maxCost });
-      showToast({ type: 'pending', title: `Buying ${outcomeName}...`, message: `${shareAmount} USDC submitted`, txHash: tx.hash });
+      showToast({ type: 'pending', title: `Buying ${outcomeName}...`, message: `${shareAmount} shares submitted`, txHash: tx.hash });
       setTxMessage({ type: 'success', text: 'Transaction submitted. Waiting for confirmation...' });
       await tx.wait();
-      showToast({ type: 'success', title: `Bought ${outcomeName}`, message: `${shareAmount} USDC for ${estimatedShares.toFixed(2)} shares`, txHash: tx.hash });
+      showToast({ type: 'success', title: `Bought ${outcomeName}`, message: `${shareAmount} shares for ~${formatUSDC(previewCost)} USDC`, txHash: tx.hash });
       setTxMessage({ type: 'success', text: 'Shares purchased successfully!' });
       setShareAmount(''); setEstimatedShares(null);
       await new Promise(r => setTimeout(r, 1500));
@@ -1045,6 +1026,7 @@ export default function MarketDetail() {
   const selectedOutcomeLabel = detail.outcomeLabels[selectedOutcome] ?? `Outcome ${selectedOutcome + 1}`;
   const selectedOutcomePrice = probToPercent(detail.impliedProbabilitiesWad[selectedOutcome] ?? 0n) / 100;
   const selectedOwnedShares = userInfo?.shares[selectedOutcome] ?? 0n;
+  const selectedLimitPriceValue = limitPrice ? Number(limitPrice) : null;
   const liveConfigured = liveData && liveData.configured ? liveData : null;
 
   return (
@@ -1780,7 +1762,7 @@ export default function MarketDetail() {
               <div className="card p-5 border-white/[0.12] bg-gradient-to-b from-white/[0.025] to-transparent shadow-[0_16px_46px_rgba(0,0,0,0.45)]">
                 <div className="mb-4">
                   <h3 className="section-header mb-1">Trade</h3>
-                  <p className="text-2xs text-white/50">Choose instant best execution or place a CLOB limit order.</p>
+                  <p className="text-2xs text-white/50">Use instant execution or place a manual limit order.</p>
                 </div>
 
                 <div className="grid grid-cols-2 gap-2 mb-3">
@@ -1792,7 +1774,7 @@ export default function MarketDetail() {
                         : 'bg-dark-900/40 text-dark-400 border-white/[0.08] hover:text-white'
                     }`}
                   >
-                    Instant Route
+                    Instant
                   </button>
                   <button
                     onClick={() => { setExecutionMode('limit'); setShareAmount(''); setPreviewCost(null); setEstimatedShares(null); }}
@@ -1808,12 +1790,14 @@ export default function MarketDetail() {
 
                 <div className="mb-5 p-3 rounded-xl border border-white/[0.08] bg-dark-900/35">
                   <p className="text-2xs uppercase tracking-[0.12em] text-white/45 font-semibold mb-1">
-                    {executionMode === 'instant' ? 'CLOB + LMSR router' : 'CLOB maker order'}
+                    {executionMode === 'instant' ? 'Best available liquidity' : 'Manual limit order'}
                   </p>
                   <p className="text-xs text-white/60">
                     {executionMode === 'instant'
-                      ? 'The router fills better CLOB liquidity first and automatically falls back to LMSR.'
-                      : 'Your bid escrows USDC. Your ask escrows shares until filled, cancelled, or expired.'}
+                      ? detail.mode === 1
+                        ? 'Fills the order book first, then uses instant liquidity only if needed.'
+                        : 'Fills immediately against available order book liquidity.'
+                      : 'Matches immediately when possible. Any remaining size rests in the book.'}
                   </p>
                 </div>
 
@@ -1899,14 +1883,13 @@ export default function MarketDetail() {
                   </div>
                 </div>
 
-                {executionMode === 'limit' && (
+                {(
                   <div className="mb-4 rounded-2xl border border-white/[0.08] bg-[#060b11]/80 overflow-hidden">
                     <div className="flex items-center justify-between px-3 py-2 border-b border-white/[0.06]">
                       <div>
                         <p className="text-2xs uppercase tracking-[0.12em] text-white/45 font-semibold">CLOB Depth</p>
                         <p className="text-xs text-white/65">FIFO price levels for {selectedOutcomeLabel}</p>
                       </div>
-                      <span className="text-2xs text-cyan-300 px-2 py-1 rounded-md bg-cyan-500/10 border border-cyan-500/20">CEX mode</span>
                     </div>
                     <div className="grid grid-cols-3 px-3 py-2 text-2xs uppercase tracking-[0.12em] text-dark-500 border-b border-white/[0.06]">
                       <span>Price</span>
@@ -1918,16 +1901,50 @@ export default function MarketDetail() {
                         <p className="px-3 py-5 text-xs text-dark-500 text-center">Loading order book...</p>
                       ) : (
                         <>
-                          <DepthRows levels={[...orderBookAsks].reverse()} side="ask" />
+                          <DepthRows
+                            levels={[...orderBookAsks].reverse()}
+                            side="ask"
+                            selectedPrice={selectedLimitPriceValue}
+                            onSelectPrice={(price) => {
+                              setLimitPrice(price.toFixed(2));
+                              setExecutionMode('limit');
+                            }}
+                          />
                           <div className="px-3 py-2 border-y border-white/[0.06] bg-dark-900/60 flex items-center justify-between">
                             <span className="text-2xs uppercase tracking-[0.12em] text-dark-500">Spread</span>
-                            <span className="text-xs font-mono text-white">
-                              {orderBookBids[0] && orderBookAsks[0]
-                                ? `${(Number(ethers.formatEther(orderBookAsks[0].price - orderBookBids[0].price))).toFixed(4)} USDC`
-                                : 'No two-sided book'}
-                            </span>
+                            {orderBookBids[0] && orderBookAsks[0] ? (
+                              <div className="flex items-center gap-2">
+                                <button
+                                  type="button"
+                                  onClick={() => setLimitPrice(Number(ethers.formatEther(orderBookBids[0].price)).toFixed(2))}
+                                  className="rounded-md border border-emerald-500/25 bg-emerald-500/10 px-2 py-1 text-xs font-mono text-emerald-300 transition-colors hover:bg-emerald-500/15"
+                                >
+                                  Bid {Number(ethers.formatEther(orderBookBids[0].price)).toFixed(2)}
+                                </button>
+                                <span className="text-xs font-mono text-white/70">
+                                  {(Number(ethers.formatEther(orderBookAsks[0].price - orderBookBids[0].price))).toFixed(4)} USDC
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() => setLimitPrice(Number(ethers.formatEther(orderBookAsks[0].price)).toFixed(2))}
+                                  className="rounded-md border border-red-500/25 bg-red-500/10 px-2 py-1 text-xs font-mono text-red-300 transition-colors hover:bg-red-500/15"
+                                >
+                                  Ask {Number(ethers.formatEther(orderBookAsks[0].price)).toFixed(2)}
+                                </button>
+                              </div>
+                            ) : (
+                              <span className="text-xs font-mono text-white">No two-sided book</span>
+                            )}
                           </div>
-                          <DepthRows levels={orderBookBids} side="bid" />
+                          <DepthRows
+                            levels={orderBookBids}
+                            side="bid"
+                            selectedPrice={selectedLimitPriceValue}
+                            onSelectPrice={(price) => {
+                              setLimitPrice(price.toFixed(2));
+                              setExecutionMode('limit');
+                            }}
+                          />
                           {orderBookBids.length === 0 && orderBookAsks.length === 0 && (
                             <p className="px-3 py-5 text-xs text-dark-500 text-center">
                               No CLOB liquidity yet. Your order can become the first visible bid/ask.
@@ -1939,13 +1956,15 @@ export default function MarketDetail() {
                   </div>
                 )}
 
+                <RecentTrades trades={recentTrades} outcomeLabels={detail.outcomeLabels} />
+
                 {/* Amount input */}
                 <div className="flex items-center justify-between mb-1.5">
                   <label className="text-2xs font-semibold text-dark-500 uppercase tracking-wider flex items-center gap-1.5">
                     {executionMode === 'limit'
                       ? 'Shares'
                       : tradeTab === 'buy'
-                        ? <><UsdcIcon size={12} />Amount (USDC)</>
+                        ? 'Shares to Buy'
                         : 'Shares to Sell'}
                   </label>
                   {tradeTab === 'buy' && executionMode === 'instant' && userBalance !== null && (
@@ -1978,20 +1997,6 @@ export default function MarketDetail() {
                     className="input-field text-sm pr-16 font-medium"
                   />
                   <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1.5">
-                    {tradeTab === 'buy' && executionMode === 'instant' && userBalance !== null && userBalance > 0n && (
-                      <button
-                        onClick={() => {
-                          const gasBufferWei = ethers.parseEther('0.01');
-                          const maxSpendable = userBalance > gasBufferWei ? userBalance - gasBufferWei : 0n;
-                          const formatted = ethers.formatEther(maxSpendable);
-                          const truncated = formatted.includes('.') ? formatted.slice(0, formatted.indexOf('.') + 3) : formatted;
-                          setShareAmount(truncated);
-                        }}
-                        className="px-2 py-0.5 rounded text-2xs font-semibold bg-primary-500/15 text-primary-400 hover:bg-primary-500/25 transition-all"
-                      >
-                        Max
-                      </button>
-                    )}
                     {tradeTab === 'sell' && userInfo && (userInfo.shares[selectedOutcome] || 0n) > 0n && (
                       <button
                         onClick={() => {
@@ -2006,8 +2011,7 @@ export default function MarketDetail() {
                       </button>
                     )}
                     <span className="text-2xs text-dark-500 font-medium flex items-center gap-1">
-                      {tradeTab === 'buy' && executionMode === 'instant' && <UsdcIcon size={12} />}
-                      {executionMode === 'limit' ? 'shares' : tradeTab === 'buy' ? 'USDC' : 'shares'}
+                    {executionMode === 'limit' ? 'shares' : 'shares'}
                     </span>
                   </div>
                 </div>
@@ -2087,7 +2091,7 @@ export default function MarketDetail() {
                     <div className="divider" />
                     <PreviewRow
                       label={`Max Cost (${slippage}% slip.)`}
-                      value={`${formatUSDC(applyBuySlippage(ethers.parseEther(shareAmount), slippage))} USDC`}
+                      value={`${formatUSDC(previewCost !== null ? applyBuySlippage(previewCost, slippage) : 0n)} USDC`}
                       muted
                     />
                   </div>
@@ -2124,7 +2128,7 @@ export default function MarketDetail() {
                         Processing...
                       </span>
                     ) : tradeTab === 'buy' ? (
-                      `Buy ${detail.outcomeLabels[selectedOutcome]} for ${shareAmount || '0'} USDC`
+                      `Buy ${shareAmount || '0'} ${detail.outcomeLabels[selectedOutcome]} Shares`
                     ) : (
                       `Sell ${detail.outcomeLabels[selectedOutcome]} Shares`
                     )}
@@ -2499,7 +2503,17 @@ function PreviewRow({ label, value, accent, muted }: { label: string; value: str
   );
 }
 
-function DepthRows({ levels, side }: { levels: DepthLevel[]; side: 'bid' | 'ask' }) {
+function DepthRows({
+  levels,
+  side,
+  selectedPrice,
+  onSelectPrice,
+}: {
+  levels: DepthLevel[];
+  side: 'bid' | 'ask';
+  selectedPrice: number | null;
+  onSelectPrice: (price: number) => void;
+}) {
   if (levels.length === 0) return null;
   const color = side === 'bid' ? 'text-emerald-300' : 'text-red-300';
   const bg = side === 'bid' ? 'bg-emerald-500/[0.04]' : 'bg-red-500/[0.04]';
@@ -2509,68 +2523,56 @@ function DepthRows({ levels, side }: { levels: DepthLevel[]; side: 'bid' | 'ask'
         const price = Number(ethers.formatEther(level.price));
         const shares = Number(ethers.formatEther(level.shares));
         const total = price * shares;
+        const isSelected = selectedPrice !== null && Math.abs(selectedPrice - price) < 0.000001;
         return (
-          <div key={`${side}-${level.price.toString()}-${index}`} className={`grid grid-cols-3 px-3 py-1.5 text-xs font-mono ${bg}`}>
+          <button
+            key={`${side}-${level.price.toString()}-${index}`}
+            type="button"
+            onClick={() => onSelectPrice(price)}
+            className={`grid w-full grid-cols-3 px-3 py-1.5 text-xs font-mono transition-colors hover:bg-white/[0.04] ${bg} ${
+              isSelected ? 'ring-1 ring-inset ring-cyan-400/45 bg-cyan-500/[0.08]' : ''
+            }`}
+          >
             <span className={color}>{price.toFixed(2)}</span>
             <span className="text-right text-white/75">{shares.toFixed(3)}</span>
             <span className="text-right text-white/45">{total.toFixed(3)}</span>
-          </div>
+          </button>
         );
       })}
     </div>
   );
 }
 
-/* ─── LMSR Math ─── */
-
-function computeProbabilities(sharesWad: bigint[], bWad: bigint): number[] {
-  const b = Number(bWad) / 1e18;
-  if (b === 0) return sharesWad.map(() => 1 / sharesWad.length);
-  const exps = sharesWad.map(q => {
-    const qNum = Number(q) / 1e18;
-    return Math.exp(qNum / b);
-  });
-  const sumExp = exps.reduce((a, b) => a + b, 0);
-  if (sumExp === 0) return sharesWad.map(() => 1 / sharesWad.length);
-  return exps.map(e => e / sumExp);
-}
-
-function computeLMSRCostValue(sharesWad: bigint[], bWad: bigint): number {
-  const b = Number(bWad) / 1e18;
-  if (b === 0) return 0;
-  const qNums = sharesWad.map(q => Number(q) / 1e18);
-  const scaled = qNums.map(q => q / b);
-  const maxScaled = Math.max(...scaled);
-  const sumExp = scaled.reduce((acc, s) => acc + Math.exp(s - maxScaled), 0);
-  return b * (maxScaled + Math.log(sumExp));
-}
-
-function computeLMSRTradeCost(
-  sharesWad: bigint[], bWad: bigint, outcomeIdx: number, deltaShares: number
-): number {
-  const costBefore = computeLMSRCostValue(sharesWad, bWad);
-  const deltaWad = BigInt(Math.round(deltaShares * 1e18));
-  const sharesAfter = sharesWad.map((q, i) => i === outcomeIdx ? q + deltaWad : q);
-  const costAfter = computeLMSRCostValue(sharesAfter, bWad);
-  return costAfter - costBefore;
-}
-
-function findSharesForCost(
-  sharesWad: bigint[], bWad: bigint, outcomeIdx: number,
-  budgetUSDC: number, safetyMarginPct: number = 0.5
-): number | null {
-  if (budgetUSDC <= 0) return null;
-  let lo = 0;
-  let hi = budgetUSDC * 100;
-  const epsilon = 1e-6;
-  const minCost = computeLMSRTradeCost(sharesWad, bWad, outcomeIdx, epsilon);
-  if (minCost > budgetUSDC) return null;
-  for (let iter = 0; iter < 100; iter++) {
-    const mid = (lo + hi) / 2;
-    const cost = computeLMSRTradeCost(sharesWad, bWad, outcomeIdx, mid);
-    if (Math.abs(cost - budgetUSDC) < epsilon * budgetUSDC) { lo = mid; break; }
-    if (cost < budgetUSDC) { lo = mid; } else { hi = mid; }
-  }
-  const result = lo * (1 - safetyMarginPct / 100);
-  return result > epsilon ? result : null;
+function RecentTrades({ trades, outcomeLabels }: { trades: TradeEvent[]; outcomeLabels: string[] }) {
+  return (
+    <div className="mb-4 rounded-2xl border border-white/[0.08] bg-dark-900/35 overflow-hidden">
+      <div className="flex items-center justify-between px-3 py-2 border-b border-white/[0.06]">
+        <p className="text-2xs uppercase tracking-[0.12em] text-white/45 font-semibold">Recent Trades</p>
+        <span className="text-2xs text-dark-500">Executed only</span>
+      </div>
+      <div className="grid grid-cols-4 px-3 py-2 text-2xs uppercase tracking-[0.12em] text-dark-500 border-b border-white/[0.06]">
+        <span>Side</span>
+        <span>Outcome</span>
+        <span className="text-right">Price</span>
+        <span className="text-right">Size</span>
+      </div>
+      <div className="max-h-36 overflow-hidden">
+        {trades.length === 0 ? (
+          <p className="px-3 py-4 text-xs text-dark-500 text-center">No executed trades yet.</p>
+        ) : (
+          trades.map((trade) => {
+            const sideClass = trade.type === 'buy' ? 'text-emerald-300' : 'text-red-300';
+            return (
+              <div key={`${trade.txHash}-${trade.logIndex}`} className="grid grid-cols-4 px-3 py-1.5 text-xs font-mono animate-fade-in">
+                <span className={sideClass}>{trade.type.toUpperCase()}</span>
+                <span className="truncate text-white/70">{outcomeLabels[trade.outcomeIndex] ?? trade.outcomeIndex}</span>
+                <span className="text-right text-white">{Number(ethers.formatEther(trade.priceWad)).toFixed(2)}</span>
+                <span className="text-right text-white/50">{Number(ethers.formatEther(trade.sharesWad)).toFixed(3)}</span>
+              </div>
+            );
+          })
+        )}
+      </div>
+    </div>
+  );
 }

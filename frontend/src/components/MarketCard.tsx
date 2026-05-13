@@ -2,7 +2,7 @@ import { Link } from 'react-router-dom';
 import ImageWithFallback from './ImageWithFallback';
 import Countdown from './Countdown';
 import UsdcIcon from './UsdcIcon';
-import { formatCompactUSDC, makeMarketSlug, probToPercent, getStabilityLevel } from '../utils/format';
+import { formatCompactUSDC, makeMarketSlug, probToPercent } from '../utils/format';
 import { STAGE, STAGE_LABELS, STAGE_COLORS } from '../config/network';
 import { EffectiveStatus } from '../types/live';
 
@@ -19,6 +19,7 @@ export interface MarketSummaryData {
   marketDeadline: number;
   totalVolumeWei: bigint;
   participants: number;
+  mode: number;
   bWad: bigint;
 }
 
@@ -61,7 +62,6 @@ export default function MarketCard({ data, effectiveStatus }: Props) {
   const sparklinePath = sparklinePoints.length > 0 ? pointsToPath(sparklinePoints) : '';
   const sparklineAreaPath = sparklinePath ? `${sparklinePath} L 100 100 L 0 100 Z` : '';
   const lastPoint = sparklinePoints.length > 0 ? sparklinePoints[sparklinePoints.length - 1] : null;
-  const stability = getStabilityLevel(data.bWad);
 
   return (
     <Link to={`/market/${makeMarketSlug(data.marketId, data.title)}`} className="block group">
@@ -87,8 +87,8 @@ export default function MarketCard({ data, effectiveStatus }: Props) {
             <span className="badge bg-[var(--bg-card)]/80 text-white/90 border-[var(--bg-border)] backdrop-blur-sm text-2xs">
               {data.category}
             </span>
-            <span className={`badge mt-1.5 block ${stability.bgColor} ${stability.color} border backdrop-blur-sm text-2xs`}>
-              {stability.label}
+            <span className="badge mt-1.5 block bg-cyan-500/12 text-cyan-300 border-cyan-500/25 backdrop-blur-sm text-2xs">
+              {data.mode === 1 ? 'Instant' : 'CLOB'}
             </span>
           </div>
 

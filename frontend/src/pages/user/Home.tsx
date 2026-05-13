@@ -10,7 +10,7 @@ import EmptyState from '../../components/EmptyState';
 import UsdcIcon from '../../components/UsdcIcon';
 import Countdown from '../../components/Countdown';
 import ImageWithFallback from '../../components/ImageWithFallback';
-import { formatCompactUSDC, STABILITY_FILTERS, parseDescription, makeMarketSlug, titleCase } from '../../utils/format';
+import { formatCompactUSDC, parseDescription, makeMarketSlug, titleCase } from '../../utils/format';
 import { EffectiveStatus, LiveMarketDataResponse } from '../../types/live';
 
 const DEFAULT_CATEGORIES = ['All', 'Crypto', 'Sports', 'Politics', 'Entertainment', 'Science', 'Other'];
@@ -61,7 +61,6 @@ export default function Home() {
   const [descriptionByMarket, setDescriptionByMarket] = useState<Record<string, string>>({});
   const fetchedMarketsRef = useRef<Set<string>>(new Set());
   const [stageFilter, setStageFilter] = useState(0);
-  const [stabilityFilter, setStabilityFilter] = useState('all');
   const [sortBy, setSortBy] = useState('trending');
   const [searchQuery, setSearchQuery] = useState('');
   const [page, setPage] = useState(0);
@@ -96,6 +95,7 @@ export default function Home() {
         marketDeadline: Number(s.marketDeadline),
         totalVolumeWei: s.totalVolumeWei as bigint,
         participants: Number(s.participants),
+        mode: Number(s.mode ?? 1),
         bWad: s.bWad as bigint,
       }));
 
@@ -116,13 +116,6 @@ export default function Home() {
       if (categoryFilter !== 'All' && m.category.toLowerCase() !== categoryFilter.toLowerCase()) return false;
       if (stageFilter !== -1 && m.stage !== stageFilter) return false;
       if (searchQuery && !m.title.toLowerCase().includes(searchQuery.toLowerCase())) return false;
-      if (stabilityFilter !== 'all') {
-        const sf = STABILITY_FILTERS.find(f => f.value === stabilityFilter);
-        if (sf && sf.min !== undefined && sf.max !== undefined) {
-          const bValue = Number(ethers.formatEther(m.bWad));
-          if (bValue < sf.min || bValue > sf.max) return false;
-        }
-      }
       return true;
     })
     .sort((a, b) => {
@@ -403,14 +396,13 @@ export default function Home() {
                 <p className="text-xs text-white/50 font-medium">
                   {filtered.length} market{filtered.length !== 1 ? 's' : ''} found
                 </p>
-                {(searchQuery || categoryFilter !== 'All' || stageFilter !== 0 || stabilityFilter !== 'all' || subcategoryFilter !== 'All') && (
+                {(searchQuery || categoryFilter !== 'All' || stageFilter !== 0 || subcategoryFilter !== 'All') && (
                   <button
                     onClick={() => {
                       setSearchQuery('');
                       setCategoryFilter('All');
                       setSubcategoryFilter('All');
                       setStageFilter(0);
-                      setStabilityFilter('all');
                       setPage(0);
                     }}
                     className="text-xs text-[#00d46a] hover:text-[#00d46a] font-medium transition-colors"
@@ -430,7 +422,7 @@ export default function Home() {
             ) : paginated.length === 0 ? (
               <EmptyState
                 title="No markets found"
-                description={searchQuery || categoryFilter !== 'All' || stageFilter !== 0 || stabilityFilter !== 'all'
+                description={searchQuery || categoryFilter !== 'All' || stageFilter !== 0
                   ? 'Try adjusting your filters or search query.'
                   : 'No prediction markets have been created yet. Check back soon!'}
               />
@@ -541,25 +533,6 @@ export default function Home() {
               </div>
 
               <div className="space-y-4 max-h-[70vh] overflow-y-auto pr-1">
-                <div>
-                  <p className="text-2xs font-medium text-white/40 uppercase tracking-wider mb-2">Stability</p>
-                  <div className="grid grid-cols-2 gap-2">
-                    {STABILITY_FILTERS.map(sf => (
-                      <button
-                        key={sf.value}
-                        onClick={() => { setStabilityFilter(sf.value); setPage(0); }}
-                        className={`px-3 py-2.5 rounded-lg text-xs border text-left transition-all duration-150 min-h-[44px] ${
-                          stabilityFilter === sf.value
-                            ? 'bg-[#00d46a] border-[#00d46a] text-white font-semibold'
-                            : 'bg-[var(--bg-base)] border-[var(--bg-border)] text-white/60 hover:text-white hover:border-white/20'
-                        }`}
-                      >
-                        {sf.label}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
                 {categoryFilter !== 'All' && subcategoryCounts.length > 0 && (
                   <div>
                     <p className="text-2xs font-medium text-white/40 uppercase tracking-wider mb-2">Subcategory</p>
@@ -586,7 +559,6 @@ export default function Home() {
               <div className="mt-5 flex items-center justify-between gap-3">
                 <button
                   onClick={() => {
-                    setStabilityFilter('all');
                     setSubcategoryFilter('All');
                     setPage(0);
                   }}

@@ -1,16 +1,20 @@
 import { ethers } from 'ethers';
-import { NETWORK } from '../config/network';
+import { NETWORK, ORDER_BOOK_ADDRESS } from '../config/network';
 
 /* ─── Types ─── */
 
 export interface TradeEvent {
   type: 'buy' | 'sell';
+  source: 'CLOB' | 'LMSR';
   trader: string;
   outcomeIndex: number;
   sharesWad: bigint;
   costOrProceedsWei: bigint;
+  feeWei: bigint;
+  priceWad: bigint;
   timestamp: number;
   blockNumber: number;
+  logIndex: number;
   txHash: string;
 }
 
@@ -31,6 +35,7 @@ interface BlockscoutLogEntry {
 
 const SHARES_BOUGHT_TOPIC = ethers.id('SharesBought(address,uint256,uint256,uint256)');
 const SHARES_SOLD_TOPIC = ethers.id('SharesSold(address,uint256,uint256,uint256)');
+const ORDERBOOK_TRADE_TOPIC = ethers.id('TradeExecuted(address,address,uint256,uint8,uint256,uint256,uint256,bool)');
 
 /* ─── Fetch trade events from BlockScout ─── */
 
@@ -42,16 +47,20 @@ export async function fetchTradeEvents(
   const fromBlock = options?.startBlock ?? 0;
 
   // Fetch buy and sell logs in parallel using topic0 filter
-  const [buyRes, sellRes] = await Promise.all([
+  const marketTopic = `0x${marketAddress.toLowerCase().replace(/^0x/, '').padStart(64, '0')}`;
+  const [buyRes, sellRes, clobRes] = await Promise.all([
     fetch(
       `${baseUrl}?module=logs&action=getLogs&address=${marketAddress}&fromBlock=${fromBlock}&toBlock=latest&topic0=${SHARES_BOUGHT_TOPIC}`
     ),
     fetch(
       `${baseUrl}?module=logs&action=getLogs&address=${marketAddress}&fromBlock=${fromBlock}&toBlock=latest&topic0=${SHARES_SOLD_TOPIC}`
     ),
+    fetch(
+      `${baseUrl}?module=logs&action=getLogs&address=${ORDER_BOOK_ADDRESS}&fromBlock=${fromBlock}&toBlock=latest&topic0=${ORDERBOOK_TRADE_TOPIC}&topic2=${marketTopic}`
+    ),
   ]);
 
-  const [buyData, sellData] = await Promise.all([buyRes.json(), sellRes.json()]);
+  const [buyData, sellData, clobData] = await Promise.all([buyRes.json(), sellRes.json(), clobRes.json()]);
 
   const events: TradeEvent[] = [];
 
@@ -71,8 +80,15 @@ export async function fetchTradeEvents(
     }
   }
 
+  if (clobData.status === '1' && Array.isArray(clobData.result)) {
+    for (const log of clobData.result as BlockscoutLogEntry[]) {
+      const parsed = parseOrderBookTradeLog(log);
+      if (parsed) events.push(parsed);
+    }
+  }
+
   // Sort by block number, then log index for deterministic ordering
-  events.sort((a, b) => a.blockNumber - b.blockNumber);
+  events.sort((a, b) => a.blockNumber === b.blockNumber ? a.logIndex - b.logIndex : a.blockNumber - b.blockNumber);
 
   return events;
 }
@@ -81,7 +97,7 @@ export async function fetchTradeEvents(
 
 /**
  * Compute total trading volume (buys + sells) from trade events.
- * This is more accurate than the on-chain totalVolumeWei which only tracks buy-side LMSR cost.
+ * This is more accurate than the on-chain totalVolumeWei because it includes CLOB and LMSR fills.
  */
 export function computeVolumeFromEvents(events: TradeEvent[]): bigint {
   let total = 0n;
@@ -149,12 +165,54 @@ function parseTradeLog(log: BlockscoutLogEntry, type: 'buy' | 'sell'): TradeEven
 
     return {
       type,
+      source: 'LMSR',
       trader,
       outcomeIndex,
       sharesWad,
       costOrProceedsWei,
+      feeWei: 0n,
+      priceWad: sharesWad > 0n ? (costOrProceedsWei * 1_000_000_000_000_000_000n) / sharesWad : 0n,
       timestamp,
       blockNumber,
+      logIndex: parseInt(log.logIndex, 16),
+      txHash: log.transactionHash,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function parseOrderBookTradeLog(log: BlockscoutLogEntry): TradeEvent | null {
+  try {
+    const traderTopic = log.topics[1];
+    const outcomeTopic = log.topics[3];
+    if (!traderTopic || !outcomeTopic) return null;
+
+    const trader = '0x' + traderTopic.slice(26);
+    const outcomeIndex = parseInt(outcomeTopic, 16);
+    const decoded = ethers.AbiCoder.defaultAbiCoder().decode(
+      ['uint8', 'uint256', 'uint256', 'uint256', 'bool'],
+      log.data
+    );
+    const side = Number(decoded[0]);
+    const sharesWad = decoded[1] as bigint;
+    const notionalWei = decoded[2] as bigint;
+    const feeWei = decoded[3] as bigint;
+    const timestamp = parseInt(log.timeStamp, 16);
+    const blockNumber = parseInt(log.blockNumber, 16);
+
+    return {
+      type: side === 0 ? 'buy' : 'sell',
+      source: 'CLOB',
+      trader,
+      outcomeIndex,
+      sharesWad,
+      costOrProceedsWei: notionalWei,
+      feeWei,
+      priceWad: sharesWad > 0n ? (notionalWei * 1_000_000_000_000_000_000n) / sharesWad : 0n,
+      timestamp,
+      blockNumber,
+      logIndex: parseInt(log.logIndex, 16),
       txHash: log.transactionHash,
     };
   } catch {

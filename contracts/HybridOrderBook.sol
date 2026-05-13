@@ -45,6 +45,8 @@ contract HybridOrderBook is Ownable, ReentrancyGuard {
     uint256 public minOrderSharesWad;
     uint256 public maxPriceDeviationBps;
     uint256 public makerFeeBps;
+    uint256 public takerFeeBps;
+    uint256 public maxMatchesPerOrder = 32;
     bool public paused;
 
     mapping(address => bool) public allowedMarket;
@@ -57,6 +59,8 @@ contract HybridOrderBook is Ownable, ReentrancyGuard {
     event MarketAllowed(address indexed market, bool allowed);
     event PausedUpdated(bool paused);
     event MakerFeeUpdated(uint256 makerFeeBps);
+    event TakerFeeUpdated(uint256 takerFeeBps);
+    event MaxMatchesPerOrderUpdated(uint256 maxMatchesPerOrder);
     event OrderConstraintsUpdated(uint256 tickSizeWad, uint256 minOrderSharesWad, uint256 maxPriceDeviationBps);
     event OrderPlaced(
         uint256 indexed orderId,
@@ -70,6 +74,28 @@ contract HybridOrderBook is Ownable, ReentrancyGuard {
     );
     event OrderCancelled(uint256 indexed orderId, address indexed owner, uint256 remainingSharesWad, uint256 refundWei);
     event OrderPruned(uint256 indexed orderId, address indexed market, uint256 indexed outcome, Side side, uint256 priceWad);
+    event OrderMatched(
+        uint256 indexed orderId,
+        address indexed market,
+        address indexed taker,
+        uint256 outcome,
+        Side restingSide,
+        uint256 priceWad,
+        uint256 sharesWad,
+        uint256 notionalWei,
+        uint256 feeWei
+    );
+    event OrderPartiallyFilled(uint256 indexed orderId, uint256 remainingSharesWad);
+    event TradeExecuted(
+        address indexed trader,
+        address indexed market,
+        uint256 indexed outcome,
+        Side side,
+        uint256 sharesWad,
+        uint256 notionalWei,
+        uint256 feeWei,
+        bool isLimitOrder
+    );
     event OrderFilled(
         uint256 indexed orderId,
         address indexed market,
@@ -138,6 +164,18 @@ contract HybridOrderBook is Ownable, ReentrancyGuard {
         emit MakerFeeUpdated(_makerFeeBps);
     }
 
+    function setTakerFeeBps(uint256 _takerFeeBps) external onlyOwner {
+        require(_takerFeeBps <= MAX_FEE_BPS, "OB: taker fee too high");
+        takerFeeBps = _takerFeeBps;
+        emit TakerFeeUpdated(_takerFeeBps);
+    }
+
+    function setMaxMatchesPerOrder(uint256 _maxMatchesPerOrder) external onlyOwner {
+        require(_maxMatchesPerOrder > 0 && _maxMatchesPerOrder <= 128, "OB: invalid matches");
+        maxMatchesPerOrder = _maxMatchesPerOrder;
+        emit MaxMatchesPerOrderUpdated(_maxMatchesPerOrder);
+    }
+
     function setOrderConstraints(
         uint256 _tickSizeWad,
         uint256 _minOrderSharesWad,
@@ -163,43 +201,59 @@ contract HybridOrderBook is Ownable, ReentrancyGuard {
         require(sharesWad >= minOrderSharesWad, "OB: order too small");
         require(expiry == 0 || expiry > block.timestamp, "OB: expired order");
         _assertValidPrice(priceWad);
-        _assertPriceNearLmsr(market, outcome, priceWad);
 
         Side side = Side(sideRaw);
-        uint256 escrowWei;
+        uint256 remainingSharesWad = sharesWad;
+        uint256 availableWei = msg.value;
+        uint256 matchedNotionalWei;
+        uint256 takerFeeWei;
+
         if (side == Side.Bid) {
-            uint256 notionalWei = _mulWad(sharesWad, priceWad);
-            uint256 makerFeeWei = _fee(notionalWei, makerFeeBps);
-            escrowWei = notionalWei + makerFeeWei;
-            require(msg.value >= escrowWei, "OB: insufficient escrow");
-            if (msg.value > escrowWei) _sendValue(payable(msg.sender), msg.value - escrowWei, "OB: refund failed");
+            uint256 maxNotionalWei = _mulWad(sharesWad, priceWad);
+            require(msg.value >= maxNotionalWei + _fee(maxNotionalWei, takerFeeBps), "OB: insufficient escrow");
+            (
+                remainingSharesWad,
+                availableWei,
+                matchedNotionalWei,
+                takerFeeWei
+            ) = _matchIncomingBid(market, outcome, msg.sender, priceWad, sharesWad, availableWei, maxMatchesPerOrder);
         } else {
             require(msg.value == 0, "OB: ask cannot include value");
             require(
                 IHybridMarket(market).moveShares(msg.sender, address(this), outcome, sharesWad),
                 "OB: share escrow failed"
             );
+            (
+                remainingSharesWad,
+                matchedNotionalWei,
+                takerFeeWei
+            ) = _matchIncomingAsk(market, outcome, msg.sender, priceWad, sharesWad, maxMatchesPerOrder);
         }
 
-        orderId = nextOrderId++;
-        orders[orderId] = Order({
-            id: orderId,
-            market: market,
-            outcome: outcome,
-            owner: msg.sender,
-            side: side,
-            priceWad: priceWad,
-            remainingSharesWad: sharesWad,
-            escrowWei: escrowWei,
-            expiry: expiry,
-            active: true
-        });
+        if (remainingSharesWad > 0) {
+            uint256 escrowWei;
+            if (side == Side.Bid) {
+                escrowWei = _mulWad(remainingSharesWad, priceWad);
+                require(availableWei >= escrowWei, "OB: insufficient resting escrow");
+                availableWei -= escrowWei;
+            }
 
-        OrderQueue storage queue = _queues[_queueKey(market, outcome, side, priceWad)];
-        queue.orderIds.push(orderId);
-        queue.totalSharesWad += sharesWad;
+            orderId = _storeOrder(market, outcome, msg.sender, side, priceWad, remainingSharesWad, escrowWei, expiry);
+        }
 
-        emit OrderPlaced(orderId, market, msg.sender, outcome, side, priceWad, sharesWad, expiry);
+        if (availableWei > 0) _sendValue(payable(msg.sender), availableWei, "OB: refund failed");
+        if (matchedNotionalWei > 0) {
+            emit TradeExecuted(
+                msg.sender,
+                market,
+                outcome,
+                side,
+                sharesWad - remainingSharesWad,
+                matchedNotionalWei,
+                takerFeeWei,
+                true
+            );
+        }
     }
 
     function cancelOrder(uint256 orderId) external nonReentrant {
@@ -225,6 +279,63 @@ contract HybridOrderBook is Ownable, ReentrancyGuard {
         }
 
         emit OrderCancelled(orderId, order.owner, remaining, refundWei);
+    }
+
+    function executeMarketOrder(
+        address market,
+        uint256 outcome,
+        uint8 sideRaw,
+        uint256 sharesWad,
+        uint256 limitPriceWad,
+        address trader,
+        uint256 maxMatches
+    )
+        external
+        payable
+        nonReentrant
+        onlyRouter
+        returns (uint256 sharesFilledWad, uint256 notionalWei, uint256 feeWei)
+    {
+        require(!paused, "OB: paused");
+        require(allowedMarket[market], "OB: market not allowed");
+        require(IHybridMarket(market).isTradingOpen(), "OB: trading closed");
+        require(outcome < IHybridMarket(market).outcomeCount(), "OB: invalid outcome");
+        require(sideRaw <= uint8(Side.Ask), "OB: invalid side");
+        require(sharesWad > 0, "OB: zero shares");
+        require(trader != address(0), "OB: zero trader");
+        _assertValidPrice(limitPriceWad);
+
+        uint256 matches = maxMatches == 0 || maxMatches > maxMatchesPerOrder ? maxMatchesPerOrder : maxMatches;
+        Side side = Side(sideRaw);
+
+        if (side == Side.Bid) {
+            uint256 remainingWei;
+            uint256 remainingSharesWad;
+            (remainingSharesWad, remainingWei, notionalWei, feeWei) =
+                _matchIncomingBid(market, outcome, trader, limitPriceWad, sharesWad, msg.value, matches);
+            sharesFilledWad = sharesWad - remainingSharesWad;
+            if (remainingWei > 0) _sendValue(payable(msg.sender), remainingWei, "OB: refund failed");
+        } else {
+            require(msg.value == 0, "OB: ask cannot include value");
+            require(
+                IHybridMarket(market).moveShares(trader, address(this), outcome, sharesWad),
+                "OB: share escrow failed"
+            );
+            uint256 remainingSharesWad;
+            (remainingSharesWad, notionalWei, feeWei) =
+                _matchIncomingAsk(market, outcome, trader, limitPriceWad, sharesWad, matches);
+            sharesFilledWad = sharesWad - remainingSharesWad;
+            if (remainingSharesWad > 0) {
+                require(
+                    IHybridMarket(market).moveShares(address(this), trader, outcome, remainingSharesWad),
+                    "OB: share return failed"
+                );
+            }
+        }
+
+        if (sharesFilledWad > 0) {
+            emit TradeExecuted(trader, market, outcome, side, sharesFilledWad, notionalWei, feeWei, false);
+        }
     }
 
     function fillBestAsk(address market, uint256 outcome, address buyer, uint256 maxSharesWad)
@@ -445,6 +556,272 @@ contract HybridOrderBook is Ownable, ReentrancyGuard {
         }
 
         emit OrderPruned(orderId, market, outcome, side, priceWad);
+    }
+
+    function _storeOrder(
+        address market,
+        uint256 outcome,
+        address owner_,
+        Side side,
+        uint256 priceWad,
+        uint256 sharesWad,
+        uint256 escrowWei,
+        uint256 expiry
+    ) internal returns (uint256 orderId) {
+        orderId = nextOrderId++;
+        orders[orderId] = Order({
+            id: orderId,
+            market: market,
+            outcome: outcome,
+            owner: owner_,
+            side: side,
+            priceWad: priceWad,
+            remainingSharesWad: sharesWad,
+            escrowWei: escrowWei,
+            expiry: expiry,
+            active: true
+        });
+
+        OrderQueue storage queue = _queues[_queueKey(market, outcome, side, priceWad)];
+        queue.orderIds.push(orderId);
+        queue.totalSharesWad += sharesWad;
+
+        emit OrderPlaced(orderId, market, owner_, outcome, side, priceWad, sharesWad, expiry);
+    }
+
+    function _matchIncomingBid(
+        address market,
+        uint256 outcome,
+        address buyer,
+        uint256 limitPriceWad,
+        uint256 sharesWad,
+        uint256 availableWei,
+        uint256 maxMatches
+    )
+        internal
+        returns (uint256 remainingSharesWad, uint256 remainingWei, uint256 matchedNotionalWei, uint256 takerFeeWei)
+    {
+        remainingSharesWad = sharesWad;
+        remainingWei = availableWei;
+
+        uint256 matches;
+        while (remainingSharesWad > 0 && matches < maxMatches) {
+            (
+                uint256 directOrderId,
+                uint256 directPrice,
+                uint256 directShares,
+                uint256 complementOrderId,
+                uint256 complementPrice,
+                uint256 complementShares
+            ) = _bestBidMatch(market, outcome, limitPriceWad);
+
+            if (directOrderId == 0 && complementOrderId == 0) break;
+
+            bool useComplement = directOrderId == 0
+                || (
+                    complementOrderId != 0
+                        && (
+                            complementPrice < directPrice
+                                || (complementPrice == directPrice && complementOrderId < directOrderId)
+                        )
+                );
+
+            if (useComplement) {
+                uint256 fillShares = _min(remainingSharesWad, complementShares);
+                (uint256 takerNotional, uint256 feeWei) =
+                    _fillComplementBid(complementOrderId, market, outcome, buyer, fillShares);
+                require(remainingWei >= takerNotional + feeWei, "OB: insufficient value");
+                remainingWei -= takerNotional + feeWei;
+                matchedNotionalWei += takerNotional;
+                takerFeeWei += feeWei;
+            } else {
+                uint256 fillShares = _min(remainingSharesWad, directShares);
+                (uint256 notionalWei, uint256 feeWei) =
+                    _fillAskWithBid(directOrderId, market, outcome, buyer, fillShares);
+                require(remainingWei >= notionalWei + feeWei, "OB: insufficient value");
+                remainingWei -= notionalWei + feeWei;
+                matchedNotionalWei += notionalWei;
+                takerFeeWei += feeWei;
+            }
+
+            remainingSharesWad -= _min(
+                useComplement ? complementShares : directShares,
+                remainingSharesWad
+            );
+            unchecked { matches++; }
+        }
+    }
+
+    function _matchIncomingAsk(
+        address market,
+        uint256 outcome,
+        address seller,
+        uint256 limitPriceWad,
+        uint256 sharesWad,
+        uint256 maxMatches
+    ) internal returns (uint256 remainingSharesWad, uint256 matchedNotionalWei, uint256 takerFeeWei) {
+        remainingSharesWad = sharesWad;
+
+        uint256 matches;
+        while (remainingSharesWad > 0 && matches < maxMatches) {
+            (uint256 bidPrice, uint256 bidShares, uint256 bidOrderId) = _findBestView(market, outcome, Side.Bid);
+            if (bidOrderId == 0 || bidPrice < limitPriceWad) break;
+
+            uint256 fillShares = _min(remainingSharesWad, bidShares);
+            (uint256 notionalWei, uint256 feeWei) =
+                _fillBidWithAsk(bidOrderId, market, outcome, seller, fillShares);
+            matchedNotionalWei += notionalWei;
+            takerFeeWei += feeWei;
+            remainingSharesWad -= fillShares;
+            unchecked { matches++; }
+        }
+    }
+
+    function _bestBidMatch(address market, uint256 outcome, uint256 limitPriceWad)
+        internal
+        view
+        returns (
+            uint256 directOrderId,
+            uint256 directPrice,
+            uint256 directShares,
+            uint256 complementOrderId,
+            uint256 complementEffectivePrice,
+            uint256 complementShares
+        )
+    {
+        (directPrice, directShares, directOrderId) = _findBestView(market, outcome, Side.Ask);
+        if (directOrderId != 0 && directPrice > limitPriceWad) {
+            directOrderId = 0;
+            directPrice = 0;
+            directShares = 0;
+        }
+
+        if (IHybridMarket(market).outcomeCount() == 2) {
+            uint256 complementOutcome = outcome == 0 ? 1 : 0;
+            uint256 complementBidPrice;
+            (complementBidPrice, complementShares, complementOrderId) =
+                _findBestView(market, complementOutcome, Side.Bid);
+            if (complementOrderId != 0) {
+                complementEffectivePrice = WAD - complementBidPrice;
+                if (complementEffectivePrice > limitPriceWad) {
+                    complementOrderId = 0;
+                    complementEffectivePrice = 0;
+                    complementShares = 0;
+                }
+            }
+        }
+    }
+
+    function _fillAskWithBid(
+        uint256 orderId,
+        address market,
+        uint256 outcome,
+        address buyer,
+        uint256 sharesWad
+    ) internal returns (uint256 notionalWei, uint256 feeWei) {
+        Order storage order = orders[orderId];
+        notionalWei = _mulWad(sharesWad, order.priceWad);
+        feeWei = _fee(notionalWei, takerFeeBps);
+        uint256 makerFeeWei = _fee(notionalWei, makerFeeBps);
+
+        _applyFill(order, sharesWad);
+        require(IHybridMarket(market).moveShares(address(this), buyer, outcome, sharesWad), "OB: share transfer failed");
+
+        uint256 makerProceeds = notionalWei - makerFeeWei;
+        if (makerProceeds > 0) _sendValue(payable(order.owner), makerProceeds, "OB: maker payment failed");
+        _sendFees(feeWei + makerFeeWei);
+
+        emit OrderMatched(orderId, market, buyer, outcome, Side.Ask, order.priceWad, sharesWad, notionalWei, feeWei);
+        emit OrderFilled(orderId, market, buyer, outcome, Side.Ask, sharesWad, notionalWei, makerFeeWei);
+        _emitPartialIfActive(order);
+    }
+
+    function _fillBidWithAsk(
+        uint256 orderId,
+        address market,
+        uint256 outcome,
+        address seller,
+        uint256 sharesWad
+    ) internal returns (uint256 notionalWei, uint256 feeWei) {
+        Order storage order = orders[orderId];
+        notionalWei = _mulWad(sharesWad, order.priceWad);
+        feeWei = _fee(notionalWei, takerFeeBps);
+        require(order.escrowWei >= notionalWei, "OB: bad escrow");
+        order.escrowWei -= notionalWei;
+
+        _applyFill(order, sharesWad);
+        require(IHybridMarket(market).moveShares(address(this), order.owner, outcome, sharesWad), "OB: share transfer failed");
+
+        uint256 proceedsWei = notionalWei - feeWei;
+        if (proceedsWei > 0) _sendValue(payable(seller), proceedsWei, "OB: proceeds failed");
+        _sendFees(feeWei);
+        _refundInactiveBidDust(order);
+
+        emit OrderMatched(orderId, market, seller, outcome, Side.Bid, order.priceWad, sharesWad, notionalWei, feeWei);
+        emit OrderFilled(orderId, market, seller, outcome, Side.Bid, sharesWad, notionalWei, 0);
+        _emitPartialIfActive(order);
+    }
+
+    function _fillComplementBid(
+        uint256 orderId,
+        address market,
+        uint256 takerOutcome,
+        address buyer,
+        uint256 sharesWad
+    ) internal returns (uint256 takerNotionalWei, uint256 feeWei) {
+        Order storage order = orders[orderId];
+        uint256 restingNotionalWei = _mulWad(sharesWad, order.priceWad);
+        takerNotionalWei = sharesWad - restingNotionalWei;
+        feeWei = _fee(takerNotionalWei, takerFeeBps);
+        require(order.escrowWei >= restingNotionalWei, "OB: bad escrow");
+        order.escrowWei -= restingNotionalWei;
+
+        _applyFill(order, sharesWad);
+        require(
+            IHybridMarket(market).mintCompleteSet{value: sharesWad}(
+                buyer,
+                takerOutcome,
+                order.owner,
+                order.outcome,
+                sharesWad
+            ),
+            "OB: complete set mint failed"
+        );
+
+        _sendFees(feeWei);
+        _refundInactiveBidDust(order);
+
+        emit OrderMatched(
+            orderId,
+            market,
+            buyer,
+            takerOutcome,
+            Side.Bid,
+            WAD - order.priceWad,
+            sharesWad,
+            takerNotionalWei,
+            feeWei
+        );
+        emit OrderFilled(orderId, market, buyer, takerOutcome, Side.Bid, sharesWad, takerNotionalWei, 0);
+        _emitPartialIfActive(order);
+    }
+
+    function _sendFees(uint256 amountWei) internal {
+        if (amountWei > 0) _sendValue(payable(feeRecipient), amountWei, "OB: fee failed");
+    }
+
+    function _refundInactiveBidDust(Order storage order) internal {
+        if (!order.active && order.side == Side.Bid && order.escrowWei > 0) {
+            uint256 dustRefund = order.escrowWei;
+            order.escrowWei = 0;
+            _sendValue(payable(order.owner), dustRefund, "OB: dust refund failed");
+        }
+    }
+
+    function _emitPartialIfActive(Order storage order) internal {
+        if (order.active && order.remainingSharesWad > 0) {
+            emit OrderPartiallyFilled(order.id, order.remainingSharesWad);
+        }
     }
 
     function _setConstraints(

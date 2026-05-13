@@ -15,6 +15,11 @@ contract PredictionMarketV2 is ReentrancyGuard {
         Expired
     }
 
+    enum MarketMode {
+        CLOB_ONLY,
+        HYBRID_CLOB_LMSR
+    }
+
     uint256 public constant PLATFORM_FEE_BPS = 75;
     uint256 public constant RESOLVER_REWARD_BPS = 25;
     uint256 public constant RESOLUTION_GRACE_PERIOD = 3 days;
@@ -31,6 +36,7 @@ contract PredictionMarketV2 is ReentrancyGuard {
     string[] public outcomeLabels;
     uint256 public outcomeCount;
 
+    MarketMode public marketMode;
     int256 public b;
     int256[] public totalSharesWad;
 
@@ -63,7 +69,9 @@ contract PredictionMarketV2 is ReentrancyGuard {
         address indexed owner,
         address indexed resolutionManager,
         uint256 outcomeCount,
+        MarketMode mode,
         int256 bWad,
+        uint256 initialLiquidityWei,
         uint256 marketDeadline,
         uint256 resolutionTime
     );
@@ -77,6 +85,14 @@ contract PredictionMarketV2 is ReentrancyGuard {
     event SharesBought(address indexed trader, uint256 indexed outcomeIndex, uint256 sharesWad, uint256 costWei);
     event SharesSold(address indexed trader, uint256 indexed outcomeIndex, uint256 sharesWad, uint256 proceedsWei);
     event SharesMoved(address indexed from, address indexed to, uint256 indexed outcomeIndex, uint256 sharesWad);
+    event CompleteSetMinted(
+        address indexed outcomeARecipient,
+        uint256 indexed outcomeA,
+        address indexed outcomeBRecipient,
+        uint256 outcomeB,
+        uint256 sharesWad,
+        uint256 collateralWei
+    );
     event MarketResolved(uint256 winningOutcome, string proofUri);
     event MarketCancelled(string reason, string proofUri);
     event MarketEdited(string newTitle, string newDescription, string newCategory);
@@ -115,12 +131,13 @@ contract PredictionMarketV2 is ReentrancyGuard {
     }
 
     function initialize(
-        address _owner,
+        address owner_,
         string memory _title,
         string memory _description,
         string memory _category,
         string memory _imageUri,
         string[] memory _outcomeLabels,
+        MarketMode _marketMode,
         int256 _bWad,
         uint256 _durationSeconds,
         string memory _resolutionSource,
@@ -132,24 +149,31 @@ contract PredictionMarketV2 is ReentrancyGuard {
     ) external payable {
         require(!_initialized, "PMV2: initialized");
         _initialized = true;
-        require(_owner != address(0), "PMV2: zero owner");
+        require(owner_ != address(0), "PMV2: zero owner");
         require(_resolutionManager != address(0), "PMV2: zero resolver");
-        require(_bWad > 0, "PMV2: b must be > 0");
         require(_outcomeLabels.length >= 2, "PMV2: need outcomes");
+        require(uint8(_marketMode) <= uint8(MarketMode.HYBRID_CLOB_LMSR), "PMV2: bad mode");
+        if (_marketMode == MarketMode.CLOB_ONLY) {
+            require(_outcomeLabels.length == 2, "PMV2: CLOB needs binary");
+            require(msg.value == 0, "PMV2: CLOB seed forbidden");
+            require(_bWad == 0, "PMV2: CLOB b must be 0");
+        } else {
+            require(_bWad > 0, "PMV2: b must be > 0");
+            uint256 requiredSeed = uint256(LMSRMath.initialLiquidity(_outcomeLabels.length, _bWad));
+            require(msg.value >= requiredSeed, "PMV2: insufficient seed");
+        }
         require(_durationSeconds >= 1 hours, "PMV2: duration too short");
         require(bytes(_resolutionSource).length > 0, "PMV2: source required");
         require(bytes(_fallbackResolutionSource).length > 0, "PMV2: fallback required");
         require(bytes(_invalidCondition).length > 0, "PMV2: invalid condition required");
         require(_resolutionTime >= block.timestamp + _durationSeconds, "PMV2: bad resolution time");
 
-        uint256 requiredSeed = uint256(LMSRMath.initialLiquidity(_outcomeLabels.length, _bWad));
-        require(msg.value >= requiredSeed, "PMV2: insufficient seed");
-
-        _transferOwnership(_owner);
+        _transferOwnership(owner_);
         title = _title;
         description = _description;
         category = _category;
         imageUri = _imageUri;
+        marketMode = _marketMode;
         b = _bWad;
         createdAt = block.timestamp;
         marketDeadline = block.timestamp + _durationSeconds;
@@ -175,7 +199,16 @@ contract PredictionMarketV2 is ReentrancyGuard {
             unchecked { i++; }
         }
 
-        emit MarketInitialized(_owner, _resolutionManager, outcomeCount, _bWad, marketDeadline, _resolutionTime);
+        emit MarketInitialized(
+            owner_,
+            _resolutionManager,
+            outcomeCount,
+            _marketMode,
+            _bWad,
+            msg.value,
+            marketDeadline,
+            _resolutionTime
+        );
     }
 
     function owner() public view returns (address) {
@@ -224,6 +257,7 @@ contract PredictionMarketV2 is ReentrancyGuard {
         returns (uint256 costWei)
     {
         _assertTradingAllowed();
+        require(marketMode == MarketMode.HYBRID_CLOB_LMSR, "PMV2: LMSR disabled");
         require(trader != address(0), "PMV2: zero trader");
         require(outcomeIdx < outcomeCount, "PMV2: invalid outcome");
         require(sharesWad > 0, "PMV2: zero shares");
@@ -260,6 +294,7 @@ contract PredictionMarketV2 is ReentrancyGuard {
         returns (uint256 proceedsWei)
     {
         _assertTradingAllowed();
+        require(marketMode == MarketMode.HYBRID_CLOB_LMSR, "PMV2: LMSR disabled");
         require(trader != address(0), "PMV2: zero trader");
         require(recipient != address(0), "PMV2: zero recipient");
         require(outcomeIdx < outcomeCount, "PMV2: invalid outcome");
@@ -298,6 +333,32 @@ contract PredictionMarketV2 is ReentrancyGuard {
         _trackParticipant(to);
 
         emit SharesMoved(from, to, outcomeIdx, sharesWad);
+        return true;
+    }
+
+    function mintCompleteSet(
+        address outcomeARecipient,
+        uint256 outcomeA,
+        address outcomeBRecipient,
+        uint256 outcomeB,
+        uint256 sharesWad
+    ) external payable nonReentrant onlyOperator returns (bool) {
+        _assertTradingAllowed();
+        require(outcomeCount == 2, "PMV2: complete set binary only");
+        require(outcomeARecipient != address(0) && outcomeBRecipient != address(0), "PMV2: zero recipient");
+        require(outcomeA < outcomeCount && outcomeB < outcomeCount && outcomeA != outcomeB, "PMV2: bad outcomes");
+        require(sharesWad > 0, "PMV2: zero shares");
+        require(msg.value == sharesWad, "PMV2: bad collateral");
+
+        totalSharesWad[outcomeA] += int256(sharesWad);
+        totalSharesWad[outcomeB] += int256(sharesWad);
+        sharesOf[outcomeARecipient][outcomeA] += sharesWad;
+        sharesOf[outcomeBRecipient][outcomeB] += sharesWad;
+        totalVolumeWei += sharesWad;
+        _trackParticipant(outcomeARecipient);
+        _trackParticipant(outcomeBRecipient);
+
+        emit CompleteSetMinted(outcomeARecipient, outcomeA, outcomeBRecipient, outcomeB, sharesWad, msg.value);
         return true;
     }
 
@@ -480,6 +541,15 @@ contract PredictionMarketV2 is ReentrancyGuard {
     }
 
     function getImpliedProbabilities() external view returns (int256[] memory probs) {
+        if (marketMode != MarketMode.HYBRID_CLOB_LMSR) {
+            probs = new int256[](outcomeCount);
+            int256 uniform = int256(1e18 / outcomeCount);
+            for (uint256 i = 0; i < outcomeCount; ) {
+                probs[i] = uniform;
+                unchecked { i++; }
+            }
+            return probs;
+        }
         int256[] memory q = _getSharesArray();
         probs = new int256[](outcomeCount);
         for (uint256 i = 0; i < outcomeCount; ) {
@@ -490,12 +560,16 @@ contract PredictionMarketV2 is ReentrancyGuard {
 
     function getImpliedProbability(uint256 outcomeIdx) public view returns (uint256) {
         require(outcomeIdx < outcomeCount, "PMV2: invalid outcome");
+        if (marketMode != MarketMode.HYBRID_CLOB_LMSR) {
+            return 1e18 / outcomeCount;
+        }
         int256 prob = LMSRMath.impliedProbability(_getSharesArray(), outcomeIdx, b);
         return uint256(prob);
     }
 
     function previewBuy(uint256 outcomeIdx, uint256 sharesWad) external view returns (uint256 costWei) {
         require(outcomeIdx < outcomeCount, "PMV2: invalid outcome");
+        require(marketMode == MarketMode.HYBRID_CLOB_LMSR, "PMV2: LMSR disabled");
         if (sharesWad == 0) return 0;
         int256 raw = LMSRMath.tradeCost(_getSharesArray(), outcomeIdx, int256(sharesWad), b);
         costWei = raw > 0 ? uint256(raw) : 0;
@@ -503,6 +577,7 @@ contract PredictionMarketV2 is ReentrancyGuard {
 
     function previewSell(uint256 outcomeIdx, uint256 sharesWad) external view returns (uint256 proceedsWei) {
         require(outcomeIdx < outcomeCount, "PMV2: invalid outcome");
+        require(marketMode == MarketMode.HYBRID_CLOB_LMSR, "PMV2: LMSR disabled");
         if (sharesWad == 0) return 0;
         int256 raw = LMSRMath.tradeCost(_getSharesArray(), outcomeIdx, -int256(sharesWad), b);
         proceedsWei = raw < 0 ? uint256(-raw) : 0;

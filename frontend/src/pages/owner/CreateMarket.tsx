@@ -32,6 +32,9 @@ const DURATION_PRESETS = [
   { label: 'Custom', seconds: 0 },
 ];
 
+const MARKET_MODE_CLOB_ONLY = 0;
+const MARKET_MODE_HYBRID = 1;
+
 const CATEGORY_ICONS: Record<string, string> = {
   Crypto: '\u20BF',
   Sports: '\u26BD',
@@ -74,6 +77,7 @@ export default function CreateMarket() {
   const [customHours, setCustomHours] = useState('');
   const [useCalendar, setUseCalendar] = useState(false);
   const deadlinePicker = useDateTimePicker();
+  const [instantLiquidityEnabled, setInstantLiquidityEnabled] = useState(false);
   const [bValue, setBValue] = useState('1000');
   const [resolutionBufferHours, setResolutionBufferHours] = useState('48');
   const [resolutionSource, setResolutionSource] = useState('Official source linked in the market description or live feed snapshot.');
@@ -162,7 +166,8 @@ export default function CreateMarket() {
     : new Date(Date.now() + durationSeconds * 1000);
   const resolutionBufferSeconds = Math.max(3600, Math.floor(parseFloat(resolutionBufferHours || '0') * 3600));
   const resolutionTime = Math.floor(expiryDate.getTime() / 1000) + resolutionBufferSeconds;
-  const requiredSeedEth = Number.isFinite(parseFloat(bValue)) && outcomes.length >= 2
+  const marketMode = instantLiquidityEnabled ? MARKET_MODE_HYBRID : MARKET_MODE_CLOB_ONLY;
+  const requiredSeedEth = instantLiquidityEnabled && Number.isFinite(parseFloat(bValue)) && outcomes.length >= 2
     ? Math.max(0, parseFloat(bValue) * Math.log(outcomes.length))
     : 0;
 
@@ -265,8 +270,9 @@ export default function CreateMarket() {
     actualCategory.trim().length > 0 &&
     outcomes.length >= 2 &&
     outcomes.every(o => o.trim().length > 0) &&
+    (instantLiquidityEnabled || outcomes.length === 2) &&
     durationSeconds >= 3600 &&
-    parseFloat(bValue) >= 1000 &&
+    (!instantLiquidityEnabled || parseFloat(bValue) >= 1000) &&
     resolutionSource.trim().length > 0 &&
     fallbackResolutionSource.trim().length > 0 &&
     invalidCondition.trim().length > 0 &&
@@ -279,7 +285,7 @@ export default function CreateMarket() {
     actualCategory.trim().length > 0,
     outcomes.length >= 2 && outcomes.every(o => o.trim().length > 0),
     durationSeconds >= 3600,
-    parseFloat(bValue) >= 1000,
+    !instantLiquidityEnabled || parseFloat(bValue) >= 1000,
     resolutionSource.trim().length > 0,
     fallbackResolutionSource.trim().length > 0,
     invalidCondition.trim().length > 0,
@@ -582,7 +588,7 @@ export default function CreateMarket() {
     setFeedSaving(false);
     try {
       const factory = new ethers.Contract(HYBRID_FACTORY_ADDRESS, HYBRID_FACTORY_ABI, signer);
-      const bWad = ethers.parseEther(bValue);
+      const bWad = instantLiquidityEnabled ? ethers.parseEther(bValue) : 0n;
       const encodedDescription = subcategory.trim().length > 0
         ? `${description.trim()}:::${subcategory.trim()}`
         : description.trim();
@@ -593,6 +599,7 @@ export default function CreateMarket() {
         actualCategory.trim(),
         imageUri.trim(),
         outcomes.map(o => o.trim()),
+        marketMode,
         bWad,
         durationSeconds,
         resolutionSource.trim(),
@@ -698,6 +705,7 @@ export default function CreateMarket() {
         return null;
       });
       setOutcomes(['Yes', 'No']);
+      setInstantLiquidityEnabled(false);
       setResolutionBufferHours('48');
       setResolutionSource('Official source linked in the market description or live feed snapshot.');
       setFallbackResolutionSource('Admin multisig/arbitration using public evidence if the primary source is unavailable.');
@@ -1088,61 +1096,99 @@ export default function CreateMarket() {
             )}
           </div>
 
-          {/* Liquidity parameter */}
+          {/* Market mode */}
           <div className="card p-5">
             <SectionHeader
               icon={<svg className="w-4 h-4 text-primary-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" /></svg>}
-              title="Liquidity Depth (b)"
-              subtitle="Controls price sensitivity and market stability"
+              title="Market Engine"
+              subtitle="CLOB-only is the default. Instant liquidity is reserved for selected markets."
             />
-            <div className="flex items-center gap-3">
-              <input
-                type="number"
-                value={bValue}
-                onChange={e => setBValue(e.target.value)}
-                min="1000"
-                step="100"
-                className="input-field flex-1"
-                placeholder="1000"
-              />
-              <div className="relative">
-                <button
-                  onMouseEnter={() => setShowBTooltip(true)}
-                  onMouseLeave={() => setShowBTooltip(false)}
-                  onClick={() => setShowBTooltip(!showBTooltip)}
-                  className="w-8 h-8 rounded-full bg-dark-750 border border-white/[0.08] text-dark-400 text-xs flex items-center justify-center hover:text-white hover:border-white/[0.15] transition-colors"
-                >
-                  ?
-                </button>
-                {showBTooltip && (
-                  <div className="absolute bottom-full right-0 mb-2 w-72 p-4 rounded-xl bg-dark-800 border border-white/[0.08] text-xs text-dark-200 shadow-elevated z-10 animate-fade-in">
-                    <p className="font-semibold text-white mb-2">LMSR Liquidity Parameter</p>
-                    <p className="text-dark-300 leading-relaxed">Higher values = more stable prices, smaller multipliers. Lower values = more volatile prices, bigger potential returns.</p>
-                    <div className="divider my-3" />
-                    <p className="text-dark-400">Rule of thumb: expected total volume / 10. Minimum: 1000, Maximum: 1,000,000.</p>
-                  </div>
-                )}
+            <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/[0.04] p-3">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-sm font-semibold text-white">CLOB-only</p>
+                  <p className="text-xs text-dark-400 mt-1">No protocol seed. Orders match against real user liquidity only.</p>
+                </div>
+                <span className="text-2xs font-semibold text-emerald-300 rounded-md border border-emerald-500/25 bg-emerald-500/10 px-2 py-1">
+                  Default
+                </span>
               </div>
+              {!instantLiquidityEnabled && outcomes.length !== 2 && (
+                <p className="mt-3 text-xs text-amber-300">
+                  CLOB-only markets currently require exactly two outcomes. Enable instant liquidity for multi-outcome markets.
+                </p>
+              )}
             </div>
-            {/* Quick preset buttons */}
-            <div className="flex gap-2 mt-3">
-              {[1000, 2500, 5000, 10000, 50000].map(v => (
-                <button
-                  key={v}
-                  onClick={() => setBValue(v.toString())}
-                  className={`chip text-2xs ${bValue === v.toString() ? 'chip-active' : ''}`}
-                >
-                  {v}
-                </button>
-              ))}
-            </div>
+
+            <label className="mt-4 flex items-center justify-between gap-3 rounded-xl border border-white/[0.08] bg-dark-900/35 p-3 cursor-pointer">
+              <div>
+                <p className="text-sm font-semibold text-white">Enable instant liquidity</p>
+                <p className="text-xs text-dark-400 mt-1">Hybrid mode uses admin-funded LMSR only after CLOB liquidity.</p>
+              </div>
+              <input
+                type="checkbox"
+                checked={instantLiquidityEnabled}
+                onChange={(e) => setInstantLiquidityEnabled(e.target.checked)}
+                className="h-5 w-5 accent-primary-500"
+              />
+            </label>
+
+            {instantLiquidityEnabled && (
+              <div className="mt-4 space-y-3 animate-fade-in">
+                <div className="flex items-center gap-3">
+                  <input
+                    type="number"
+                    value={bValue}
+                    onChange={e => setBValue(e.target.value)}
+                    min="1000"
+                    step="100"
+                    className="input-field flex-1"
+                    placeholder="1000"
+                  />
+                  <div className="relative">
+                    <button
+                      onMouseEnter={() => setShowBTooltip(true)}
+                      onMouseLeave={() => setShowBTooltip(false)}
+                      onClick={() => setShowBTooltip(!showBTooltip)}
+                      className="w-8 h-8 rounded-full bg-dark-750 border border-white/[0.08] text-dark-400 text-xs flex items-center justify-center hover:text-white hover:border-white/[0.15] transition-colors"
+                    >
+                      ?
+                    </button>
+                    {showBTooltip && (
+                      <div className="absolute bottom-full right-0 mb-2 w-72 p-4 rounded-xl bg-dark-800 border border-white/[0.08] text-xs text-dark-200 shadow-elevated z-10 animate-fade-in">
+                        <p className="font-semibold text-white mb-2">Admin LMSR Liquidity</p>
+                        <p className="text-dark-300 leading-relaxed">This is protocol risk capital for instant fills. It is not a normal refundable LP deposit.</p>
+                        <div className="divider my-3" />
+                        <p className="text-dark-400">Higher values reduce price movement but require more seed capital.</p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+                <div className="flex gap-2">
+                  {[1000, 2500, 5000, 10000, 50000].map(v => (
+                    <button
+                      key={v}
+                      onClick={() => setBValue(v.toString())}
+                      className={`chip text-2xs ${bValue === v.toString() ? 'chip-active' : ''}`}
+                    >
+                      {v}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
             <div className="mt-4 p-3 rounded-xl bg-dark-900/40 border border-white/[0.06]">
-              <p className="text-2xs uppercase tracking-[0.12em] text-dark-500 font-semibold mb-1">Required seed</p>
+              <p className="text-2xs uppercase tracking-[0.12em] text-dark-500 font-semibold mb-1">
+                {instantLiquidityEnabled ? 'Required protocol seed' : 'Required protocol seed'}
+              </p>
               <p className="text-sm text-white font-semibold tabular-nums">
                 {requiredSeedEth.toFixed(4)} USDC
               </p>
               <p className="text-xs text-dark-500 mt-1">
-                Funded from the factory liquidity reserve. The owner wallet does not pay this per market.
+                {instantLiquidityEnabled
+                  ? 'Funded from the factory reserve. This capital is at risk and should be used selectively.'
+                  : 'CLOB-only markets require no protocol seed liquidity.'}
               </p>
             </div>
           </div>
@@ -1574,8 +1620,8 @@ export default function CreateMarket() {
                 {[
                   { label: 'Outcomes', value: outcomes.filter(o => o.trim()).length.toString(), ok: outcomes.length >= 2 && outcomes.every(o => o.trim().length > 0) },
                   { label: 'Duration', value: durationSeconds >= 86400 ? `${Math.floor(durationSeconds / 86400)} days` : `${Math.floor(durationSeconds / 3600)} hours`, ok: durationSeconds >= 3600 },
-                  { label: 'Liquidity (b)', value: bValue, ok: parseFloat(bValue) >= 1000 },
-                  { label: 'Seed', value: `${requiredSeedEth.toFixed(2)} USDC`, ok: requiredSeedEth > 0 },
+                  { label: 'Engine', value: instantLiquidityEnabled ? 'Hybrid' : 'CLOB-only', ok: instantLiquidityEnabled || outcomes.length === 2 },
+                  { label: 'Seed', value: `${requiredSeedEth.toFixed(2)} USDC`, ok: !instantLiquidityEnabled || requiredSeedEth > 0 },
                   { label: 'Expiry', value: durationSeconds >= 3600 ? expiryDate.toLocaleDateString() : '-', ok: durationSeconds >= 3600 },
                   { label: 'Resolution', value: resolutionSource.trim() ? 'Configured' : '-', ok: resolutionSource.trim().length > 0 && fallbackResolutionSource.trim().length > 0 && invalidCondition.trim().length > 0 },
                 ].map(row => (
@@ -1630,13 +1676,21 @@ export default function CreateMarket() {
                 <span className="text-white">{durationSeconds >= 86400 ? `${Math.floor(durationSeconds / 86400)} days` : `${Math.floor(durationSeconds / 3600)} hours`}</span>
               </div>
               <div>
-                <span className="text-dark-400">Liquidity (b): </span>
-                <span className="text-white">{bValue}</span>
+                <span className="text-dark-400">Engine: </span>
+                <span className="text-white">{instantLiquidityEnabled ? 'Hybrid CLOB + LMSR' : 'CLOB-only'}</span>
               </div>
-              <div>
-                <span className="text-dark-400">Factory-funded seed: </span>
-                <span className="text-white">{requiredSeedEth.toFixed(4)} USDC</span>
-              </div>
+              {instantLiquidityEnabled && (
+                <>
+                  <div>
+                    <span className="text-dark-400">Liquidity depth: </span>
+                    <span className="text-white">{bValue}</span>
+                  </div>
+                  <div>
+                    <span className="text-dark-400">Factory-funded seed: </span>
+                    <span className="text-white">{requiredSeedEth.toFixed(4)} USDC</span>
+                  </div>
+                </>
+              )}
               <div>
                 <span className="text-dark-400">Resolution opens: </span>
                 <span className="text-white">{new Date(resolutionTime * 1000).toLocaleString()}</span>

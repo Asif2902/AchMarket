@@ -7,7 +7,7 @@ import {HybridOrderBook} from "./HybridOrderBook.sol";
 import {IHybridMarket} from "./interfaces/IHybridMarket.sol";
 
 /// @title MarketRouter
-/// @notice Single public execution entrypoint for hybrid CLOB + LMSR trades.
+/// @notice Single public execution entrypoint for CLOB-first trades with optional LMSR fallback.
 contract MarketRouter is Ownable, ReentrancyGuard {
     enum TradeSide {
         Buy,
@@ -52,6 +52,7 @@ contract MarketRouter is Ownable, ReentrancyGuard {
     event FeesUpdated(uint256 orderBookTakerFeeBps, uint256 lmsrTakerFeeBps);
     event ExecutionConfigUpdated(uint256 chunkSizeWad, uint256 maxTradeSharesWad, uint256 defaultMaxHops);
     event OrderBookFallback(address indexed market, uint256 indexed outcome, TradeSide side, uint256 remainingSharesWad);
+    event LmsrQuoteUsed(address indexed market, uint256 indexed outcome, TradeSide side, uint256 sharesWad, uint256 amountWei);
     event HybridTrade(
         address indexed trader,
         address indexed market,
@@ -159,68 +160,49 @@ contract MarketRouter is Ownable, ReentrancyGuard {
         result.requestedSharesWad = sharesWad;
         uint256 remaining = sharesWad;
         uint256 feeAccrued;
+        uint256 routerFeeAccrued;
         uint256 hopsLimit = maxHops == 0 ? defaultMaxHops : maxHops;
-        uint256 hops;
 
-        while (remaining > 0 && hops < hopsLimit) {
-            bool filledFromOrderBook;
-            if (!_isClobUnavailable()) {
-                (uint256 askPrice, uint256 askShares,) = orderBook.getBestAsk(market, outcome);
-                uint256 lmsrPrice = IHybridMarket(market).getImpliedProbability(outcome);
-                if (askShares > 0 && askPrice <= lmsrPrice) {
-                    uint256 fillShares = _min(remaining, askShares);
-                    uint256 quotedNotional = _mulWad(fillShares, askPrice);
-                    require(_spentWith(result, quotedNotional, orderBookTakerFeeBps) <= maxCostWei, "Router: slippage");
-                    require(_spentWith(result, quotedNotional, orderBookTakerFeeBps) <= msg.value, "Router: insufficient value");
-
-                    try orderBook.fillBestAsk{value: quotedNotional}(market, outcome, msg.sender, fillShares)
-                        returns (uint256 gotShares, uint256 paidWei, uint256)
-                    {
-                        if (gotShares > 0) {
-                            uint256 takerFee = _fee(paidWei, orderBookTakerFeeBps);
-                            result.filledSharesWad += gotShares;
-                            result.orderBookSharesWad += gotShares;
-                            result.costWei += paidWei + takerFee;
-                            feeAccrued += takerFee;
-                            remaining -= gotShares;
-                            result.usedOrderBook = true;
-                            filledFromOrderBook = true;
-                        }
-                    } catch {
-                        emit OrderBookFallback(market, outcome, TradeSide.Buy, remaining);
-                        break;
-                    }
+        if (!_isClobUnavailable()) {
+            uint256 limitPriceWad = _maxAverageBuyPrice(maxCostWei, sharesWad);
+            try orderBook.executeMarketOrder{value: msg.value}(
+                market,
+                outcome,
+                uint8(HybridOrderBook.Side.Bid),
+                sharesWad,
+                limitPriceWad,
+                msg.sender,
+                hopsLimit
+            ) returns (uint256 gotShares, uint256 paidWei, uint256 clobFeeWei) {
+                if (gotShares > 0) {
+                    result.filledSharesWad += gotShares;
+                    result.orderBookSharesWad += gotShares;
+                    result.costWei += paidWei + clobFeeWei;
+                    feeAccrued += clobFeeWei;
+                    remaining -= gotShares;
+                    result.usedOrderBook = true;
                 }
+            } catch {
+                emit OrderBookFallback(market, outcome, TradeSide.Buy, remaining);
             }
-
-            if (!filledFromOrderBook && remaining > 0) {
-                uint256 fillShares = _min(remaining, chunkSizeWad);
-                (uint256 paidWei, uint256 takerFee) = _buyFromLmsr(market, outcome, fillShares, maxCostWei, msg.value, result.costWei);
-                result.filledSharesWad += fillShares;
-                result.lmsrSharesWad += fillShares;
-                result.costWei += paidWei + takerFee;
-                feeAccrued += takerFee;
-                remaining -= fillShares;
-                result.usedLmsr = true;
-            }
-
-            unchecked { hops++; }
         }
 
-        if (remaining > 0) {
+        if (remaining > 0 && _isHybridLmsrMarket(market)) {
             (uint256 paidWei, uint256 takerFee) = _buyFromLmsr(market, outcome, remaining, maxCostWei, msg.value, result.costWei);
             result.filledSharesWad += remaining;
             result.lmsrSharesWad += remaining;
             result.costWei += paidWei + takerFee;
             feeAccrued += takerFee;
+            routerFeeAccrued += takerFee;
             result.usedLmsr = true;
+            emit LmsrQuoteUsed(market, outcome, TradeSide.Buy, remaining, paidWei);
             remaining = 0;
         }
 
         require(result.filledSharesWad >= minSharesOutWad, "Router: min shares");
         result.feeWei = feeAccrued;
         result.isPartial = result.filledSharesWad < sharesWad;
-        _settleBuy(result.costWei, feeAccrued);
+        _settleBuy(result.costWei, routerFeeAccrued);
         _emitTrade(msg.sender, market, outcome, TradeSide.Buy, result);
     }
 
@@ -237,64 +219,51 @@ contract MarketRouter is Ownable, ReentrancyGuard {
         result.requestedSharesWad = sharesWad;
         uint256 remaining = sharesWad;
         uint256 feeAccrued;
+        uint256 routerFeeAccrued;
+        uint256 routerProceedsWei;
         uint256 hopsLimit = maxHops == 0 ? defaultMaxHops : maxHops;
-        uint256 hops;
 
-        while (remaining > 0 && hops < hopsLimit) {
-            bool filledFromOrderBook;
-            if (!_isClobUnavailable()) {
-                (uint256 bidPrice, uint256 bidShares,) = orderBook.getBestBid(market, outcome);
-                uint256 lmsrPrice = IHybridMarket(market).getImpliedProbability(outcome);
-                if (bidShares > 0 && bidPrice >= lmsrPrice) {
-                    uint256 fillShares = _min(remaining, bidShares);
-                    try orderBook.fillBestBid(market, outcome, msg.sender, payable(address(this)), fillShares)
-                        returns (uint256 gotShares, uint256 grossWei, uint256)
-                    {
-                        if (gotShares > 0) {
-                            uint256 takerFee = _fee(grossWei, orderBookTakerFeeBps);
-                            result.filledSharesWad += gotShares;
-                            result.orderBookSharesWad += gotShares;
-                            result.proceedsWei += grossWei - takerFee;
-                            feeAccrued += takerFee;
-                            remaining -= gotShares;
-                            result.usedOrderBook = true;
-                            filledFromOrderBook = true;
-                        }
-                    } catch {
-                        emit OrderBookFallback(market, outcome, TradeSide.Sell, remaining);
-                        break;
-                    }
+        if (!_isClobUnavailable()) {
+            uint256 limitPriceWad = _minAverageSellPrice(minProceedsWei, sharesWad);
+            try orderBook.executeMarketOrder(
+                market,
+                outcome,
+                uint8(HybridOrderBook.Side.Ask),
+                sharesWad,
+                limitPriceWad,
+                msg.sender,
+                hopsLimit
+            ) returns (uint256 gotShares, uint256 grossWei, uint256 clobFeeWei) {
+                if (gotShares > 0) {
+                    result.filledSharesWad += gotShares;
+                    result.orderBookSharesWad += gotShares;
+                    result.proceedsWei += grossWei - clobFeeWei;
+                    feeAccrued += clobFeeWei;
+                    remaining -= gotShares;
+                    result.usedOrderBook = true;
                 }
+            } catch {
+                emit OrderBookFallback(market, outcome, TradeSide.Sell, remaining);
             }
-
-            if (!filledFromOrderBook && remaining > 0) {
-                uint256 fillShares = _min(remaining, chunkSizeWad);
-                (uint256 grossWei, uint256 takerFee) = _sellToLmsr(market, outcome, fillShares, 0);
-                result.filledSharesWad += fillShares;
-                result.lmsrSharesWad += fillShares;
-                result.proceedsWei += grossWei - takerFee;
-                feeAccrued += takerFee;
-                remaining -= fillShares;
-                result.usedLmsr = true;
-            }
-
-            unchecked { hops++; }
         }
 
-        if (remaining > 0) {
+        if (remaining > 0 && _isHybridLmsrMarket(market)) {
             (uint256 grossWei, uint256 takerFee) = _sellToLmsr(market, outcome, remaining, 0);
             result.filledSharesWad += remaining;
             result.lmsrSharesWad += remaining;
             result.proceedsWei += grossWei - takerFee;
             feeAccrued += takerFee;
+            routerFeeAccrued += takerFee;
+            routerProceedsWei += grossWei - takerFee;
             result.usedLmsr = true;
+            emit LmsrQuoteUsed(market, outcome, TradeSide.Sell, remaining, grossWei);
             remaining = 0;
         }
 
         require(result.proceedsWei >= minProceedsWei, "Router: min proceeds");
         result.feeWei = feeAccrued;
         result.isPartial = result.filledSharesWad < sharesWad;
-        _settleSell(result.proceedsWei, feeAccrued);
+        _settleSell(routerProceedsWei, routerFeeAccrued);
         _emitTrade(msg.sender, market, outcome, TradeSide.Sell, result);
     }
 
@@ -311,7 +280,7 @@ contract MarketRouter is Ownable, ReentrancyGuard {
 
         result.requestedSharesWad = sharesWad;
         uint256 remaining = sharesWad;
-        uint256 lmsrPrice = IHybridMarket(market).getImpliedProbability(outcome);
+        uint256 lmsrPrice = _isHybridLmsrMarket(market) ? IHybridMarket(market).getImpliedProbability(outcome) : 0;
 
         if (!_isClobUnavailable()) {
             if (side == TradeSide.Buy) {
@@ -320,7 +289,7 @@ contract MarketRouter is Ownable, ReentrancyGuard {
                     outcome,
                     uint8(HybridOrderBook.Side.Ask),
                     _boundedBookPreviewShares(remaining, maxHops),
-                    lmsrPrice
+                    _isHybridLmsrMarket(market) ? lmsrPrice : WAD
                 );
                 uint256 takerFee = _fee(notional, orderBookTakerFeeBps);
                 result.costWei += notional + takerFee;
@@ -335,7 +304,7 @@ contract MarketRouter is Ownable, ReentrancyGuard {
                     outcome,
                     uint8(HybridOrderBook.Side.Bid),
                     _boundedBookPreviewShares(remaining, maxHops),
-                    lmsrPrice
+                    _isHybridLmsrMarket(market) ? lmsrPrice : 0
                 );
                 uint256 takerFee = _fee(gross, orderBookTakerFeeBps);
                 result.proceedsWei += gross - takerFee;
@@ -347,7 +316,7 @@ contract MarketRouter is Ownable, ReentrancyGuard {
             }
         }
 
-        if (remaining > 0) {
+        if (remaining > 0 && _isHybridLmsrMarket(market)) {
             if (side == TradeSide.Buy) {
                 uint256 cost = IHybridMarket(market).previewBuy(outcome, remaining);
                 uint256 takerFee = _fee(cost, lmsrTakerFeeBps);
@@ -363,6 +332,7 @@ contract MarketRouter is Ownable, ReentrancyGuard {
             result.filledSharesWad += remaining;
             result.usedLmsr = true;
         }
+        result.isPartial = result.filledSharesWad < sharesWad;
     }
 
     function getBestExecution(
@@ -421,6 +391,21 @@ contract MarketRouter is Ownable, ReentrancyGuard {
 
     function _isClobUnavailable() internal view returns (bool) {
         return clobPaused || orderBook.paused();
+    }
+
+    function _isHybridLmsrMarket(address market) internal view returns (bool) {
+        return IHybridMarket(market).marketMode() == 1;
+    }
+
+    function _maxAverageBuyPrice(uint256 maxCostWei, uint256 sharesWad) internal pure returns (uint256) {
+        uint256 price = (maxCostWei * WAD) / sharesWad;
+        return price > WAD ? WAD : price;
+    }
+
+    function _minAverageSellPrice(uint256 minProceedsWei, uint256 sharesWad) internal pure returns (uint256) {
+        if (minProceedsWei == 0) return 1;
+        uint256 price = (minProceedsWei * WAD) / sharesWad;
+        return price > WAD ? WAD : price;
     }
 
     function _boundedBookPreviewShares(uint256 sharesWad, uint256 maxHops) internal view returns (uint256) {
