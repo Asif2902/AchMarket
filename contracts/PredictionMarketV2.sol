@@ -2,10 +2,9 @@
 pragma solidity ^0.8.20;
 
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
-import {LMSRMath} from "./LMSRMath.sol";
 
 /// @title PredictionMarketV2
-/// @notice Solvent LMSR market designed to be executed through MarketRouter and HybridOrderBook.
+/// @notice Pool-settled market with a same-outcome CLOB and bounded per-outcome MM inventory.
 contract PredictionMarketV2 is ReentrancyGuard {
     enum Stage {
         Active,
@@ -17,11 +16,19 @@ contract PredictionMarketV2 is ReentrancyGuard {
 
     enum MarketMode {
         CLOB_ONLY,
-        HYBRID_CLOB_LMSR
+        HYBRID_CLOB_MM
     }
 
-    uint256 public constant PLATFORM_FEE_BPS = 75;
-    uint256 public constant RESOLVER_REWARD_BPS = 25;
+    struct OutcomeMMState {
+        uint256 initialSharesWad;
+        uint256 soldSharesWad;
+        uint256 reserveWei;
+    }
+
+    uint256 public constant WAD = 1e18;
+    uint256 public constant MAX_BPS = 10_000;
+    uint256 public constant DEFAULT_MM_SPREAD_BPS = 100;
+    uint256 public constant MAX_MM_SPREAD_BPS = 2_000;
     uint256 public constant RESOLUTION_GRACE_PERIOD = 3 days;
 
     address private _owner;
@@ -37,8 +44,10 @@ contract PredictionMarketV2 is ReentrancyGuard {
     uint256 public outcomeCount;
 
     MarketMode public marketMode;
+    /// @dev Kept for backwards-compatible frontend/lens fields. In v2 this stores the per-outcome MM inventory.
     int256 public b;
     int256[] public totalSharesWad;
+    uint256[] public lastTradePriceWad;
 
     mapping(address => mapping(uint256 => uint256)) public sharesOf;
     mapping(address => bool) public authorizedOperator;
@@ -58,10 +67,21 @@ contract PredictionMarketV2 is ReentrancyGuard {
     address public resolutionManager;
 
     uint256 public initialLiquidityWei;
+    uint256 public marketPoolWei;
+    uint256 public feePoolWei;
     uint256 public resolvedPoolWei;
     uint256 public totalClaimWei;
     uint256 public totalVolumeWei;
     uint256 public participantCount;
+    uint256 public totalWinningSharesAtResolution;
+    uint256 public totalClaimSharesAtResolution;
+    uint256 public remainingClaimSharesWad;
+    uint256 public payoutPerWinningShareWad;
+    uint256 public payoutPerInvalidShareWad;
+    uint256 public totalClaimedWei;
+    uint256 public mmSpreadBps;
+
+    OutcomeMMState[] private _outcomeMM;
 
     event ResolutionManagerUpdated(address indexed resolutionManager);
     event OwnershipTransferred(address indexed previousOwner, address indexed newOwner);
@@ -70,7 +90,7 @@ contract PredictionMarketV2 is ReentrancyGuard {
         address indexed resolutionManager,
         uint256 outcomeCount,
         MarketMode mode,
-        int256 bWad,
+        int256 initialMmSharesWad,
         uint256 initialLiquidityWei,
         uint256 marketDeadline,
         uint256 resolutionTime
@@ -82,9 +102,11 @@ contract PredictionMarketV2 is ReentrancyGuard {
         string invalidCondition
     );
     event OperatorUpdated(address indexed operator, bool allowed);
+    event MMSpreadUpdated(uint256 spreadBps);
     event SharesBought(address indexed trader, uint256 indexed outcomeIndex, uint256 sharesWad, uint256 costWei);
     event SharesSold(address indexed trader, uint256 indexed outcomeIndex, uint256 sharesWad, uint256 proceedsWei);
     event SharesMoved(address indexed from, address indexed to, uint256 indexed outcomeIndex, uint256 sharesWad);
+    event TradePriceRecorded(uint256 indexed outcomeIndex, uint256 priceWad);
     event CompleteSetMinted(
         address indexed outcomeARecipient,
         uint256 indexed outcomeA,
@@ -100,29 +122,29 @@ contract PredictionMarketV2 is ReentrancyGuard {
     event MarketResumed();
     event DeadlineEdited(uint256 newDeadline);
     event Redeemed(address indexed user, uint256 amountWei);
-    event FeeCollected(address indexed recipient, uint256 amountWei);
-    event ResolverRewardPaid(address indexed recipient, uint256 amountWei);
+    event DustSwept(address indexed recipient, uint256 amountWei);
+    event FeeSwept(address indexed recipient, uint256 amountWei);
 
     modifier onlyOperator() {
-        require(authorizedOperator[msg.sender], "PMV2: not operator");
+        require(authorizedOperator[msg.sender], "M");
         _;
     }
 
     modifier onlyOwner() {
-        require(msg.sender == _owner, "PMV2: not owner");
+        require(msg.sender == _owner, "M");
         _;
     }
 
     modifier onlyEditable() {
         require(
             (stage == Stage.Active || stage == Stage.Suspended) && block.timestamp <= marketDeadline,
-            "PMV2: market not editable"
+            "M"
         );
         _;
     }
 
     modifier onlyResolutionManager() {
-        require(msg.sender == resolutionManager, "PMV2: not resolver");
+        require(msg.sender == resolutionManager, "M");
         _;
     }
 
@@ -138,7 +160,7 @@ contract PredictionMarketV2 is ReentrancyGuard {
         string memory _imageUri,
         string[] memory _outcomeLabels,
         MarketMode _marketMode,
-        int256 _bWad,
+        int256 _initialMmSharesWad,
         uint256 _durationSeconds,
         string memory _resolutionSource,
         uint256 _resolutionTime,
@@ -147,26 +169,22 @@ contract PredictionMarketV2 is ReentrancyGuard {
         address _resolutionManager,
         address[] memory _operators
     ) external payable {
-        require(!_initialized, "PMV2: initialized");
+        require(!_initialized, "M");
         _initialized = true;
-        require(owner_ != address(0), "PMV2: zero owner");
-        require(_resolutionManager != address(0), "PMV2: zero resolver");
-        require(_outcomeLabels.length >= 2, "PMV2: need outcomes");
-        require(uint8(_marketMode) <= uint8(MarketMode.HYBRID_CLOB_LMSR), "PMV2: bad mode");
+        require(owner_ != address(0), "M");
+        require(_resolutionManager != address(0), "M");
+        require(_outcomeLabels.length >= 2, "M");
+        require(uint8(_marketMode) <= uint8(MarketMode.HYBRID_CLOB_MM), "M");
         if (_marketMode == MarketMode.CLOB_ONLY) {
-            require(_outcomeLabels.length == 2, "PMV2: CLOB needs binary");
-            require(msg.value == 0, "PMV2: CLOB seed forbidden");
-            require(_bWad == 0, "PMV2: CLOB b must be 0");
+            require(_initialMmSharesWad == 0, "M");
         } else {
-            require(_bWad > 0, "PMV2: b must be > 0");
-            uint256 requiredSeed = uint256(LMSRMath.initialLiquidity(_outcomeLabels.length, _bWad));
-            require(msg.value >= requiredSeed, "PMV2: insufficient seed");
+            require(_initialMmSharesWad > 0, "M");
         }
-        require(_durationSeconds >= 1 hours, "PMV2: duration too short");
-        require(bytes(_resolutionSource).length > 0, "PMV2: source required");
-        require(bytes(_fallbackResolutionSource).length > 0, "PMV2: fallback required");
-        require(bytes(_invalidCondition).length > 0, "PMV2: invalid condition required");
-        require(_resolutionTime >= block.timestamp + _durationSeconds, "PMV2: bad resolution time");
+        require(_durationSeconds >= 1 hours, "M");
+        require(bytes(_resolutionSource).length > 0, "M");
+        require(bytes(_fallbackResolutionSource).length > 0, "M");
+        require(bytes(_invalidCondition).length > 0, "M");
+        require(_resolutionTime >= block.timestamp + _durationSeconds, "M");
 
         _transferOwnership(owner_);
         title = _title;
@@ -174,7 +192,7 @@ contract PredictionMarketV2 is ReentrancyGuard {
         category = _category;
         imageUri = _imageUri;
         marketMode = _marketMode;
-        b = _bWad;
+        b = _initialMmSharesWad;
         createdAt = block.timestamp;
         marketDeadline = block.timestamp + _durationSeconds;
         resolutionTime = _resolutionTime;
@@ -184,16 +202,26 @@ contract PredictionMarketV2 is ReentrancyGuard {
         resolutionManager = _resolutionManager;
         stage = Stage.Active;
         initialLiquidityWei = msg.value;
+        marketPoolWei = msg.value;
+        mmSpreadBps = DEFAULT_MM_SPREAD_BPS;
 
         outcomeCount = _outcomeLabels.length;
+        uint256 initialMmShares = _initialMmSharesWad > 0 ? uint256(_initialMmSharesWad) : 0;
+        uint256 initialPrice = WAD / _outcomeLabels.length;
         for (uint256 i = 0; i < _outcomeLabels.length; ) {
             outcomeLabels.push(_outcomeLabels[i]);
             totalSharesWad.push(0);
+            lastTradePriceWad.push(initialPrice);
+            _outcomeMM.push(OutcomeMMState({
+                initialSharesWad: initialMmShares,
+                soldSharesWad: 0,
+                reserveWei: 0
+            }));
             unchecked { i++; }
         }
 
         for (uint256 i = 0; i < _operators.length; ) {
-            require(_operators[i] != address(0), "PMV2: zero operator");
+            require(_operators[i] != address(0), "M");
             authorizedOperator[_operators[i]] = true;
             emit OperatorUpdated(_operators[i], true);
             unchecked { i++; }
@@ -204,7 +232,7 @@ contract PredictionMarketV2 is ReentrancyGuard {
             _resolutionManager,
             outcomeCount,
             _marketMode,
-            _bWad,
+            _initialMmSharesWad,
             msg.value,
             marketDeadline,
             _resolutionTime
@@ -216,20 +244,26 @@ contract PredictionMarketV2 is ReentrancyGuard {
     }
 
     function transferOwnership(address newOwner) external onlyOwner {
-        require(newOwner != address(0), "PMV2: zero owner");
+        require(newOwner != address(0), "M");
         _transferOwnership(newOwner);
     }
 
     function setAuthorizedOperator(address operator, bool allowed) external onlyOwner {
-        require(operator != address(0), "PMV2: zero operator");
+        require(operator != address(0), "M");
         authorizedOperator[operator] = allowed;
         emit OperatorUpdated(operator, allowed);
     }
 
     function setResolutionManager(address _resolutionManager) external onlyOwner {
-        require(_resolutionManager != address(0), "PMV2: zero resolver");
+        require(_resolutionManager != address(0), "M");
         resolutionManager = _resolutionManager;
         emit ResolutionManagerUpdated(_resolutionManager);
+    }
+
+    function setMMSpreadBps(uint256 _mmSpreadBps) external onlyOwner {
+        require(_mmSpreadBps <= MAX_MM_SPREAD_BPS, "M");
+        mmSpreadBps = _mmSpreadBps;
+        emit MMSpreadUpdated(_mmSpreadBps);
     }
 
     function editResolutionRules(
@@ -238,10 +272,10 @@ contract PredictionMarketV2 is ReentrancyGuard {
         string calldata _fallbackResolutionSource,
         string calldata _invalidCondition
     ) external onlyOwner onlyEditable {
-        require(bytes(_resolutionSource).length > 0, "PMV2: source required");
-        require(bytes(_fallbackResolutionSource).length > 0, "PMV2: fallback required");
-        require(bytes(_invalidCondition).length > 0, "PMV2: invalid condition required");
-        require(_resolutionTime >= marketDeadline, "PMV2: bad resolution time");
+        require(bytes(_resolutionSource).length > 0, "M");
+        require(bytes(_fallbackResolutionSource).length > 0, "M");
+        require(bytes(_invalidCondition).length > 0, "M");
+        require(_resolutionTime >= marketDeadline, "M");
         resolutionSource = _resolutionSource;
         resolutionTime = _resolutionTime;
         fallbackResolutionSource = _fallbackResolutionSource;
@@ -257,26 +291,30 @@ contract PredictionMarketV2 is ReentrancyGuard {
         returns (uint256 costWei)
     {
         _assertTradingAllowed();
-        require(marketMode == MarketMode.HYBRID_CLOB_LMSR, "PMV2: LMSR disabled");
-        require(trader != address(0), "PMV2: zero trader");
-        require(outcomeIdx < outcomeCount, "PMV2: invalid outcome");
-        require(sharesWad > 0, "PMV2: zero shares");
+        require(marketMode == MarketMode.HYBRID_CLOB_MM, "M");
+        require(trader != address(0), "M");
+        require(outcomeIdx < outcomeCount, "M");
+        require(sharesWad > 0, "M");
 
-        int256[] memory q = _getSharesArray();
-        int256 rawCost = LMSRMath.tradeCost(q, outcomeIdx, int256(sharesWad), b);
-        require(rawCost >= 0, "PMV2: negative buy cost");
+        OutcomeMMState storage mm = _outcomeMM[outcomeIdx];
+        require(mm.soldSharesWad + sharesWad <= mm.initialSharesWad, "M");
 
-        costWei = uint256(rawCost);
-        require(costWei <= maxCostWei, "PMV2: slippage exceeded");
-        require(msg.value >= costWei, "PMV2: insufficient value");
+        costWei = _quoteBuy(outcomeIdx, mm.soldSharesWad, sharesWad);
+        require(costWei > 0, "M");
+        require(costWei <= maxCostWei, "M");
+        require(msg.value >= costWei, "M");
 
+        mm.soldSharesWad += sharesWad;
+        mm.reserveWei += costWei;
         totalSharesWad[outcomeIdx] += int256(sharesWad);
         sharesOf[trader][outcomeIdx] += sharesWad;
+        marketPoolWei += costWei;
         totalVolumeWei += costWei;
         _trackParticipant(trader);
+        _recordTradePrice(outcomeIdx, (costWei * WAD) / sharesWad);
 
         uint256 excess = msg.value - costWei;
-        if (excess > 0) _sendValue(payable(msg.sender), excess, "PMV2: refund failed");
+        if (excess > 0) _sendValue(payable(msg.sender), excess, "M");
 
         emit SharesBought(trader, outcomeIdx, sharesWad, costWei);
     }
@@ -294,26 +332,29 @@ contract PredictionMarketV2 is ReentrancyGuard {
         returns (uint256 proceedsWei)
     {
         _assertTradingAllowed();
-        require(marketMode == MarketMode.HYBRID_CLOB_LMSR, "PMV2: LMSR disabled");
-        require(trader != address(0), "PMV2: zero trader");
-        require(recipient != address(0), "PMV2: zero recipient");
-        require(outcomeIdx < outcomeCount, "PMV2: invalid outcome");
-        require(sharesWad > 0, "PMV2: zero shares");
-        require(sharesOf[trader][outcomeIdx] >= sharesWad, "PMV2: insufficient shares");
+        require(marketMode == MarketMode.HYBRID_CLOB_MM, "M");
+        require(trader != address(0), "M");
+        require(recipient != address(0), "M");
+        require(outcomeIdx < outcomeCount, "M");
+        require(sharesWad > 0, "M");
+        require(sharesOf[trader][outcomeIdx] >= sharesWad, "M");
 
-        int256[] memory q = _getSharesArray();
-        int256 rawCost = LMSRMath.tradeCost(q, outcomeIdx, -int256(sharesWad), b);
-        require(rawCost <= 0, "PMV2: positive sell cost");
+        OutcomeMMState storage mm = _outcomeMM[outcomeIdx];
+        proceedsWei = _quoteSell(outcomeIdx, mm.soldSharesWad, mm.reserveWei, sharesWad);
+        require(proceedsWei > 0, "M");
+        require(proceedsWei >= minReceiveWei, "M");
+        require(address(this).balance >= feePoolWei + proceedsWei, "M");
+        require(marketPoolWei >= proceedsWei, "M");
 
-        proceedsWei = rawCost < 0 ? uint256(-rawCost) : 0;
-        require(proceedsWei >= minReceiveWei, "PMV2: slippage exceeded");
-        require(address(this).balance >= proceedsWei, "PMV2: insufficient liquidity");
-
-        totalSharesWad[outcomeIdx] -= int256(sharesWad);
+        mm.soldSharesWad -= sharesWad;
+        mm.reserveWei -= proceedsWei;
         sharesOf[trader][outcomeIdx] -= sharesWad;
+        totalSharesWad[outcomeIdx] -= int256(sharesWad);
+        marketPoolWei -= proceedsWei;
         totalVolumeWei += proceedsWei;
+        _recordTradePrice(outcomeIdx, (proceedsWei * WAD) / sharesWad);
 
-        if (proceedsWei > 0) _sendValue(recipient, proceedsWei, "PMV2: sell transfer failed");
+        _sendValue(recipient, proceedsWei, "M");
 
         emit SharesSold(trader, outcomeIdx, sharesWad, proceedsWei);
     }
@@ -323,16 +364,23 @@ contract PredictionMarketV2 is ReentrancyGuard {
         onlyOperator
         returns (bool)
     {
-        require(from != address(0) && to != address(0), "PMV2: zero address");
-        require(outcomeIdx < outcomeCount, "PMV2: invalid outcome");
-        require(sharesWad > 0, "PMV2: zero shares");
-        require(sharesOf[from][outcomeIdx] >= sharesWad, "PMV2: insufficient shares");
+        require(from != address(0) && to != address(0), "M");
+        require(outcomeIdx < outcomeCount, "M");
+        require(sharesWad > 0, "M");
+        require(sharesOf[from][outcomeIdx] >= sharesWad, "M");
 
         sharesOf[from][outcomeIdx] -= sharesWad;
         sharesOf[to][outcomeIdx] += sharesWad;
         _trackParticipant(to);
 
         emit SharesMoved(from, to, outcomeIdx, sharesWad);
+        return true;
+    }
+
+    function recordTradePrice(uint256 outcomeIdx, uint256 priceWad) external onlyOperator returns (bool) {
+        require(outcomeIdx < outcomeCount, "M");
+        require(priceWad > 0 && priceWad <= WAD, "M");
+        _recordTradePrice(outcomeIdx, priceWad);
         return true;
     }
 
@@ -344,17 +392,18 @@ contract PredictionMarketV2 is ReentrancyGuard {
         uint256 sharesWad
     ) external payable nonReentrant onlyOperator returns (bool) {
         _assertTradingAllowed();
-        require(outcomeCount == 2, "PMV2: complete set binary only");
-        require(outcomeARecipient != address(0) && outcomeBRecipient != address(0), "PMV2: zero recipient");
-        require(outcomeA < outcomeCount && outcomeB < outcomeCount && outcomeA != outcomeB, "PMV2: bad outcomes");
-        require(sharesWad > 0, "PMV2: zero shares");
-        require(msg.value == sharesWad, "PMV2: bad collateral");
+        require(outcomeCount == 2, "M");
+        require(outcomeARecipient != address(0) && outcomeBRecipient != address(0), "M");
+        require(outcomeA < outcomeCount && outcomeB < outcomeCount && outcomeA != outcomeB, "M");
+        require(sharesWad > 0, "M");
+        require(msg.value == sharesWad, "M");
 
         totalSharesWad[outcomeA] += int256(sharesWad);
         totalSharesWad[outcomeB] += int256(sharesWad);
         sharesOf[outcomeARecipient][outcomeA] += sharesWad;
         sharesOf[outcomeBRecipient][outcomeB] += sharesWad;
-        totalVolumeWei += sharesWad;
+        marketPoolWei += msg.value;
+        totalVolumeWei += msg.value;
         _trackParticipant(outcomeARecipient);
         _trackParticipant(outcomeBRecipient);
 
@@ -362,86 +411,102 @@ contract PredictionMarketV2 is ReentrancyGuard {
         return true;
     }
 
-    function resolveByManager(uint256 _winningOutcome, string calldata _proofUri, address rewardRecipient)
+    function resolveByManager(uint256 _winningOutcome, string calldata _proofUri, address)
         external
         onlyResolutionManager
     {
-        require(stage == Stage.Active || stage == Stage.Suspended, "PMV2: not resolvable");
-        require(_winningOutcome < outcomeCount, "PMV2: invalid outcome");
-        require(bytes(_proofUri).length > 0, "PMV2: proof required");
+        require(stage == Stage.Active || stage == Stage.Suspended, "M");
+        require(_winningOutcome < outcomeCount, "M");
+        require(bytes(_proofUri).length > 0, "M");
 
         winningOutcome = _winningOutcome;
         proofUri = _proofUri;
         stage = Stage.Resolved;
-        _finalizePayout(uint256(totalSharesWad[_winningOutcome]), rewardRecipient);
+        _finalizeResolved(_winningOutcome);
 
         emit MarketResolved(_winningOutcome, _proofUri);
     }
 
-    function cancelByManager(string calldata reason, string calldata _proofUri, address rewardRecipient)
+    function cancelByManager(string calldata reason, string calldata _proofUri, address)
         external
         onlyResolutionManager
     {
-        require(stage == Stage.Active || stage == Stage.Suspended, "PMV2: not cancellable");
-        require(bytes(reason).length > 0, "PMV2: reason required");
-        require(bytes(_proofUri).length > 0, "PMV2: proof required");
+        require(stage == Stage.Active || stage == Stage.Suspended, "M");
+        require(bytes(reason).length > 0, "M");
+        require(bytes(_proofUri).length > 0, "M");
 
         cancelReason = reason;
         cancelProofUri = _proofUri;
         stage = Stage.Cancelled;
-        _finalizePayout(_invalidPayoutLiability(), rewardRecipient);
+        _finalizeInvalid();
 
         emit MarketCancelled(reason, _proofUri);
     }
 
     function emergencyCancel(string calldata reason, string calldata _proofUri) external onlyOwner {
-        require(stage == Stage.Active || stage == Stage.Suspended, "PMV2: not cancellable");
-        require(bytes(reason).length > 0, "PMV2: reason required");
-        require(bytes(_proofUri).length > 0, "PMV2: proof required");
+        require(stage == Stage.Active || stage == Stage.Suspended, "M");
+        require(bytes(reason).length > 0, "M");
+        require(bytes(_proofUri).length > 0, "M");
 
         cancelReason = reason;
         cancelProofUri = _proofUri;
         stage = Stage.Cancelled;
-        _finalizePayout(_invalidPayoutLiability(), address(0));
+        _finalizeInvalid();
 
         emit MarketCancelled(reason, _proofUri);
     }
 
     function triggerExpiry() external {
-        require(stage == Stage.Active || stage == Stage.Suspended, "PMV2: not active");
-        require(block.timestamp > resolutionTime + RESOLUTION_GRACE_PERIOD, "PMV2: grace not passed");
+        require(stage == Stage.Active || stage == Stage.Suspended, "M");
+        require(block.timestamp > resolutionTime + RESOLUTION_GRACE_PERIOD, "M");
         _expire("Expired: not resolved within grace period", "");
     }
 
     function redeem() external nonReentrant {
         require(
             stage == Stage.Resolved || stage == Stage.Cancelled || stage == Stage.Expired,
-            "PMV2: redeem closed"
+            "M"
         );
-        require(!hasRedeemed[msg.sender], "PMV2: already redeemed");
+        require(!hasRedeemed[msg.sender], "M");
 
         uint256 payout;
+        uint256 claimShares;
         if (stage == Stage.Resolved) {
-            payout = sharesOf[msg.sender][winningOutcome];
+            claimShares = sharesOf[msg.sender][winningOutcome];
+            require(claimShares > 0, "M");
+            payout = (claimShares * payoutPerWinningShareWad) / WAD;
             sharesOf[msg.sender][winningOutcome] = 0;
+            totalSharesWad[winningOutcome] -= int256(claimShares);
         } else {
-            uint256 totalUserShares;
             for (uint256 i = 0; i < outcomeCount; ) {
                 uint256 bal = sharesOf[msg.sender][i];
                 if (bal > 0) {
-                    totalUserShares += bal;
+                    claimShares += bal;
                     sharesOf[msg.sender][i] = 0;
+                    totalSharesWad[i] -= int256(bal);
                 }
                 unchecked { i++; }
             }
-            payout = totalUserShares / outcomeCount;
+            require(claimShares > 0, "M");
+            payout = (claimShares * payoutPerInvalidShareWad) / WAD;
         }
 
-        require(payout > 0, "PMV2: nothing to redeem");
+        require(payout > 0, "M");
+        require(address(this).balance >= feePoolWei + payout, "M");
         hasRedeemed[msg.sender] = true;
-        require(address(this).balance >= payout, "PMV2: insufficient pool");
+        if (remainingClaimSharesWad >= claimShares) {
+            remainingClaimSharesWad -= claimShares;
+        } else {
+            remainingClaimSharesWad = 0;
+        }
+        totalClaimedWei += payout;
+        if (marketPoolWei >= payout) {
+            marketPoolWei -= payout;
+        } else {
+            marketPoolWei = 0;
+        }
 
-        _sendValue(payable(msg.sender), payout, "PMV2: payout failed");
+        _sendValue(payable(msg.sender), payout, "M");
         emit Redeemed(msg.sender, payout);
     }
 
@@ -450,9 +515,9 @@ contract PredictionMarketV2 is ReentrancyGuard {
         string calldata _description,
         string calldata _category
     ) external onlyOwner onlyEditable {
-        require(bytes(_title).length > 0, "PMV2: empty title");
-        require(bytes(_description).length > 0, "PMV2: empty description");
-        require(bytes(_category).length > 0, "PMV2: empty category");
+        require(bytes(_title).length > 0, "M");
+        require(bytes(_description).length > 0, "M");
+        require(bytes(_category).length > 0, "M");
         title = _title;
         description = _description;
         category = _category;
@@ -460,22 +525,46 @@ contract PredictionMarketV2 is ReentrancyGuard {
     }
 
     function suspend() external onlyOwner {
-        require(stage == Stage.Active, "PMV2: not active");
+        require(stage == Stage.Active, "M");
         stage = Stage.Suspended;
         emit MarketSuspended();
     }
 
     function resume() external onlyOwner {
-        require(stage == Stage.Suspended, "PMV2: not suspended");
+        require(stage == Stage.Suspended, "M");
         stage = Stage.Active;
         emit MarketResumed();
     }
 
     function editDeadline(uint256 newDeadline) external onlyOwner onlyEditable {
-        require(newDeadline > block.timestamp, "PMV2: deadline must be future");
-        require(newDeadline <= resolutionTime, "PMV2: deadline after resolution");
+        require(newDeadline > block.timestamp, "M");
+        require(newDeadline <= resolutionTime, "M");
         marketDeadline = newDeadline;
         emit DeadlineEdited(newDeadline);
+    }
+
+    function sweepDust(address payable recipient) external onlyOwner nonReentrant {
+        require(stage == Stage.Resolved || stage == Stage.Cancelled || stage == Stage.Expired, "M");
+        require(remainingClaimSharesWad == 0, "M");
+        require(recipient != address(0), "M");
+        uint256 sweepable = address(this).balance > feePoolWei ? address(this).balance - feePoolWei : 0;
+        require(sweepable > 0, "M");
+        if (marketPoolWei >= sweepable) {
+            marketPoolWei -= sweepable;
+        } else {
+            marketPoolWei = 0;
+        }
+        _sendValue(recipient, sweepable, "M");
+        emit DustSwept(recipient, sweepable);
+    }
+
+    function sweepFees(address payable recipient) external onlyOwner nonReentrant {
+        require(recipient != address(0), "M");
+        uint256 amount = feePoolWei;
+        require(amount > 0, "M");
+        feePoolWei = 0;
+        _sendValue(recipient, amount, "M");
+        emit FeeSwept(recipient, amount);
     }
 
     function getMarketInfo()
@@ -541,46 +630,82 @@ contract PredictionMarketV2 is ReentrancyGuard {
     }
 
     function getImpliedProbabilities() external view returns (int256[] memory probs) {
-        if (marketMode != MarketMode.HYBRID_CLOB_LMSR) {
-            probs = new int256[](outcomeCount);
-            int256 uniform = int256(1e18 / outcomeCount);
-            for (uint256 i = 0; i < outcomeCount; ) {
-                probs[i] = uniform;
-                unchecked { i++; }
-            }
-            return probs;
-        }
-        int256[] memory q = _getSharesArray();
         probs = new int256[](outcomeCount);
         for (uint256 i = 0; i < outcomeCount; ) {
-            probs[i] = LMSRMath.impliedProbability(q, i, b);
+            probs[i] = int256(lastTradePriceWad[i]);
             unchecked { i++; }
         }
     }
 
     function getImpliedProbability(uint256 outcomeIdx) public view returns (uint256) {
-        require(outcomeIdx < outcomeCount, "PMV2: invalid outcome");
-        if (marketMode != MarketMode.HYBRID_CLOB_LMSR) {
-            return 1e18 / outcomeCount;
+        require(outcomeIdx < outcomeCount, "M");
+        return lastTradePriceWad[outcomeIdx];
+    }
+
+    function previewBuy(uint256 outcomeIdx, uint256 sharesWad) public view returns (uint256 costWei) {
+        require(outcomeIdx < outcomeCount, "M");
+        if (marketMode != MarketMode.HYBRID_CLOB_MM || sharesWad == 0) return 0;
+        OutcomeMMState memory mm = _outcomeMM[outcomeIdx];
+        if (mm.soldSharesWad + sharesWad > mm.initialSharesWad) return 0;
+        return _quoteBuy(outcomeIdx, mm.soldSharesWad, sharesWad);
+    }
+
+    function previewSell(uint256 outcomeIdx, uint256 sharesWad) public view returns (uint256 proceedsWei) {
+        require(outcomeIdx < outcomeCount, "M");
+        if (marketMode != MarketMode.HYBRID_CLOB_MM || sharesWad == 0) return 0;
+        OutcomeMMState memory mm = _outcomeMM[outcomeIdx];
+        return _quoteSell(outcomeIdx, mm.soldSharesWad, mm.reserveWei, sharesWad);
+    }
+
+    function previewMMBuyFromState(uint256 outcomeIdx, uint256 soldSharesWad, uint256 sharesWad)
+        external
+        view
+        returns (uint256)
+    {
+        require(outcomeIdx < outcomeCount, "M");
+        OutcomeMMState memory mm = _outcomeMM[outcomeIdx];
+        if (marketMode != MarketMode.HYBRID_CLOB_MM || sharesWad == 0) return 0;
+        if (soldSharesWad + sharesWad > mm.initialSharesWad) return 0;
+        return _quoteBuy(outcomeIdx, soldSharesWad, sharesWad);
+    }
+
+    function previewMMSellFromState(
+        uint256 outcomeIdx,
+        uint256 soldSharesWad,
+        uint256 reserveWei,
+        uint256 sharesWad
+    ) external view returns (uint256) {
+        require(outcomeIdx < outcomeCount, "M");
+        if (marketMode != MarketMode.HYBRID_CLOB_MM || sharesWad == 0) return 0;
+        return _quoteSell(outcomeIdx, soldSharesWad, reserveWei, sharesWad);
+    }
+
+    function getMMOutcomeState(uint256 outcomeIdx)
+        external
+        view
+        returns (
+            uint256 initialSharesWad,
+            uint256 availableSharesWad,
+            uint256 soldSharesWad,
+            uint256 reserveWei,
+            uint256 bidPriceWad,
+            uint256 askPriceWad
+        )
+    {
+        require(outcomeIdx < outcomeCount, "M");
+        OutcomeMMState memory mm = _outcomeMM[outcomeIdx];
+        initialSharesWad = mm.initialSharesWad;
+        soldSharesWad = mm.soldSharesWad;
+        reserveWei = mm.reserveWei;
+        availableSharesWad = mm.initialSharesWad > mm.soldSharesWad
+            ? mm.initialSharesWad - mm.soldSharesWad
+            : 0;
+        askPriceWad = availableSharesWad > 0 ? _applyAskSpread(_midPrice(outcomeIdx, mm.soldSharesWad)) : 0;
+        if (soldSharesWad > 0 && reserveWei > 0) {
+            uint256 sampleShares = soldSharesWad < WAD ? soldSharesWad : WAD;
+            uint256 proceeds = _quoteSell(outcomeIdx, soldSharesWad, reserveWei, sampleShares);
+            bidPriceWad = proceeds > 0 ? (proceeds * WAD) / sampleShares : 0;
         }
-        int256 prob = LMSRMath.impliedProbability(_getSharesArray(), outcomeIdx, b);
-        return uint256(prob);
-    }
-
-    function previewBuy(uint256 outcomeIdx, uint256 sharesWad) external view returns (uint256 costWei) {
-        require(outcomeIdx < outcomeCount, "PMV2: invalid outcome");
-        require(marketMode == MarketMode.HYBRID_CLOB_LMSR, "PMV2: LMSR disabled");
-        if (sharesWad == 0) return 0;
-        int256 raw = LMSRMath.tradeCost(_getSharesArray(), outcomeIdx, int256(sharesWad), b);
-        costWei = raw > 0 ? uint256(raw) : 0;
-    }
-
-    function previewSell(uint256 outcomeIdx, uint256 sharesWad) external view returns (uint256 proceedsWei) {
-        require(outcomeIdx < outcomeCount, "PMV2: invalid outcome");
-        require(marketMode == MarketMode.HYBRID_CLOB_LMSR, "PMV2: LMSR disabled");
-        if (sharesWad == 0) return 0;
-        int256 raw = LMSRMath.tradeCost(_getSharesArray(), outcomeIdx, -int256(sharesWad), b);
-        proceedsWei = raw < 0 ? uint256(-raw) : 0;
     }
 
     function getUserInfo(address user)
@@ -593,13 +718,18 @@ contract PredictionMarketV2 is ReentrancyGuard {
         )
     {
         _shares = new uint256[](outcomeCount);
+        uint256 anyShares;
         for (uint256 i = 0; i < outcomeCount; ) {
             _shares[i] = sharesOf[user][i];
+            anyShares += _shares[i];
             unchecked { i++; }
         }
         _redeemed = hasRedeemed[user];
-        _canRedeem = (stage == Stage.Resolved || stage == Stage.Cancelled || stage == Stage.Expired)
-            && !hasRedeemed[user];
+        if (stage == Stage.Resolved) {
+            _canRedeem = !_redeemed && sharesOf[user][winningOutcome] > 0;
+        } else if (stage == Stage.Cancelled || stage == Stage.Expired) {
+            _canRedeem = !_redeemed && anyShares > 0;
+        }
     }
 
     function resolutionDeadline() external view returns (uint256) {
@@ -611,52 +741,138 @@ contract PredictionMarketV2 is ReentrancyGuard {
     }
 
     function _assertTradingAllowed() internal view {
-        require(isTradingOpen(), "PMV2: trading closed");
+        require(isTradingOpen(), "M");
     }
 
-    function _finalizePayout(uint256 claimWei, address rewardRecipient) internal {
-        uint256 pool = address(this).balance;
-        require(pool >= claimWei, "PMV2: insolvent");
-
-        totalClaimWei = claimWei;
-        uint256 surplus = pool - claimWei;
-        uint256 fee = (surplus * PLATFORM_FEE_BPS) / 10_000;
-        uint256 resolverReward = rewardRecipient == address(0) ? 0 : (surplus * RESOLVER_REWARD_BPS) / 10_000;
-        if (resolverReward > fee) resolverReward = fee;
-        uint256 protocolFee = fee - resolverReward;
-        resolvedPoolWei = pool - fee;
-
-        if (protocolFee > 0) {
-            _sendValue(payable(_owner), protocolFee, "PMV2: fee failed");
-            emit FeeCollected(_owner, protocolFee);
-        }
-        if (resolverReward > 0) {
-            _sendValue(payable(rewardRecipient), resolverReward, "PMV2: reward failed");
-            emit ResolverRewardPaid(rewardRecipient, resolverReward);
-        }
+    function _finalizeResolved(uint256 _winningOutcome) internal {
+        uint256 claimablePool = _claimablePool();
+        uint256 winningShares = uint256(totalSharesWad[_winningOutcome]);
+        resolvedPoolWei = claimablePool;
+        totalClaimWei = claimablePool;
+        totalWinningSharesAtResolution = winningShares;
+        totalClaimSharesAtResolution = winningShares;
+        remainingClaimSharesWad = winningShares;
+        payoutPerWinningShareWad = winningShares == 0 ? 0 : (claimablePool * WAD) / winningShares;
     }
 
-    function _invalidPayoutLiability() internal view returns (uint256 liability) {
-        for (uint256 i = 0; i < outcomeCount; ) {
-            liability += uint256(totalSharesWad[i]) / outcomeCount;
-            unchecked { i++; }
-        }
+    function _finalizeInvalid() internal {
+        uint256 claimablePool = _claimablePool();
+        uint256 claimShares = _totalOutstandingShares();
+        resolvedPoolWei = claimablePool;
+        totalClaimWei = claimablePool;
+        totalClaimSharesAtResolution = claimShares;
+        remainingClaimSharesWad = claimShares;
+        payoutPerInvalidShareWad = claimShares == 0 ? 0 : (claimablePool * WAD) / claimShares;
     }
 
     function _expire(string memory reason, string memory proof) internal {
         cancelReason = reason;
         cancelProofUri = proof;
         stage = Stage.Expired;
-        _finalizePayout(_invalidPayoutLiability(), address(0));
+        _finalizeInvalid();
         emit MarketCancelled(reason, proof);
     }
 
-    function _getSharesArray() internal view returns (int256[] memory q) {
-        q = new int256[](outcomeCount);
+    function _claimablePool() internal view returns (uint256) {
+        uint256 bal = address(this).balance;
+        return bal > feePoolWei ? bal - feePoolWei : 0;
+    }
+
+    function _totalOutstandingShares() internal view returns (uint256 total) {
         for (uint256 i = 0; i < outcomeCount; ) {
-            q[i] = totalSharesWad[i];
+            if (totalSharesWad[i] > 0) total += uint256(totalSharesWad[i]);
             unchecked { i++; }
         }
+    }
+
+    function _quoteBuy(uint256 outcomeIdx, uint256 soldSharesWad, uint256 sharesWad)
+        internal
+        view
+        returns (uint256)
+    {
+        uint256 avgMid = _averageMidForBuy(outcomeIdx, soldSharesWad, sharesWad);
+        uint256 askPrice = _applyAskSpread(avgMid);
+        return (sharesWad * askPrice) / WAD;
+    }
+
+    function _quoteSell(uint256 outcomeIdx, uint256 soldSharesWad, uint256 reserveWei, uint256 sharesWad)
+        internal
+        view
+        returns (uint256)
+    {
+        if (sharesWad == 0 || sharesWad > soldSharesWad || reserveWei == 0) return 0;
+        uint256 avgMid = _averageMidForSell(outcomeIdx, soldSharesWad, sharesWad);
+        uint256 bidPrice = _applyBidSpread(avgMid);
+        uint256 proceedsWei = (sharesWad * bidPrice) / WAD;
+        if (proceedsWei == 0 || proceedsWei > reserveWei) return 0;
+        if (!_bidBelowLastTrade(outcomeIdx, proceedsWei, sharesWad)) return 0;
+        return proceedsWei;
+    }
+
+    function _averageMidForBuy(uint256 outcomeIdx, uint256 soldSharesWad, uint256 sharesWad)
+        internal
+        view
+        returns (uint256)
+    {
+        OutcomeMMState memory mm = _outcomeMM[outcomeIdx];
+        uint256 base = _basePrice();
+        if (mm.initialSharesWad == 0 || sharesWad == 0) return base;
+        uint256 headroom = WAD - base;
+        uint256 variable = (headroom * ((soldSharesWad * 2) + sharesWad)) / (2 * mm.initialSharesWad);
+        if (variable > headroom) variable = headroom;
+        return base + variable;
+    }
+
+    function _averageMidForSell(uint256 outcomeIdx, uint256 soldSharesWad, uint256 sharesWad)
+        internal
+        view
+        returns (uint256)
+    {
+        OutcomeMMState memory mm = _outcomeMM[outcomeIdx];
+        uint256 base = _basePrice();
+        if (mm.initialSharesWad == 0 || sharesWad == 0) return base;
+        uint256 headroom = WAD - base;
+        uint256 soldFactor = (soldSharesWad * 2) - sharesWad;
+        uint256 variable = (headroom * soldFactor) / (2 * mm.initialSharesWad);
+        if (variable > headroom) variable = headroom;
+        return base + variable;
+    }
+
+    function _midPrice(uint256 outcomeIdx, uint256 soldSharesWad) internal view returns (uint256) {
+        OutcomeMMState memory mm = _outcomeMM[outcomeIdx];
+        uint256 base = _basePrice();
+        if (mm.initialSharesWad == 0) return base;
+        uint256 headroom = WAD - base;
+        uint256 variable = (headroom * soldSharesWad) / mm.initialSharesWad;
+        if (variable > headroom) variable = headroom;
+        return base + variable;
+    }
+
+    function _basePrice() internal view returns (uint256) {
+        return WAD / outcomeCount;
+    }
+
+    function _applyAskSpread(uint256 midPriceWad) internal view returns (uint256) {
+        uint256 price = (midPriceWad * (MAX_BPS + mmSpreadBps)) / MAX_BPS;
+        return price > WAD ? WAD : price;
+    }
+
+    function _applyBidSpread(uint256 midPriceWad) internal view returns (uint256) {
+        return (midPriceWad * (MAX_BPS - mmSpreadBps)) / MAX_BPS;
+    }
+
+    function _bidBelowLastTrade(uint256 outcomeIdx, uint256 proceedsWei, uint256 sharesWad)
+        internal
+        view
+        returns (bool)
+    {
+        uint256 bidPrice = (proceedsWei * WAD) / sharesWad;
+        return bidPrice < lastTradePriceWad[outcomeIdx];
+    }
+
+    function _recordTradePrice(uint256 outcomeIdx, uint256 priceWad) internal {
+        lastTradePriceWad[outcomeIdx] = priceWad;
+        emit TradePriceRecorded(outcomeIdx, priceWad);
     }
 
     function _trackParticipant(address user) internal {
@@ -676,5 +892,7 @@ contract PredictionMarketV2 is ReentrancyGuard {
         require(ok, errorMessage);
     }
 
-    receive() external payable {}
+    receive() external payable {
+        marketPoolWei += msg.value;
+    }
 }

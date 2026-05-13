@@ -9,6 +9,27 @@ interface IHybridMarket {
     function getImpliedProbability(uint256 outcomeIdx) external view returns (uint256);
     function previewBuy(uint256 outcomeIdx, uint256 sharesWad) external view returns (uint256);
     function previewSell(uint256 outcomeIdx, uint256 sharesWad) external view returns (uint256);
+    function previewMMBuyFromState(uint256 outcomeIdx, uint256 soldSharesWad, uint256 sharesWad)
+        external
+        view
+        returns (uint256);
+    function previewMMSellFromState(
+        uint256 outcomeIdx,
+        uint256 soldSharesWad,
+        uint256 reserveWei,
+        uint256 sharesWad
+    ) external view returns (uint256);
+    function getMMOutcomeState(uint256 outcomeIdx)
+        external
+        view
+        returns (
+            uint256 initialSharesWad,
+            uint256 availableSharesWad,
+            uint256 soldSharesWad,
+            uint256 reserveWei,
+            uint256 bidPriceWad,
+            uint256 askPriceWad
+        );
 
     function buyFor(address trader, uint256 outcomeIdx, uint256 sharesWad, uint256 maxCostWei)
         external
@@ -26,6 +47,8 @@ interface IHybridMarket {
     function moveShares(address from, address to, uint256 outcomeIdx, uint256 sharesWad)
         external
         returns (bool);
+
+    function recordTradePrice(uint256 outcomeIdx, uint256 priceWad) external returns (bool);
 
     function mintCompleteSet(
         address outcomeARecipient,

@@ -6,11 +6,10 @@ import {Clones} from "@openzeppelin/contracts/proxy/Clones.sol";
 import {PredictionMarketV2} from "./PredictionMarketV2.sol";
 import {MarketRouter} from "./MarketRouter.sol";
 import {HybridOrderBook} from "./HybridOrderBook.sol";
-import {LMSRMath} from "./LMSRMath.sol";
 import {IResolutionManager} from "./interfaces/IResolutionManager.sol";
 
 /// @title HybridMarketFactory
-/// @notice Deploys and wires v2 CLOB-first markets with optional LMSR support.
+/// @notice Deploys and wires v2 CLOB-first markets with optional bounded MM support.
 contract HybridMarketFactory is Ownable {
     address[] public markets;
     mapping(address => bool) public isMarket;
@@ -24,7 +23,7 @@ contract HybridMarketFactory is Ownable {
     bool public creationPaused;
 
     int256 public minBWad = 1_000e18;
-    int256 public maxBWad = 1_000_000e18;
+    int256 public maxBWad = 10_000e18;
     uint256 public minDuration = 1 hours;
     uint256 public maxDuration = 365 days;
 
@@ -39,7 +38,7 @@ contract HybridMarketFactory is Ownable {
         uint256 resolutionTime,
         address resolutionManager,
         PredictionMarketV2.MarketMode mode,
-        int256 bWad,
+        int256 initialMmSharesWad,
         uint256 seedWei
     );
     event RouterUpdated(address indexed router);
@@ -80,13 +79,10 @@ contract HybridMarketFactory is Ownable {
         string calldata _invalidCondition
     ) external onlyOwner returns (address market) {
         require(!creationPaused, "FactoryV2: creation paused");
-        require(_modeRaw <= uint8(PredictionMarketV2.MarketMode.HYBRID_CLOB_LMSR), "FactoryV2: bad mode");
+        require(_modeRaw <= uint8(PredictionMarketV2.MarketMode.HYBRID_CLOB_MM), "FactoryV2: bad mode");
         PredictionMarketV2.MarketMode mode = PredictionMarketV2.MarketMode(_modeRaw);
         _validateCreation(_title, _description, _category, _outcomeLabels, mode, _bWad, _durationSeconds);
-        uint256 seedWei = mode == PredictionMarketV2.MarketMode.HYBRID_CLOB_LMSR
-            ? requiredSeed(_outcomeLabels.length, _bWad)
-            : 0;
-        if (seedWei > 0) require(address(this).balance >= seedWei, "FactoryV2: liquidity reserve low");
+        uint256 seedWei = 0;
 
         address[] memory operators = new address[](2);
         operators[0] = address(router);
@@ -242,7 +238,9 @@ contract HybridMarketFactory is Ownable {
     }
 
     function requiredSeed(uint256 outcomeCount, int256 bWad) public pure returns (uint256) {
-        return uint256(LMSRMath.initialLiquidity(outcomeCount, bWad));
+        outcomeCount;
+        bWad;
+        return 0;
     }
 
     function liquidityReserve() external view returns (uint256) {
@@ -289,11 +287,10 @@ contract HybridMarketFactory is Ownable {
         require(bytes(_category).length > 0, "FactoryV2: empty category");
         require(_outcomeLabels.length >= 2, "FactoryV2: need outcomes");
         if (_mode == PredictionMarketV2.MarketMode.CLOB_ONLY) {
-            require(_outcomeLabels.length == 2, "FactoryV2: CLOB needs binary");
             require(_bWad == 0, "FactoryV2: CLOB b must be 0");
         } else {
-            require(_bWad >= minBWad, "FactoryV2: b too small");
-            require(_bWad <= maxBWad, "FactoryV2: b too large");
+            require(_bWad >= minBWad, "FactoryV2: MM shares too small");
+            require(_bWad <= maxBWad, "FactoryV2: MM shares too large");
         }
         require(
             _durationSeconds >= minDuration && _durationSeconds <= maxDuration,

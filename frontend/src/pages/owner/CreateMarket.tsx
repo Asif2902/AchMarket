@@ -168,7 +168,7 @@ export default function CreateMarket() {
   const resolutionTime = Math.floor(expiryDate.getTime() / 1000) + resolutionBufferSeconds;
   const marketMode = instantLiquidityEnabled ? MARKET_MODE_HYBRID : MARKET_MODE_CLOB_ONLY;
   const requiredSeedEth = instantLiquidityEnabled && Number.isFinite(parseFloat(bValue)) && outcomes.length >= 2
-    ? Math.max(0, parseFloat(bValue) * Math.log(outcomes.length))
+    ? Math.max(0, parseFloat(bValue))
     : 0;
 
   const addOutcome = () => setOutcomes([...outcomes, '']);
@@ -270,9 +270,8 @@ export default function CreateMarket() {
     actualCategory.trim().length > 0 &&
     outcomes.length >= 2 &&
     outcomes.every(o => o.trim().length > 0) &&
-    (instantLiquidityEnabled || outcomes.length === 2) &&
     durationSeconds >= 3600 &&
-    (!instantLiquidityEnabled || parseFloat(bValue) >= 1000) &&
+    (!instantLiquidityEnabled || (parseFloat(bValue) >= 1000 && parseFloat(bValue) <= 10000)) &&
     resolutionSource.trim().length > 0 &&
     fallbackResolutionSource.trim().length > 0 &&
     invalidCondition.trim().length > 0 &&
@@ -285,7 +284,7 @@ export default function CreateMarket() {
     actualCategory.trim().length > 0,
     outcomes.length >= 2 && outcomes.every(o => o.trim().length > 0),
     durationSeconds >= 3600,
-    !instantLiquidityEnabled || parseFloat(bValue) >= 1000,
+    !instantLiquidityEnabled || (parseFloat(bValue) >= 1000 && parseFloat(bValue) <= 10000),
     resolutionSource.trim().length > 0,
     fallbackResolutionSource.trim().length > 0,
     invalidCondition.trim().length > 0,
@@ -1110,29 +1109,24 @@ export default function CreateMarket() {
             <SectionHeader
               icon={<svg className="w-4 h-4 text-primary-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" /></svg>}
               title="Market Engine"
-              subtitle="CLOB-only is the default. Instant liquidity is reserved for selected markets."
+              subtitle="CLOB-only is available for any outcome count. Instant liquidity uses bounded per-outcome MM inventory."
             />
             <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/[0.04] p-3">
               <div className="flex items-start justify-between gap-3">
                 <div>
                   <p className="text-sm font-semibold text-white">CLOB-only</p>
-                  <p className="text-xs text-dark-400 mt-1">No protocol seed. Orders match against real user liquidity only.</p>
+                  <p className="text-xs text-dark-400 mt-1">No MM inventory. Orders match against real user liquidity only.</p>
                 </div>
                 <span className="text-2xs font-semibold text-emerald-300 rounded-md border border-emerald-500/25 bg-emerald-500/10 px-2 py-1">
                   Default
                 </span>
               </div>
-              {!instantLiquidityEnabled && outcomes.length !== 2 && (
-                <p className="mt-3 text-xs text-amber-300">
-                  CLOB-only markets currently require exactly two outcomes. Enable instant liquidity for multi-outcome markets.
-                </p>
-              )}
             </div>
 
             <label className="mt-4 flex items-center justify-between gap-3 rounded-xl border border-white/[0.08] bg-dark-900/35 p-3 cursor-pointer">
               <div>
                 <p className="text-sm font-semibold text-white">Enable instant liquidity</p>
-                <p className="text-xs text-dark-400 mt-1">Hybrid mode uses admin-funded LMSR only after CLOB liquidity.</p>
+                <p className="text-xs text-dark-400 mt-1">Hybrid mode routes through CLOB and bounded same-outcome MM liquidity.</p>
               </div>
               <input
                 type="checkbox"
@@ -1150,6 +1144,7 @@ export default function CreateMarket() {
                     value={bValue}
                     onChange={e => setBValue(e.target.value)}
                     min="1000"
+                    max="10000"
                     step="100"
                     className="input-field flex-1"
                     placeholder="1000"
@@ -1165,16 +1160,16 @@ export default function CreateMarket() {
                     </button>
                     {showBTooltip && (
                       <div className="absolute bottom-full right-0 mb-2 w-72 p-4 rounded-xl bg-dark-800 border border-white/[0.08] text-xs text-dark-200 shadow-elevated z-10 animate-fade-in">
-                        <p className="font-semibold text-white mb-2">Admin LMSR Liquidity</p>
-                        <p className="text-dark-300 leading-relaxed">This is protocol risk capital for instant fills. It is not a normal refundable LP deposit.</p>
+                        <p className="font-semibold text-white mb-2">MM Inventory</p>
+                        <p className="text-dark-300 leading-relaxed">This is the maximum number of shares the MM can issue per outcome. Buybacks are limited to same-outcome reserve collected from MM buys.</p>
                         <div className="divider my-3" />
-                        <p className="text-dark-400">Higher values reduce price movement but require more seed capital.</p>
+                        <p className="text-dark-400">Higher values reduce price movement and increase available instant buy depth.</p>
                       </div>
                     )}
                   </div>
                 </div>
                 <div className="flex gap-2">
-                  {[1000, 2500, 5000, 10000, 50000].map(v => (
+                  {[1000, 2500, 5000, 7500, 10000].map(v => (
                     <button
                       key={v}
                       onClick={() => setBValue(v.toString())}
@@ -1189,15 +1184,15 @@ export default function CreateMarket() {
 
             <div className="mt-4 p-3 rounded-xl bg-dark-900/40 border border-white/[0.06]">
               <p className="text-2xs uppercase tracking-[0.12em] text-dark-500 font-semibold mb-1">
-                {instantLiquidityEnabled ? 'Required protocol seed' : 'Required protocol seed'}
+                {instantLiquidityEnabled ? 'MM inventory per outcome' : 'MM inventory per outcome'}
               </p>
               <p className="text-sm text-white font-semibold tabular-nums">
-                {requiredSeedEth.toFixed(4)} USDC
+                {requiredSeedEth.toFixed(0)} shares
               </p>
               <p className="text-xs text-dark-500 mt-1">
                 {instantLiquidityEnabled
-                  ? 'Funded from the factory reserve. This capital is at risk and should be used selectively.'
-                  : 'CLOB-only markets require no protocol seed liquidity.'}
+                  ? 'No fake sell liquidity is created. MM buybacks only use reserve from same-outcome MM buys.'
+                  : 'CLOB-only markets use no protocol MM inventory.'}
               </p>
             </div>
           </div>
@@ -1629,8 +1624,8 @@ export default function CreateMarket() {
                 {[
                   { label: 'Outcomes', value: outcomes.filter(o => o.trim()).length.toString(), ok: outcomes.length >= 2 && outcomes.every(o => o.trim().length > 0) },
                   { label: 'Duration', value: durationSeconds >= 86400 ? `${Math.floor(durationSeconds / 86400)} days` : `${Math.floor(durationSeconds / 3600)} hours`, ok: durationSeconds >= 3600 },
-                  { label: 'Engine', value: instantLiquidityEnabled ? 'Hybrid' : 'CLOB-only', ok: instantLiquidityEnabled || outcomes.length === 2 },
-                  { label: 'Seed', value: `${requiredSeedEth.toFixed(2)} USDC`, ok: !instantLiquidityEnabled || requiredSeedEth > 0 },
+                  { label: 'Engine', value: instantLiquidityEnabled ? 'Hybrid' : 'CLOB-only', ok: true },
+                  { label: 'MM inventory', value: instantLiquidityEnabled ? `${requiredSeedEth.toFixed(0)} shares` : '0', ok: !instantLiquidityEnabled || (requiredSeedEth >= 1000 && requiredSeedEth <= 10000) },
                   { label: 'Expiry', value: durationSeconds >= 3600 ? expiryDate.toLocaleDateString() : '-', ok: durationSeconds >= 3600 },
                   { label: 'Resolution', value: resolutionSource.trim() ? 'Configured' : '-', ok: resolutionSource.trim().length > 0 && fallbackResolutionSource.trim().length > 0 && invalidCondition.trim().length > 0 },
                 ].map(row => (
@@ -1686,17 +1681,17 @@ export default function CreateMarket() {
               </div>
               <div>
                 <span className="text-dark-400">Engine: </span>
-                <span className="text-white">{instantLiquidityEnabled ? 'Hybrid CLOB + LMSR' : 'CLOB-only'}</span>
+                <span className="text-white">{instantLiquidityEnabled ? 'Hybrid CLOB + MM' : 'CLOB-only'}</span>
               </div>
               {instantLiquidityEnabled && (
                 <>
                   <div>
-                    <span className="text-dark-400">Liquidity depth: </span>
+                    <span className="text-dark-400">MM inventory per outcome: </span>
                     <span className="text-white">{bValue}</span>
                   </div>
                   <div>
-                    <span className="text-dark-400">Factory-funded seed: </span>
-                    <span className="text-white">{requiredSeedEth.toFixed(4)} USDC</span>
+                    <span className="text-dark-400">Initial price: </span>
+                    <span className="text-white">{(1 / outcomes.length).toFixed(3)} USDC</span>
                   </div>
                 </>
               )}

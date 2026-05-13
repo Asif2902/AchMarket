@@ -5,7 +5,7 @@ import { MARKET_ROUTER_ADDRESS, NETWORK, ORDER_BOOK_ADDRESS } from '../config/ne
 
 export interface TradeEvent {
   type: 'buy' | 'sell';
-  source: 'CLOB' | 'LMSR' | 'HYBRID';
+  source: 'CLOB' | 'MM' | 'SPLIT';
   trader: string;
   outcomeIndex: number;
   sharesWad: bigint;
@@ -85,7 +85,7 @@ export async function fetchTradeEvents(
     }
   }
 
-  // Legacy LMSR events are kept as a fallback for older deployments. New router
+  // Legacy MM events are kept as a fallback for older deployments. New router
   // TradeExecuted logs are authoritative, so skip duplicated transaction hashes.
   if (buyData.status === '1' && Array.isArray(buyData.result)) {
     for (const log of buyData.result as BlockscoutLogEntry[]) {
@@ -113,7 +113,7 @@ export async function fetchTradeEvents(
 
 /**
  * Compute total trading volume (buys + sells) from trade events.
- * This is more accurate than the on-chain totalVolumeWei because it includes CLOB and LMSR fills.
+ * This is more accurate than the on-chain totalVolumeWei because it includes CLOB and MM fills.
  */
 export function computeVolumeFromEvents(events: TradeEvent[]): bigint {
   let total = 0n;
@@ -181,7 +181,7 @@ function parseTradeLog(log: BlockscoutLogEntry, type: 'buy' | 'sell'): TradeEven
 
     return {
       type,
-      source: 'LMSR',
+      source: 'MM',
       trader,
       outcomeIndex,
       sharesWad,
@@ -218,7 +218,7 @@ function parseExecutedTradeLog(log: BlockscoutLogEntry): TradeEvent | null {
     const notionalWei = decoded[5] as bigint;
     const feeWei = decoded[6] as bigint;
     const blockNumber = parseInt(log.blockNumber, 16);
-    const source = sourceRaw === 2 ? 'HYBRID' : sourceRaw === 1 ? 'LMSR' : 'CLOB';
+    const source = sourceRaw === 2 ? 'SPLIT' : sourceRaw === 1 ? 'MM' : 'CLOB';
 
     return {
       type: side === 0 ? 'buy' : 'sell',

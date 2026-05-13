@@ -71,6 +71,15 @@ interface DepthLevel {
   shares: bigint;
 }
 
+interface MMQuoteState {
+  initialSharesWad: bigint;
+  availableSharesWad: bigint;
+  soldSharesWad: bigint;
+  reserveWei: bigint;
+  bidPriceWad: bigint;
+  askPriceWad: bigint;
+}
+
 interface UserLimitOrder {
   id: bigint;
   market: string;
@@ -118,9 +127,6 @@ function buildTradeHistory(detailData: MarketDetailData, events: TradeEvent[]): 
     if (event.outcomeIndex >= outcomeCount || event.priceWad === 0n) continue;
     const tradedPrice = Number(ethers.formatEther(event.priceWad)) * 100;
     lastPrices[event.outcomeIndex] = tradedPrice;
-    if (outcomeCount === 2) {
-      lastPrices[event.outcomeIndex === 0 ? 1 : 0] = 100 - tradedPrice;
-    }
 
     const point: ProbHistoryPoint = { time: event.timestamp };
     detailData.outcomeLabels.forEach((label, i) => {
@@ -253,11 +259,14 @@ export default function MarketDetail() {
   const [limitPrice, setLimitPrice] = useState('');
   const [limitExpiryMinutes, setLimitExpiryMinutes] = useState('1440');
   const [slippage, setSlippage] = useState(1);
+  const [allowPartialFill, setAllowPartialFill] = useState(false);
   const [estimatedShares, setEstimatedShares] = useState<number | null>(null);
+  const [previewFilledSharesWad, setPreviewFilledSharesWad] = useState<bigint>(0n);
   const [previewCost, setPreviewCost] = useState<bigint | null>(null);
   const [executionSource, setExecutionSource] = useState('');
   const [orderBookBids, setOrderBookBids] = useState<DepthLevel[]>([]);
   const [orderBookAsks, setOrderBookAsks] = useState<DepthLevel[]>([]);
+  const [mmQuote, setMmQuote] = useState<MMQuoteState | null>(null);
   const [orderBookLoading, setOrderBookLoading] = useState(false);
   const [userOrders, setUserOrders] = useState<UserLimitOrder[]>([]);
   const [userOrdersLoading, setUserOrdersLoading] = useState(false);
@@ -332,7 +341,9 @@ export default function MarketDetail() {
       setSelectedOutcome(0);
       setShareAmount('');
       setInventoryAmount('');
+      setMmQuote(null);
       setEstimatedShares(null);
+      setPreviewFilledSharesWad(0n);
       setPreviewCost(null);
       setPreviewKey('');
       setUserOrders([]);
@@ -526,6 +537,7 @@ export default function MarketDetail() {
     if (!marketAddress) {
       setOrderBookBids([]);
       setOrderBookAsks([]);
+      setMmQuote(null);
       return;
     }
 
@@ -534,9 +546,11 @@ export default function MarketDetail() {
       setOrderBookLoading(true);
       try {
         const orderBook = new ethers.Contract(ORDER_BOOK_ADDRESS, ORDER_BOOK_ABI, readProvider);
-        const [bidDepth, askDepth] = await Promise.all([
+        const market = new ethers.Contract(marketAddress, MARKET_V2_ABI, readProvider);
+        const [bidDepth, askDepth, mmState] = await Promise.all([
           orderBook.getDepth(marketAddress, selectedOutcome, 0, 10),
           orderBook.getDepth(marketAddress, selectedOutcome, 1, 10),
+          market.getMMOutcomeState(selectedOutcome).catch(() => null),
         ]);
         if (cancelled) return;
         const parseDepth = (depth: DepthResult): DepthLevel[] => {
@@ -548,10 +562,19 @@ export default function MarketDetail() {
         };
         setOrderBookBids(parseDepth(bidDepth));
         setOrderBookAsks(parseDepth(askDepth));
+        setMmQuote(mmState ? {
+          initialSharesWad: mmState.initialSharesWad ?? mmState[0],
+          availableSharesWad: mmState.availableSharesWad ?? mmState[1],
+          soldSharesWad: mmState.soldSharesWad ?? mmState[2],
+          reserveWei: mmState.reserveWei ?? mmState[3],
+          bidPriceWad: mmState.bidPriceWad ?? mmState[4],
+          askPriceWad: mmState.askPriceWad ?? mmState[5],
+        } : null);
       } catch (err) {
         if (!cancelled) {
           setOrderBookBids([]);
           setOrderBookAsks([]);
+          setMmQuote(null);
         }
       } finally {
         if (!cancelled) setOrderBookLoading(false);
@@ -797,6 +820,7 @@ export default function MarketDetail() {
       if (!shareAmount || parseFloat(shareAmount) <= 0) {
         setPreviewCost(null);
         setEstimatedShares(null);
+        setPreviewFilledSharesWad(0n);
         setExecutionSource('');
         setPreviewKey('');
         setPreviewLoading(false);
@@ -805,50 +829,56 @@ export default function MarketDetail() {
       if (executionMode === 'limit') {
         setPreviewCost(null);
         setEstimatedShares(null);
+        setPreviewFilledSharesWad(0n);
         setExecutionSource('');
         setPreviewKey(inputKey);
         setPreviewLoading(false);
         return;
       }
       if (tradeTab === 'buy') {
-        if (!detail || !marketAddress) { setEstimatedShares(null); setPreviewLoading(false); return; }
+        if (!detail || !marketAddress) { setEstimatedShares(null); setPreviewFilledSharesWad(0n); setPreviewLoading(false); return; }
         try {
           const sharesWad = ethers.parseEther(shareAmount);
           const router = new ethers.Contract(MARKET_ROUTER_ADDRESS, MARKET_ROUTER_ABI, readProvider);
           const preview = await router.previewTrade(marketAddress, selectedOutcome, 0, sharesWad, 8);
-          const filledShares = Number(ethers.formatEther(preview.filledSharesWad ?? preview[1]));
+          const filledSharesWad = preview.filledSharesWad ?? preview[1];
+          const filledShares = Number(ethers.formatEther(filledSharesWad));
           const costWei = preview.costWei ?? preview[4];
+          setPreviewFilledSharesWad(filledSharesWad);
           setEstimatedShares(filledShares > 0 && costWei > 0n ? filledShares : null);
           setPreviewCost(filledShares > 0 && costWei > 0n ? costWei : null);
-          const lmsrShares = preview.lmsrSharesWad ?? preview[3];
-          setExecutionSource(lmsrShares > 0n
-            ? `${formatWad(preview.orderBookSharesWad ?? preview[2])} CLOB + ${formatWad(lmsrShares)} instant`
+          const mmShares = preview.mmSharesWad ?? preview[3];
+          setExecutionSource(mmShares > 0n
+            ? `${formatWad(preview.orderBookSharesWad ?? preview[2])} CLOB + ${formatWad(mmShares)} MM`
             : `${formatWad(preview.orderBookSharesWad ?? preview[2])} CLOB`);
           setPreviewKey(inputKey);
         } catch {
           setEstimatedShares(null);
           setPreviewCost(null);
+          setPreviewFilledSharesWad(0n);
           setExecutionSource('');
         } finally {
           setPreviewLoading(false);
         }
       } else {
-        if (!marketAddress) { setPreviewCost(null); setPreviewLoading(false); return; }
+        if (!marketAddress) { setPreviewCost(null); setPreviewFilledSharesWad(0n); setPreviewLoading(false); return; }
         try {
           const router = new ethers.Contract(MARKET_ROUTER_ADDRESS, MARKET_ROUTER_ABI, readProvider);
           const sharesWad = ethers.parseEther(shareAmount);
           const preview = await router.previewTrade(marketAddress, selectedOutcome, 1, sharesWad, 8);
           const proceedsWei = preview.proceedsWei ?? preview[5];
           const filledShares = preview.filledSharesWad ?? preview[1];
+          setPreviewFilledSharesWad(filledShares);
           setPreviewCost(filledShares > 0n && proceedsWei > 0n ? proceedsWei : null);
-          const lmsrShares = preview.lmsrSharesWad ?? preview[3];
-          setExecutionSource(lmsrShares > 0n
-            ? `${formatWad(preview.orderBookSharesWad ?? preview[2])} CLOB + ${formatWad(lmsrShares)} instant`
+          const mmShares = preview.mmSharesWad ?? preview[3];
+          setExecutionSource(mmShares > 0n
+            ? `${formatWad(preview.orderBookSharesWad ?? preview[2])} CLOB + ${formatWad(mmShares)} MM`
             : `${formatWad(preview.orderBookSharesWad ?? preview[2])} CLOB`);
           setEstimatedShares(null);
           setPreviewKey(inputKey);
         } catch {
           setPreviewCost(null);
+          setPreviewFilledSharesWad(0n);
           setExecutionSource('');
         } finally {
           setPreviewLoading(false);
@@ -874,15 +904,16 @@ export default function MarketDetail() {
     try {
       const router = new ethers.Contract(MARKET_ROUTER_ADDRESS, MARKET_ROUTER_ABI, signer);
       const sharesWad = ethers.parseEther(shareAmount);
+      const minSharesOut = allowPartialFill ? 1n : sharesWad;
       const maxCost = applyBuySlippage(previewCost, slippage);
       const deadline = Math.floor(Date.now() / 1000) + 300;
-      const tx = await router.buy(marketAddress, selectedOutcome, sharesWad, sharesWad, maxCost, 8, deadline, { value: maxCost });
+      const tx = await router.buy(marketAddress, selectedOutcome, sharesWad, minSharesOut, maxCost, 8, deadline, { value: maxCost });
       showToast({ type: 'pending', title: `Buying ${outcomeName}...`, message: `${shareAmount} shares submitted`, txHash: tx.hash });
       setTxMessage({ type: 'success', text: 'Transaction submitted. Waiting for confirmation...' });
       await tx.wait();
       showToast({ type: 'success', title: `Bought ${outcomeName}`, message: `${shareAmount} shares for ~${formatUSDC(previewCost)} USDC`, txHash: tx.hash });
       setTxMessage({ type: 'success', text: 'Shares purchased successfully!' });
-      setShareAmount(''); setEstimatedShares(null);
+      setShareAmount(''); setEstimatedShares(null); setPreviewFilledSharesWad(0n);
       await refreshAfterTransaction();
     } catch (err) {
       const errMsg = parseContractError(err);
@@ -898,9 +929,10 @@ export default function MarketDetail() {
     try {
       const router = new ethers.Contract(MARKET_ROUTER_ADDRESS, MARKET_ROUTER_ABI, signer);
       const sharesWad = ethers.parseEther(shareAmount);
+      const minSharesOut = allowPartialFill ? 1n : sharesWad;
       const minReceive = applySellSlippage(previewCost, slippage);
       const deadline = Math.floor(Date.now() / 1000) + 300;
-      const tx = await router.sell(marketAddress, selectedOutcome, sharesWad, minReceive, 8, deadline);
+      const tx = await router.sell(marketAddress, selectedOutcome, sharesWad, minSharesOut, minReceive, 8, deadline);
       showToast({ type: 'pending', title: `Selling ${outcomeName}...`, message: `${shareAmount} shares submitted`, txHash: tx.hash });
       setTxMessage({ type: 'success', text: 'Transaction submitted. Waiting for confirmation...' });
       await tx.wait();
@@ -1083,7 +1115,7 @@ export default function MarketDetail() {
   let profit = 0;
   const hasExistingShares = userInfo?.shares[selectedOutcome] && userInfo.shares[selectedOutcome] > 0n;
   if (estimatedShares !== null && shareAmount && tradeTab === 'buy' && previewCost !== null) {
-    const sharesWad = ethers.parseEther(estimatedShares.toString());
+    const sharesWad = previewFilledSharesWad;
     const totalWinShares = detail.totalSharesWad[selectedOutcome] + sharesWad;
     const costWei = previewCost;
     // Use actual contract balance (more accurate than totalVolumeWei if sells occurred)
@@ -1113,6 +1145,23 @@ export default function MarketDetail() {
   const limitSharesWad: bigint = (() => {
     try { return shareAmount && parseFloat(shareAmount) > 0 ? ethers.parseEther(shareAmount) : 0n; } catch { return 0n; }
   })();
+  const requestedSharesWad = limitSharesWad;
+  const isPreviewPartial = executionMode === 'instant'
+    && requestedSharesWad > 0n
+    && previewFilledSharesWad > 0n
+    && previewFilledSharesWad < requestedSharesWad;
+  const noSellLiquidity = executionMode === 'instant'
+    && tradeTab === 'sell'
+    && requestedSharesWad > 0n
+    && !previewLoading
+    && previewKey === currentInputKey
+    && previewCost === null;
+  const buyLiquidityInsufficient = executionMode === 'instant'
+    && tradeTab === 'buy'
+    && requestedSharesWad > 0n
+    && !previewLoading
+    && previewKey === currentInputKey
+    && (previewCost === null || (isPreviewPartial && !allowPartialFill));
   const limitPriceWad: bigint = (() => {
     try { return limitPrice && parseFloat(limitPrice) > 0 ? ethers.parseEther(limitPrice) : 0n; } catch { return 0n; }
   })();
@@ -1121,8 +1170,10 @@ export default function MarketDetail() {
     : 0n;
   const limitPayoutWei = limitSharesWad;
   const sellAvgPrice = previewCost !== null && shareAmount && parseFloat(shareAmount) > 0
-    ? Number(ethers.formatEther(previewCost)) / parseFloat(shareAmount)
+    ? Number(ethers.formatEther(previewCost)) / Math.max(Number(ethers.formatEther(previewFilledSharesWad || requestedSharesWad)), 0.0000001)
     : 0;
+  const buyPriceImpact = avgPrice > 0 ? avgPrice - selectedOutcomePrice : 0;
+  const sellPriceImpact = sellAvgPrice > 0 ? selectedOutcomePrice - sellAvgPrice : 0;
   const inventoryCostWei: bigint = (() => {
     try { return inventoryAmount && parseFloat(inventoryAmount) > 0 ? ethers.parseEther(inventoryAmount) : 0n; } catch { return 0n; }
   })();
@@ -1730,20 +1781,20 @@ export default function MarketDetail() {
               </div>
             )}
 
-            {/* Resolved pool & fee info */}
+            {/* Resolved pool info */}
             {isResolved && detail.resolvedPoolWei > 0n && (() => {
-              const grossPool = (detail.resolvedPoolWei * 10000n) / 9975n;
-              const fee = grossPool - detail.resolvedPoolWei;
+              const winningShares = detail.totalSharesWad[detail.winningOutcome] > 0n ? detail.totalSharesWad[detail.winningOutcome] : 0n;
+              const payoutPerShare = winningShares > 0n ? (detail.resolvedPoolWei * 1_000_000_000_000_000_000n) / winningShares : 0n;
               return (
                 <div className="card p-4">
                   <div className="grid grid-cols-2 gap-4">
                     <div>
-                      <span className="text-2xs text-dark-500 font-medium uppercase tracking-wider">Prize Pool (after fee)</span>
+                      <span className="text-2xs text-dark-500 font-medium uppercase tracking-wider">Claimable Pool</span>
                       <p className="text-base font-bold text-white mt-0.5 flex items-center gap-1.5"><UsdcIcon size={16} />{formatCompactUSDC(detail.resolvedPoolWei)} USDC</p>
                     </div>
                     <div>
-                      <span className="text-2xs text-dark-500 font-medium uppercase tracking-wider">Settlement Fee (0.75%)</span>
-                      <p className="text-base font-bold text-dark-400 mt-0.5 flex items-center gap-1.5"><UsdcIcon size={16} className="opacity-50" />{formatCompactUSDC(fee)} USDC</p>
+                      <span className="text-2xs text-dark-500 font-medium uppercase tracking-wider">Payout / Winning Share</span>
+                      <p className="text-base font-bold text-emerald-400 mt-0.5 flex items-center gap-1.5"><UsdcIcon size={16} />{formatUSDC(payoutPerShare)} USDC</p>
                     </div>
                   </div>
                 </div>
@@ -1870,7 +1921,7 @@ export default function MarketDetail() {
 
                 <div className="grid grid-cols-2 gap-2 mb-3">
                   <button
-                    onClick={() => { setExecutionMode('instant'); setShareAmount(''); setPreviewCost(null); setEstimatedShares(null); }}
+                    onClick={() => { setExecutionMode('instant'); setShareAmount(''); setPreviewCost(null); setEstimatedShares(null); setPreviewFilledSharesWad(0n); }}
                     className={`p-2.5 rounded-xl text-xs font-semibold border transition-all ${
                       executionMode === 'instant'
                         ? 'bg-primary-500/15 text-primary-300 border-primary-500/30'
@@ -1880,7 +1931,7 @@ export default function MarketDetail() {
                     Instant
                   </button>
                   <button
-                    onClick={() => { setExecutionMode('limit'); setShareAmount(''); setPreviewCost(null); setEstimatedShares(null); }}
+                    onClick={() => { setExecutionMode('limit'); setShareAmount(''); setPreviewCost(null); setEstimatedShares(null); setPreviewFilledSharesWad(0n); }}
                     className={`p-2.5 rounded-xl text-xs font-semibold border transition-all ${
                       executionMode === 'limit'
                         ? 'bg-cyan-500/15 text-cyan-300 border-cyan-500/30'
@@ -1907,7 +1958,7 @@ export default function MarketDetail() {
                 {/* Buy/Sell tabs */}
                 <div className="flex rounded-xl bg-dark-900/60 p-0.5 mb-5 border border-white/[0.06]">
                   <button
-                    onClick={() => { setTradeTab('buy'); setShareAmount(''); setPreviewCost(null); setEstimatedShares(null); }}
+                    onClick={() => { setTradeTab('buy'); setShareAmount(''); setPreviewCost(null); setEstimatedShares(null); setPreviewFilledSharesWad(0n); }}
                     className={`flex-1 py-2 rounded-[10px] text-sm font-semibold transition-all ${
                       tradeTab === 'buy' ? 'bg-emerald-500/15 text-emerald-400 shadow-sm' : 'text-dark-500 hover:text-dark-300'
                     }`}
@@ -1915,7 +1966,7 @@ export default function MarketDetail() {
                     Buy
                   </button>
                   <button
-                    onClick={() => { setTradeTab('sell'); setShareAmount(''); setPreviewCost(null); setEstimatedShares(null); }}
+                    onClick={() => { setTradeTab('sell'); setShareAmount(''); setPreviewCost(null); setEstimatedShares(null); setPreviewFilledSharesWad(0n); }}
                     className={`flex-1 py-2 rounded-[10px] text-sm font-semibold transition-all ${
                       tradeTab === 'sell' ? 'bg-red-500/15 text-red-400 shadow-sm' : 'text-dark-500 hover:text-dark-300'
                     }`}
@@ -2051,6 +2102,45 @@ export default function MarketDetail() {
                               <span className="text-xs font-mono text-white">No two-sided book</span>
                             )}
                           </div>
+                          {mmQuote && mmQuote.initialSharesWad > 0n && (
+                            <div className="px-3 py-2 border-b border-white/[0.06] bg-cyan-500/[0.04]">
+                              <div className="flex items-center justify-between gap-2 mb-2">
+                                <div>
+                                  <p className="text-2xs uppercase tracking-[0.12em] text-cyan-300/80 font-semibold">MM Quote</p>
+                                  <p className="text-2xs text-white/45">
+                                    {formatWad(mmQuote.availableSharesWad)} available, {formatUSDC(mmQuote.reserveWei)} USDC same-outcome buyback reserve
+                                  </p>
+                                </div>
+                                <span className="text-2xs rounded-md border border-cyan-400/20 bg-cyan-400/10 px-2 py-1 text-cyan-200">Same outcome only</span>
+                              </div>
+                              <div className="grid grid-cols-2 gap-2">
+                                <button
+                                  type="button"
+                                  disabled={mmQuote.bidPriceWad === 0n}
+                                  onClick={() => {
+                                    setTradeTab('sell');
+                                    setExecutionMode('instant');
+                                  }}
+                                  className="rounded-lg border border-emerald-500/20 bg-emerald-500/10 px-2.5 py-2 text-left disabled:opacity-45"
+                                >
+                                  <p className="text-2xs text-emerald-300/70 uppercase tracking-[0.1em]">MM Bid</p>
+                                  <p className="text-sm font-mono font-semibold text-emerald-300">{mmQuote.bidPriceWad > 0n ? Number(ethers.formatEther(mmQuote.bidPriceWad)).toFixed(4) : 'No buyback'}</p>
+                                </button>
+                                <button
+                                  type="button"
+                                  disabled={mmQuote.askPriceWad === 0n}
+                                  onClick={() => {
+                                    setTradeTab('buy');
+                                    setExecutionMode('instant');
+                                  }}
+                                  className="rounded-lg border border-red-500/20 bg-red-500/10 px-2.5 py-2 text-left disabled:opacity-45"
+                                >
+                                  <p className="text-2xs text-red-300/70 uppercase tracking-[0.1em]">MM Ask</p>
+                                  <p className="text-sm font-mono font-semibold text-red-300">{mmQuote.askPriceWad > 0n ? Number(ethers.formatEther(mmQuote.askPriceWad)).toFixed(4) : 'Sold out'}</p>
+                                </button>
+                              </div>
+                            </div>
+                          )}
                           <DepthRows
                             levels={orderBookBids}
                             side="bid"
@@ -2212,24 +2302,35 @@ export default function MarketDetail() {
 
                 {/* Slippage */}
                 {executionMode === 'instant' && (
-                <div className="flex items-center justify-between mb-4">
-                  <label className="text-2xs text-dark-500 font-medium">Slippage</label>
-                  <div className="flex items-center gap-0.5">
-                    {[0.5, 1, 2, 5].map(s => (
-                      <button
-                        key={s}
-                        onClick={() => setSlippage(s)}
-                        className={`px-2 py-1 rounded-md text-2xs font-semibold transition-all ${
-                          slippage === s
-                            ? 'bg-primary-600/20 text-primary-400'
-                            : 'text-dark-500 hover:text-dark-300 hover:bg-white/[0.04]'
-                        }`}
-                      >
-                        {s}%
-                      </button>
-                    ))}
+                  <div className="mb-4 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <label className="text-2xs text-dark-500 font-medium">Slippage</label>
+                      <div className="flex items-center gap-0.5">
+                        {[0.5, 1, 2, 5].map(s => (
+                          <button
+                            key={s}
+                            onClick={() => setSlippage(s)}
+                            className={`px-2 py-1 rounded-md text-2xs font-semibold transition-all ${
+                              slippage === s
+                                ? 'bg-primary-600/20 text-primary-400'
+                                : 'text-dark-500 hover:text-dark-300 hover:bg-white/[0.04]'
+                            }`}
+                          >
+                            {s}%
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    <label className="flex items-center justify-between gap-3 rounded-xl border border-white/[0.08] bg-dark-900/35 px-3 py-2 cursor-pointer">
+                      <span className="text-xs text-white/65">Allow partial fill</span>
+                      <input
+                        type="checkbox"
+                        checked={allowPartialFill}
+                        onChange={(e) => setAllowPartialFill(e.target.checked)}
+                        className="h-4 w-4 accent-primary-500"
+                      />
+                    </label>
                   </div>
-                </div>
                 )}
 
                 {executionMode === 'limit' && limitSharesWad > 0n && limitPriceWad > 0n && (
@@ -2259,10 +2360,14 @@ export default function MarketDetail() {
                     <PreviewRow label="Side" value="Buy" />
                     <PreviewRow label="Outcome" value={selectedOutcomeLabel} />
                     <PreviewRow label="Amount" value={`${formatWad(ethers.parseEther(shareAmount))} shares`} />
-                    <PreviewRow label="Est. Shares" value={previewLoading ? '...' : `${estimatedShares.toFixed(4)}`} />
+                    <PreviewRow label="Est. Fill" value={previewLoading ? '...' : `${formatWad(previewFilledSharesWad)} shares`} />
                     <PreviewRow label="Avg Price" value={previewLoading ? '...' : `${avgPrice.toFixed(4)} USDC`} />
+                    <PreviewRow label="Price Impact" value={`${buyPriceImpact >= 0 ? '+' : ''}${buyPriceImpact.toFixed(4)} USDC`} accent={buyPriceImpact > 0.05 ? 'red' : 'green'} />
                     {previewCost !== null && <PreviewRow label="Router Cost" value={`${formatUSDC(previewCost)} USDC`} />}
                     {executionSource && <PreviewRow label="Route" value={executionSource} muted />}
+                    {isPreviewPartial && (
+                      <PreviewRow label="Partial Fill" value={allowPartialFill ? 'Allowed' : 'Disabled'} accent={allowPartialFill ? 'green' : 'red'} />
+                    )}
                     {estimatedPayout !== null && (
                       <>
                         <PreviewRow label="Est. Payout if Wins" value={`${formatUSDC(estimatedPayout)} USDC`} accent={profit >= 0 ? 'green' : 'red'} />
@@ -2291,9 +2396,14 @@ export default function MarketDetail() {
                     <PreviewRow label="Side" value="Sell" />
                     <PreviewRow label="Outcome" value={selectedOutcomeLabel} />
                     <PreviewRow label="Amount" value={`${formatWad(ethers.parseEther(shareAmount))} shares`} />
+                    <PreviewRow label="Est. Fill" value={`${formatWad(previewFilledSharesWad)} shares`} />
                     <PreviewRow label="Avg Price" value={`${sellAvgPrice.toFixed(4)} USDC`} />
+                    <PreviewRow label="Price Impact" value={`${sellPriceImpact >= 0 ? '-' : '+'}${Math.abs(sellPriceImpact).toFixed(4)} USDC`} accent={sellPriceImpact > 0.05 ? 'red' : 'green'} />
                     <PreviewRow label="Est. Proceeds" value={previewLoading ? '...' : `${formatUSDC(previewCost)} USDC`} />
                     {executionSource && <PreviewRow label="Route" value={executionSource} muted />}
+                    {isPreviewPartial && (
+                      <PreviewRow label="Partial Fill" value={allowPartialFill ? 'Allowed' : 'Disabled'} accent={allowPartialFill ? 'green' : 'red'} />
+                    )}
                     <div className="divider" />
                     <PreviewRow
                       label={`Min Receive (${slippage}% slip.)`}
@@ -2303,11 +2413,23 @@ export default function MarketDetail() {
                   </div>
                 )}
 
+                {noSellLiquidity && (
+                  <div className="mb-4 rounded-xl border border-amber-500/25 bg-amber-500/10 p-3 text-xs text-amber-200">
+                    No executable buyers available. Place a limit sell order.
+                  </div>
+                )}
+
+                {buyLiquidityInsufficient && tradeTab === 'buy' && (
+                  <div className="mb-4 rounded-xl border border-amber-500/25 bg-amber-500/10 p-3 text-xs text-amber-200">
+                    Buy liquidity is insufficient for the full amount. Reduce size or allow partial fill.
+                  </div>
+                )}
+
                 {/* Submit */}
                 {executionMode === 'instant' && (
                   <button
                     onClick={tradeTab === 'buy' ? handleBuy : handleSell}
-                    disabled={txPending || !shareAmount || parseFloat(shareAmount) <= 0 || previewLoading || previewKey !== currentInputKey || (tradeTab === 'buy' ? estimatedShares === null : previewCost === null)}
+                    disabled={txPending || !shareAmount || parseFloat(shareAmount) <= 0 || previewLoading || previewKey !== currentInputKey || (!allowPartialFill && isPreviewPartial) || (tradeTab === 'buy' ? estimatedShares === null : previewCost === null)}
                     className={`w-full py-3.5 rounded-xl font-semibold text-sm transition-all active:scale-[0.97] ${
                       tradeTab === 'buy'
                         ? 'bg-gradient-to-r from-emerald-600 to-emerald-500 hover:from-emerald-500 hover:to-emerald-400 text-white shadow-glow-yes disabled:from-emerald-600/20 disabled:to-emerald-500/20 disabled:text-emerald-400/40 disabled:shadow-none'

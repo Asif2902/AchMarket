@@ -76,6 +76,7 @@ async function deployHybridFixture() {
     "Crypto",
     "",
     ["Yes", "No"],
+    1,
     ethers.parseEther("1000"),
     duration,
     "https://example.com/source",
@@ -156,7 +157,7 @@ describe("Hybrid CLOB + LMSR", function () {
       { value: ethers.parseEther("0.4") }
     );
 
-    await router.connect(alice).sell(marketAddress, 0, halfShare, 0, 8, await latestDeadline());
+    await router.connect(alice).sell(marketAddress, 0, halfShare, halfShare, 0, 8, await latestDeadline());
 
     expect(await market.sharesOf(bob.address, 0)).to.equal(halfShare);
     const order = await orderBook.orders(1);
@@ -294,6 +295,7 @@ describe("Hybrid CLOB + LMSR", function () {
       "Test",
       "",
       ["Yes", "No"],
+      1,
       ethers.parseEther("1000"),
       24 * 60 * 60,
       "https://example.com/source",

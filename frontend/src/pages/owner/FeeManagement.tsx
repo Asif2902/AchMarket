@@ -41,8 +41,11 @@ export default function FeeManagement() {
         const results = await Promise.allSettled(
           resolvedSummaries.map(async (s: { market: string; title: string }) => {
             const marketContract = new ethers.Contract(s.market, MARKET_V2_ABI, readProvider);
-            const resolvedPoolWei = await marketContract.resolvedPoolWei();
-            return { s, resolvedPoolWei };
+            const [resolvedPoolWei, feePoolWei] = await Promise.all([
+              marketContract.resolvedPoolWei(),
+              marketContract.feePoolWei().catch(() => 0n),
+            ]);
+            return { s, resolvedPoolWei, feePoolWei };
           })
         );
 
@@ -51,14 +54,13 @@ export default function FeeManagement() {
             console.warn('Failed to fetch market data:', result.reason);
             continue;
           }
-          const { s, resolvedPoolWei } = result.value;
+          const { s, resolvedPoolWei, feePoolWei } = result.value;
           resolvedCount++;
 
           if (resolvedPoolWei > 0n) {
-            const grossPool = (resolvedPoolWei * 10000n) / 9975n;
-            const fee = grossPool - resolvedPoolWei;
+            const fee = feePoolWei;
             feesSum += fee;
-            resolvedVol += grossPool;
+            resolvedVol += resolvedPoolWei;
             events.push({
               market: s.market,
               title: s.title,
@@ -98,8 +100,8 @@ export default function FeeManagement() {
           <div className="w-10 h-10 rounded-xl bg-primary-500/10 border border-primary-500/20 flex items-center justify-center mx-auto mb-3">
             <span className="text-lg font-bold text-primary-400">%</span>
           </div>
-          <p className="text-2xl sm:text-3xl font-bold text-primary-400 tabular-nums">0.75%</p>
-          <p className="text-xs text-dark-400 mt-1">Fee Rate</p>
+          <p className="text-2xl sm:text-3xl font-bold text-primary-400 tabular-nums">Tracked</p>
+          <p className="text-xs text-dark-400 mt-1">Fee Pool</p>
         </div>
         <div className="card p-5 text-center">
           <div className="w-10 h-10 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center mx-auto mb-3">
@@ -137,7 +139,7 @@ export default function FeeManagement() {
                 <tr className="border-b border-white/[0.08] text-dark-400 text-left">
                   <th className="pb-3 pr-4 font-medium text-xs uppercase tracking-wider">Market</th>
                   <th className="pb-3 pr-4 font-medium text-xs uppercase tracking-wider text-right">Prize Pool</th>
-                  <th className="pb-3 font-medium text-xs uppercase tracking-wider text-right">Fee (0.75%)</th>
+                  <th className="pb-3 font-medium text-xs uppercase tracking-wider text-right">Tracked Fees</th>
                 </tr>
               </thead>
               <tbody>
