@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { ethers } from 'ethers';
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
+import { ChevronDown, ChevronUp, Layers3, SlidersHorizontal, Zap } from 'lucide-react';
 import { useWallet } from '../../context/WalletContext';
 import { HYBRID_FACTORY_ADDRESS, HYBRID_LENS_ADDRESS, MARKET_ROUTER_ADDRESS, ORDER_BOOK_ADDRESS, STAGE, STAGE_LABELS, STAGE_COLORS } from '../../config/network';
 import { HYBRID_FACTORY_ABI, HYBRID_LENS_ABI, MARKET_V2_ABI, MARKET_ROUTER_ABI, ORDER_BOOK_ABI } from '../../config/abis';
@@ -253,6 +254,7 @@ export default function MarketDetail() {
 
   // Trade state
   const [executionMode, setExecutionMode] = useState<'instant' | 'limit'>('instant');
+  const [showAdvancedTrade, setShowAdvancedTrade] = useState(false);
   const [tradeTab, setTradeTab] = useState<'buy' | 'sell'>('buy');
   const [selectedOutcome, setSelectedOutcome] = useState(0);
   const [shareAmount, setShareAmount] = useState('');
@@ -271,7 +273,6 @@ export default function MarketDetail() {
   const [userOrders, setUserOrders] = useState<UserLimitOrder[]>([]);
   const [userOrdersLoading, setUserOrdersLoading] = useState(false);
   const [cancellingOrderId, setCancellingOrderId] = useState<bigint | null>(null);
-  const [inventoryAmount, setInventoryAmount] = useState('');
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewKey, setPreviewKey] = useState('');
   const [txPending, setTxPending] = useState(false);
@@ -339,8 +340,9 @@ export default function MarketDetail() {
       setRecentTrades([]);
       setAccurateVolume(null);
       setSelectedOutcome(0);
+      setShowAdvancedTrade(false);
+      setExecutionMode('instant');
       setShareAmount('');
-      setInventoryAmount('');
       setMmQuote(null);
       setEstimatedShares(null);
       setPreviewFilledSharesWad(0n);
@@ -997,27 +999,6 @@ export default function MarketDetail() {
     }
   };
 
-  const handleCreateShares = async () => {
-    if (!signer || !marketAddress || !inventoryAmount || parseFloat(inventoryAmount) <= 0) return;
-    setTxPending(true); setTxMessage(null);
-    try {
-      const sharesWad = ethers.parseEther(inventoryAmount);
-      const orderBook = new ethers.Contract(ORDER_BOOK_ADDRESS, ORDER_BOOK_ABI, signer);
-      const tx = await orderBook.createCompleteSet(marketAddress, sharesWad, { value: sharesWad });
-      showToast({ type: 'pending', title: 'Creating Shares...', message: `${inventoryAmount} complete sets submitted`, txHash: tx.hash });
-      setTxMessage({ type: 'success', text: 'Create Shares submitted. Waiting for confirmation...' });
-      await tx.wait();
-      showToast({ type: 'success', title: 'Shares Created', message: `Minted ${inventoryAmount} YES and NO shares`, txHash: tx.hash });
-      setTxMessage({ type: 'success', text: 'Inventory created. You can now place sell orders.' });
-      setInventoryAmount('');
-      await refreshAfterTransaction();
-    } catch (err) {
-      const errMsg = parseContractError(err);
-      showToast({ type: 'error', title: 'Create Shares Failed', message: errMsg });
-      setTxMessage({ type: 'error', text: errMsg });
-    } finally { setTxPending(false); }
-  };
-
   const handleRedeem = async () => {
     if (!signer || !marketAddress) return;
     setTxPending(true); setTxMessage(null);
@@ -1174,10 +1155,6 @@ export default function MarketDetail() {
     : 0;
   const buyPriceImpact = avgPrice > 0 ? avgPrice - selectedOutcomePrice : 0;
   const sellPriceImpact = sellAvgPrice > 0 ? selectedOutcomePrice - sellAvgPrice : 0;
-  const inventoryCostWei: bigint = (() => {
-    try { return inventoryAmount && parseFloat(inventoryAmount) > 0 ? ethers.parseEther(inventoryAmount) : 0n; } catch { return 0n; }
-  })();
-
   return (
     <div className="min-h-screen animate-fade-in">
       <div className="relative overflow-hidden">
@@ -1231,7 +1208,7 @@ export default function MarketDetail() {
 
         <div className="flex flex-col gap-5 lg:grid lg:grid-cols-[1fr_420px] lg:gap-6">
           {/* Left Column — Market Info (scrollable) */}
-          <div className="space-y-4 md:space-y-5">
+          <div className="order-2 space-y-4 md:space-y-5 lg:order-1">
             {/* Quick stats */}
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
               <MiniStat label="Volume" value={`${formatCompactUSDC(detail.totalVolumeWei)}`} suffix="USDC" icon={<UsdcIcon size={14} />} />
@@ -1869,7 +1846,7 @@ export default function MarketDetail() {
           </div>
 
           {/* Right Column — Trade Panel (sticky) */}
-          <div className="lg:sticky lg:top-20 lg:self-start space-y-4 lg:space-y-5">
+          <div className="order-1 space-y-4 lg:sticky lg:top-20 lg:order-2 lg:self-start lg:space-y-5">
             {/* Outcome Probabilities Card */}
             <div className="card p-5 border-primary-500/20 bg-gradient-to-br from-primary-500/[0.06] to-transparent">
               <div className="flex items-end justify-between gap-3 mb-4">
@@ -1913,62 +1890,100 @@ export default function MarketDetail() {
 
             {/* Trade Panel */}
             {isActive && !tradingEnded && isConnected && isCorrectNetwork && (
-              <div className="card p-5 border-white/[0.12] bg-gradient-to-b from-white/[0.025] to-transparent shadow-[0_16px_46px_rgba(0,0,0,0.45)]">
-                <div className="mb-4">
-                  <h3 className="section-header mb-1">Trade</h3>
-                  <p className="text-2xs text-white/50">Use instant execution or place a manual limit order.</p>
+              <div className="card p-4 sm:p-5 border-white/[0.12] bg-gradient-to-b from-white/[0.035] to-transparent shadow-[0_16px_46px_rgba(0,0,0,0.45)]">
+                <div className="mb-4 flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="mb-1.5 inline-flex items-center gap-1.5 rounded-full border border-emerald-400/20 bg-emerald-400/10 px-2.5 py-1 text-2xs font-semibold uppercase tracking-[0.12em] text-emerald-300">
+                      <Zap className="h-3 w-3" />
+                      Simple Trade
+                    </div>
+                    <h3 className="text-lg font-bold text-white">Buy or sell in seconds</h3>
+                    <p className="mt-1 text-xs leading-relaxed text-white/55">
+                      Pick a side, choose an outcome, enter shares, then review the cost before confirming.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const next = !showAdvancedTrade;
+                      setShowAdvancedTrade(next);
+                      if (!next) {
+                        setExecutionMode('instant');
+                        setLimitPrice('');
+                      }
+                    }}
+                    className={`inline-flex shrink-0 items-center gap-1.5 rounded-xl border px-3 py-2 text-xs font-semibold transition-all ${
+                      showAdvancedTrade
+                        ? 'border-cyan-400/30 bg-cyan-400/10 text-cyan-200'
+                        : 'border-white/[0.08] bg-dark-900/55 text-white/65 hover:text-white'
+                    }`}
+                    aria-expanded={showAdvancedTrade}
+                  >
+                    <SlidersHorizontal className="h-3.5 w-3.5" />
+                    Advanced
+                    {showAdvancedTrade ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+                  </button>
                 </div>
 
-                <div className="grid grid-cols-2 gap-2 mb-3">
-                  <button
-                    onClick={() => { setExecutionMode('instant'); setShareAmount(''); setPreviewCost(null); setEstimatedShares(null); setPreviewFilledSharesWad(0n); }}
-                    className={`p-2.5 rounded-xl text-xs font-semibold border transition-all ${
-                      executionMode === 'instant'
-                        ? 'bg-primary-500/15 text-primary-300 border-primary-500/30'
-                        : 'bg-dark-900/40 text-dark-400 border-white/[0.08] hover:text-white'
-                    }`}
-                  >
-                    Instant
-                  </button>
-                  <button
-                    onClick={() => { setExecutionMode('limit'); setShareAmount(''); setPreviewCost(null); setEstimatedShares(null); setPreviewFilledSharesWad(0n); }}
-                    className={`p-2.5 rounded-xl text-xs font-semibold border transition-all ${
-                      executionMode === 'limit'
-                        ? 'bg-cyan-500/15 text-cyan-300 border-cyan-500/30'
-                        : 'bg-dark-900/40 text-dark-400 border-white/[0.08] hover:text-white'
-                    }`}
-                  >
-                    Limit Order
-                  </button>
-                </div>
+                {showAdvancedTrade && (
+                  <>
+                    <div className="grid grid-cols-2 gap-2 mb-3">
+                      <button
+                        onClick={() => { setExecutionMode('instant'); setShareAmount(''); setPreviewCost(null); setEstimatedShares(null); setPreviewFilledSharesWad(0n); }}
+                        className={`p-2.5 rounded-xl text-xs font-semibold border transition-all ${
+                          executionMode === 'instant'
+                            ? 'bg-primary-500/15 text-primary-300 border-primary-500/30'
+                            : 'bg-dark-900/40 text-dark-400 border-white/[0.08] hover:text-white'
+                        }`}
+                      >
+                        Instant
+                      </button>
+                      <button
+                        onClick={() => { setExecutionMode('limit'); setShareAmount(''); setPreviewCost(null); setEstimatedShares(null); setPreviewFilledSharesWad(0n); }}
+                        className={`p-2.5 rounded-xl text-xs font-semibold border transition-all ${
+                          executionMode === 'limit'
+                            ? 'bg-cyan-500/15 text-cyan-300 border-cyan-500/30'
+                            : 'bg-dark-900/40 text-dark-400 border-white/[0.08] hover:text-white'
+                        }`}
+                      >
+                        Limit Order
+                      </button>
+                    </div>
 
-                <div className="mb-5 p-3 rounded-xl border border-white/[0.08] bg-dark-900/35">
-                  <p className="text-2xs uppercase tracking-[0.12em] text-white/45 font-semibold mb-1">
-                    {executionMode === 'instant' ? 'Best available liquidity' : 'Manual limit order'}
-                  </p>
-                  <p className="text-xs text-white/60">
-                    {executionMode === 'instant'
-                      ? detail.mode === 1
-                        ? 'Fills the order book first, then uses instant liquidity only if needed.'
-                        : 'Fills immediately against available order book liquidity.'
-                      : 'Matches immediately when possible. Any remaining size rests in the book.'}
-                  </p>
-                </div>
+                    <div className="mb-5 rounded-xl border border-white/[0.08] bg-dark-900/35 p-3">
+                      <div className="flex items-start gap-2">
+                        <Layers3 className="mt-0.5 h-4 w-4 shrink-0 text-cyan-300/80" />
+                        <div>
+                          <p className="text-2xs uppercase tracking-[0.12em] text-white/45 font-semibold mb-1">
+                            {executionMode === 'instant' ? 'Best available liquidity' : 'Manual limit order'}
+                          </p>
+                          <p className="text-xs text-white/60">
+                            {executionMode === 'instant'
+                              ? detail.mode === 1
+                                ? 'Fills the order book first, then uses instant liquidity only if needed.'
+                                : 'Fills immediately against available order book liquidity.'
+                              : 'Matches immediately when possible. Any remaining size rests in the book.'}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  </>
+                )}
 
                 {/* Buy/Sell tabs */}
-                <div className="flex rounded-xl bg-dark-900/60 p-0.5 mb-5 border border-white/[0.06]">
+                <div className="flex rounded-2xl bg-dark-900/70 p-1 mb-5 border border-white/[0.06]">
                   <button
                     onClick={() => { setTradeTab('buy'); setShareAmount(''); setPreviewCost(null); setEstimatedShares(null); setPreviewFilledSharesWad(0n); }}
-                    className={`flex-1 py-2 rounded-[10px] text-sm font-semibold transition-all ${
-                      tradeTab === 'buy' ? 'bg-emerald-500/15 text-emerald-400 shadow-sm' : 'text-dark-500 hover:text-dark-300'
+                    className={`flex-1 py-3 rounded-xl text-sm font-bold transition-all ${
+                      tradeTab === 'buy' ? 'bg-emerald-500 text-white shadow-glow-yes' : 'text-dark-400 hover:text-dark-200'
                     }`}
                   >
                     Buy
                   </button>
                   <button
                     onClick={() => { setTradeTab('sell'); setShareAmount(''); setPreviewCost(null); setEstimatedShares(null); setPreviewFilledSharesWad(0n); }}
-                    className={`flex-1 py-2 rounded-[10px] text-sm font-semibold transition-all ${
-                      tradeTab === 'sell' ? 'bg-red-500/15 text-red-400 shadow-sm' : 'text-dark-500 hover:text-dark-300'
+                    className={`flex-1 py-3 rounded-xl text-sm font-bold transition-all ${
+                      tradeTab === 'sell' ? 'bg-red-500 text-white shadow-glow-no' : 'text-dark-400 hover:text-dark-200'
                     }`}
                   >
                     Sell
@@ -1976,7 +1991,12 @@ export default function MarketDetail() {
                 </div>
 
                 {/* Outcome selector */}
-                <div className="flex flex-col gap-2 mb-4">
+                <div className="mb-4">
+                  <div className="mb-2 flex items-center justify-between">
+                    <span className="text-2xs font-semibold uppercase tracking-[0.14em] text-white/45">Choose outcome</span>
+                    <span className="text-2xs text-dark-500">Tap one</span>
+                  </div>
+                  <div className="grid gap-2">
                   {detail.outcomeLabels.map((label, i) => {
                     const userShares = userInfo?.shares[i] || 0n;
                     const pct = probToPercent(detail.impliedProbabilitiesWad[i]);
@@ -1995,49 +2015,60 @@ export default function MarketDetail() {
                       <button
                         key={i}
                         onClick={() => setSelectedOutcome(i)}
-                        className={`w-full p-3 rounded-lg text-sm transition-all border-l-4 relative flex items-center justify-between ${
+                        className={`w-full min-h-[4.25rem] p-3 rounded-2xl text-sm transition-all border relative flex items-center justify-between ${
                           isSelected
-                            ? ''
-                            : 'border-l-white/10 bg-dark-900/40 hover:border-l-white/20'
+                            ? 'shadow-[0_14px_34px_rgba(0,0,0,0.24)]'
+                            : 'border-white/[0.08] bg-dark-900/45 hover:border-white/[0.16]'
                         }`}
                         style={isSelected ? {
-                          borderLeftColor: hexColor,
-                          backgroundColor: `${hexColor}10`,
+                          borderColor: `${hexColor}70`,
+                          backgroundColor: `${hexColor}14`,
                         } : {}}
                       >
-                        <div className="flex items-center gap-2 min-w-0">
-                          {isSelected && (
-                            <svg className="w-4 h-4 shrink-0" fill="currentColor" viewBox="0 0 20 20" style={{ color: hexColor }}>
-                              <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
-                            </svg>
-                          )}
-                          <span className={`font-semibold truncate ${isSelected ? '' : 'text-white/50'}`} style={isSelected ? { color: hexColor } : {}}>{label}</span>
+                        <div className="flex min-w-0 items-center gap-3 text-left">
+                          <span
+                            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl border text-xs font-bold"
+                            style={{
+                              borderColor: isSelected ? `${hexColor}66` : 'rgba(255,255,255,0.1)',
+                              color: isSelected ? hexColor : 'rgba(255,255,255,0.45)',
+                              backgroundColor: isSelected ? `${hexColor}18` : 'rgba(255,255,255,0.03)',
+                            }}
+                          >
+                            {i + 1}
+                          </span>
+                          <div className="min-w-0">
+                            <span className={`block truncate font-bold ${isSelected ? '' : 'text-white/65'}`} style={isSelected ? { color: hexColor } : {}}>{label}</span>
+                            {tradeTab === 'sell' && userShares > 0n && (
+                              <span className="mt-0.5 block text-2xs text-dark-400">You hold {formatWad(userShares)} shares</span>
+                            )}
+                          </div>
                         </div>
-                        <div className="flex items-center gap-3 shrink-0">
-                          {tradeTab === 'sell' && userShares > 0n && (
-                            <span className="text-2xs text-dark-500 hidden sm:block">Your shares: {formatWad(userShares)}</span>
-                          )}
-                          <span className={`font-mono text-sm font-bold tabular-nums`} style={isSelected ? { color: hexColor } : { color: 'rgba(255,255,255,0.4)' }}>
-                            ${(pct / 100).toFixed(2)}
+                        <div className="shrink-0 text-right">
+                          <span className="block text-lg font-black tabular-nums leading-none" style={isSelected ? { color: hexColor } : { color: 'rgba(255,255,255,0.55)' }}>
+                            {pct.toFixed(0)}%
+                          </span>
+                          <span className="mt-1 block text-2xs text-dark-500">
+                            ${Number(pct / 100).toFixed(2)}
                           </span>
                         </div>
                       </button>
                     );
                   })}
+                  </div>
                 </div>
 
                 <div className="grid grid-cols-2 gap-2 mb-4">
-                  <div className="rounded-xl border border-white/[0.08] bg-dark-900/35 p-2.5">
-                    <p className="text-2xs text-white/45 uppercase tracking-[0.12em]">Outcome</p>
-                    <p className="text-xs font-semibold text-white mt-1 truncate">{selectedOutcomeLabel}</p>
+                  <div className="rounded-2xl border border-white/[0.08] bg-dark-900/45 p-3">
+                    <p className="text-2xs text-white/45 uppercase tracking-[0.12em]">Selected</p>
+                    <p className="mt-1 truncate text-sm font-bold text-white">{selectedOutcomeLabel}</p>
                   </div>
-                  <div className="rounded-xl border border-white/[0.08] bg-dark-900/35 p-2.5">
+                  <div className="rounded-2xl border border-white/[0.08] bg-dark-900/45 p-3">
                     <p className="text-2xs text-white/45 uppercase tracking-[0.12em]">You Hold</p>
-                    <p className="text-xs font-semibold text-white mt-1 tabular-nums">{formatWad(selectedOwnedShares)}</p>
+                    <p className="mt-1 text-sm font-bold text-white tabular-nums">{formatWad(selectedOwnedShares)}</p>
                   </div>
                 </div>
 
-                {(
+                {showAdvancedTrade && (
                   <div className="mb-4 rounded-2xl border border-white/[0.08] bg-[#060b11]/80 overflow-hidden">
                     <div className="flex items-center justify-between px-3 py-2 border-b border-white/[0.06]">
                       <div>
@@ -2163,58 +2194,21 @@ export default function MarketDetail() {
                   </div>
                 )}
 
-                <RecentTrades trades={recentTrades} outcomeLabels={detail.outcomeLabels} />
+                {showAdvancedTrade && <RecentTrades trades={recentTrades} outcomeLabels={detail.outcomeLabels} />}
 
-                {detail.outcomeLabels.length === 2 && (
-                  <div className="mb-4 rounded-2xl border border-cyan-500/20 bg-cyan-500/[0.04] p-3">
-                    <div className="flex items-start justify-between gap-3 mb-3">
-                      <div>
-                        <p className="text-2xs uppercase tracking-[0.12em] text-cyan-300/80 font-semibold">Provide Inventory</p>
-                        <p className="text-xs text-white/60 mt-1">
-                          Deposit collateral to mint equal {detail.outcomeLabels[0]} and {detail.outcomeLabels[1]} shares for seeding asks.
-                        </p>
-                      </div>
-                      <span className="text-2xs rounded-md border border-cyan-400/20 bg-cyan-400/10 px-2 py-1 text-cyan-200">CLOB seed</span>
-                    </div>
-                    <div className="grid grid-cols-[1fr_auto] gap-2">
-                      <input
-                        type="number"
-                        value={inventoryAmount}
-                        onChange={(e) => setInventoryAmount(e.target.value)}
-                        placeholder="0"
-                        min="0"
-                        step="0.1"
-                        className="input-field text-sm"
-                      />
-                      <button
-                        type="button"
-                        onClick={handleCreateShares}
-                        disabled={txPending || inventoryCostWei <= 0n}
-                        className="px-3 rounded-xl bg-cyan-600/90 hover:bg-cyan-500 text-white text-xs font-semibold disabled:bg-cyan-600/20 disabled:text-cyan-300/40 transition-colors"
-                      >
-                        Create Shares
-                      </button>
-                    </div>
-                    {inventoryCostWei > 0n && (
-                      <div className="mt-2 grid grid-cols-2 gap-2 text-xs">
-                        <PreviewRow label="Deposit" value={`${formatUSDC(inventoryCostWei)} USDC`} />
-                        <PreviewRow label="Receive" value={`${formatWad(inventoryCostWei)} each`} />
-                      </div>
-                    )}
-                  </div>
+                {showAdvancedTrade && (
+                  <UserOpenOrders
+                    orders={userOrders}
+                    loading={userOrdersLoading}
+                    outcomeLabels={detail.outcomeLabels}
+                    cancellingOrderId={cancellingOrderId}
+                    onCancel={handleCancelOrder}
+                  />
                 )}
 
-                <UserOpenOrders
-                  orders={userOrders}
-                  loading={userOrdersLoading}
-                  outcomeLabels={detail.outcomeLabels}
-                  cancellingOrderId={cancellingOrderId}
-                  onCancel={handleCancelOrder}
-                />
-
                 {/* Amount input */}
-                <div className="flex items-center justify-between mb-1.5">
-                  <label className="text-2xs font-semibold text-dark-500 uppercase tracking-wider flex items-center gap-1.5">
+                <div className="flex items-center justify-between mb-2">
+                  <label className="text-2xs font-semibold text-dark-400 uppercase tracking-wider flex items-center gap-1.5">
                     {executionMode === 'limit'
                       ? 'Shares'
                       : tradeTab === 'buy'
@@ -2248,7 +2242,7 @@ export default function MarketDetail() {
                     placeholder={executionMode === 'limit' ? '0' : tradeTab === 'buy' ? '0.00' : '0'}
                     min="0"
                     step={executionMode === 'limit' ? '0.1' : tradeTab === 'buy' ? '0.01' : '0.1'}
-                    className="input-field text-sm pr-16 font-medium"
+                    className="input-field min-h-[3.75rem] rounded-2xl border-white/[0.1] bg-dark-950/70 pr-20 text-2xl font-black tabular-nums"
                   />
                   <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1.5">
                     {tradeTab === 'sell' && userInfo && (userInfo.shares[selectedOutcome] || 0n) > 0n && (
@@ -2259,12 +2253,12 @@ export default function MarketDetail() {
                           const maxShares = ethers.formatEther(effectiveWei);
                           setShareAmount(maxShares);
                         }}
-                        className="px-2 py-0.5 rounded text-2xs font-semibold bg-red-500/15 text-red-400 hover:bg-red-500/25 transition-all"
+                        className="rounded-lg bg-red-500/15 px-2 py-1 text-2xs font-bold text-red-300 transition-all hover:bg-red-500/25"
                       >
                         Max
                       </button>
                     )}
-                    <span className="text-2xs text-dark-500 font-medium flex items-center gap-1">
+                    <span className="flex items-center gap-1 rounded-lg bg-white/[0.04] px-2 py-1 text-2xs font-bold text-dark-400">
                     {executionMode === 'limit' ? 'shares' : 'shares'}
                     </span>
                   </div>
@@ -2301,7 +2295,7 @@ export default function MarketDetail() {
                 )}
 
                 {/* Slippage */}
-                {executionMode === 'instant' && (
+                {showAdvancedTrade && executionMode === 'instant' && (
                   <div className="mb-4 space-y-3">
                     <div className="flex items-center justify-between">
                       <label className="text-2xs text-dark-500 font-medium">Slippage</label>
@@ -2334,7 +2328,7 @@ export default function MarketDetail() {
                 )}
 
                 {executionMode === 'limit' && limitSharesWad > 0n && limitPriceWad > 0n && (
-                  <div className="p-3 rounded-xl bg-dark-900/40 border border-white/[0.06] mb-4 space-y-2">
+                  <div className="p-3 rounded-2xl bg-dark-900/50 border border-white/[0.06] mb-4 space-y-2">
                     <PreviewRow label="Side" value={tradeTab === 'buy' ? 'Buy limit' : 'Sell limit'} />
                     <PreviewRow label="Outcome" value={selectedOutcomeLabel} />
                     <PreviewRow label="Price" value={`${Number(limitPrice).toFixed(2)} USDC`} />
@@ -2356,60 +2350,82 @@ export default function MarketDetail() {
 
                 {/* Buy preview */}
                 {executionMode === 'instant' && tradeTab === 'buy' && estimatedShares !== null && shareAmount && (
-                  <div className="p-3 rounded-xl bg-dark-900/40 border border-white/[0.06] mb-4 space-y-2">
-                    <PreviewRow label="Side" value="Buy" />
-                    <PreviewRow label="Outcome" value={selectedOutcomeLabel} />
-                    <PreviewRow label="Amount" value={`${formatWad(ethers.parseEther(shareAmount))} shares`} />
-                    <PreviewRow label="Est. Fill" value={previewLoading ? '...' : `${formatWad(previewFilledSharesWad)} shares`} />
-                    <PreviewRow label="Avg Price" value={previewLoading ? '...' : `${avgPrice.toFixed(4)} USDC`} />
-                    <PreviewRow label="Price Impact" value={`${buyPriceImpact >= 0 ? '+' : ''}${buyPriceImpact.toFixed(4)} USDC`} accent={buyPriceImpact > 0.05 ? 'red' : 'green'} />
-                    {previewCost !== null && <PreviewRow label="Router Cost" value={`${formatUSDC(previewCost)} USDC`} />}
-                    {executionSource && <PreviewRow label="Route" value={executionSource} muted />}
-                    {isPreviewPartial && (
-                      <PreviewRow label="Partial Fill" value={allowPartialFill ? 'Allowed' : 'Disabled'} accent={allowPartialFill ? 'green' : 'red'} />
-                    )}
-                    {estimatedPayout !== null && (
-                      <>
-                        <PreviewRow label="Est. Payout if Wins" value={`${formatUSDC(estimatedPayout)} USDC`} accent={profit >= 0 ? 'green' : 'red'} />
-                        <PreviewRow label="Profit" value={`${profit >= 0 ? '+' : ''}${profit.toFixed(4)} USDC`} accent={profit >= 0 ? 'green' : 'red'} />
-                        <PreviewRow label="Return" value={`${multiplier.toFixed(2)}x`} accent={multiplier >= 1 ? 'green' : 'red'} />
-                      </>
-                    )}
-                    {totalPositionPayout !== null && (
-                      <>
-                        <div className="divider" />
-                        <PreviewRow label="Total Position Payout" value={`${formatUSDC(totalPositionPayout)} USDC`} />
-                      </>
-                    )}
-                    <div className="divider" />
-                    <PreviewRow
-                      label={`Max Loss (${slippage}% slip.)`}
-                      value={`${formatUSDC(previewCost !== null ? applyBuySlippage(previewCost, slippage) : 0n)} USDC`}
-                      muted
-                    />
+                  <div className="mb-4 overflow-hidden rounded-2xl border border-emerald-400/15 bg-gradient-to-b from-emerald-400/[0.08] to-dark-900/55">
+                    <div className="grid grid-cols-2 gap-0 border-b border-white/[0.06]">
+                      <div className="p-3">
+                        <p className="text-2xs uppercase tracking-[0.12em] text-emerald-200/60">You pay</p>
+                        <p className="mt-1 text-lg font-black text-white tabular-nums">{previewLoading || previewCost === null ? '...' : `${formatUSDC(previewCost)} USDC`}</p>
+                      </div>
+                      <div className="border-l border-white/[0.06] p-3">
+                        <p className="text-2xs uppercase tracking-[0.12em] text-emerald-200/60">You get</p>
+                        <p className="mt-1 text-lg font-black text-emerald-300 tabular-nums">{previewLoading ? '...' : `${formatWad(previewFilledSharesWad)} shares`}</p>
+                      </div>
+                    </div>
+                    <div className="space-y-2 p-3">
+                      {showAdvancedTrade && <PreviewRow label="Side" value="Buy" />}
+                      {showAdvancedTrade && <PreviewRow label="Outcome" value={selectedOutcomeLabel} />}
+                      {showAdvancedTrade && <PreviewRow label="Amount" value={`${formatWad(ethers.parseEther(shareAmount))} shares`} />}
+                      {showAdvancedTrade && <PreviewRow label="Avg Price" value={previewLoading ? '...' : `${avgPrice.toFixed(4)} USDC`} />}
+                      {showAdvancedTrade && <PreviewRow label="Price Impact" value={`${buyPriceImpact >= 0 ? '+' : ''}${buyPriceImpact.toFixed(4)} USDC`} accent={buyPriceImpact > 0.05 ? 'red' : 'green'} />}
+                      {showAdvancedTrade && previewCost !== null && <PreviewRow label="Router Cost" value={`${formatUSDC(previewCost)} USDC`} />}
+                      {showAdvancedTrade && executionSource && <PreviewRow label="Route" value={executionSource} muted />}
+                      {isPreviewPartial && (
+                        <PreviewRow label="Partial Fill" value={allowPartialFill ? 'Allowed' : 'Disabled'} accent={allowPartialFill ? 'green' : 'red'} />
+                      )}
+                      {estimatedPayout !== null && (
+                        <>
+                          <PreviewRow label="Payout if Wins" value={`${formatUSDC(estimatedPayout)} USDC`} accent={profit >= 0 ? 'green' : 'red'} />
+                          {showAdvancedTrade && <PreviewRow label="Profit" value={`${profit >= 0 ? '+' : ''}${profit.toFixed(4)} USDC`} accent={profit >= 0 ? 'green' : 'red'} />}
+                          {showAdvancedTrade && <PreviewRow label="Return" value={`${multiplier.toFixed(2)}x`} accent={multiplier >= 1 ? 'green' : 'red'} />}
+                        </>
+                      )}
+                      {totalPositionPayout !== null && showAdvancedTrade && (
+                        <>
+                          <div className="divider" />
+                          <PreviewRow label="Total Position Payout" value={`${formatUSDC(totalPositionPayout)} USDC`} />
+                        </>
+                      )}
+                      {showAdvancedTrade && <div className="divider" />}
+                      <PreviewRow
+                        label={`Max Loss (${slippage}% slip.)`}
+                        value={`${formatUSDC(previewCost !== null ? applyBuySlippage(previewCost, slippage) : 0n)} USDC`}
+                        muted
+                      />
+                    </div>
                   </div>
                 )}
 
                 {/* Sell preview */}
                 {executionMode === 'instant' && tradeTab === 'sell' && previewCost !== null && shareAmount && (
-                  <div className="p-3 rounded-xl bg-dark-900/40 border border-white/[0.06] mb-4 space-y-2">
-                    <PreviewRow label="Side" value="Sell" />
-                    <PreviewRow label="Outcome" value={selectedOutcomeLabel} />
-                    <PreviewRow label="Amount" value={`${formatWad(ethers.parseEther(shareAmount))} shares`} />
-                    <PreviewRow label="Est. Fill" value={`${formatWad(previewFilledSharesWad)} shares`} />
-                    <PreviewRow label="Avg Price" value={`${sellAvgPrice.toFixed(4)} USDC`} />
-                    <PreviewRow label="Price Impact" value={`${sellPriceImpact >= 0 ? '-' : '+'}${Math.abs(sellPriceImpact).toFixed(4)} USDC`} accent={sellPriceImpact > 0.05 ? 'red' : 'green'} />
-                    <PreviewRow label="Est. Proceeds" value={previewLoading ? '...' : `${formatUSDC(previewCost)} USDC`} />
-                    {executionSource && <PreviewRow label="Route" value={executionSource} muted />}
-                    {isPreviewPartial && (
-                      <PreviewRow label="Partial Fill" value={allowPartialFill ? 'Allowed' : 'Disabled'} accent={allowPartialFill ? 'green' : 'red'} />
-                    )}
-                    <div className="divider" />
-                    <PreviewRow
-                      label={`Min Receive (${slippage}% slip.)`}
-                      value={`${formatUSDC(applySellSlippage(previewCost, slippage))} USDC`}
-                      muted
-                    />
+                  <div className="mb-4 overflow-hidden rounded-2xl border border-red-400/15 bg-gradient-to-b from-red-400/[0.08] to-dark-900/55">
+                    <div className="grid grid-cols-2 gap-0 border-b border-white/[0.06]">
+                      <div className="p-3">
+                        <p className="text-2xs uppercase tracking-[0.12em] text-red-200/60">You sell</p>
+                        <p className="mt-1 text-lg font-black text-white tabular-nums">{formatWad(previewFilledSharesWad)} shares</p>
+                      </div>
+                      <div className="border-l border-white/[0.06] p-3">
+                        <p className="text-2xs uppercase tracking-[0.12em] text-red-200/60">You receive</p>
+                        <p className="mt-1 text-lg font-black text-red-300 tabular-nums">{previewLoading ? '...' : `${formatUSDC(previewCost)} USDC`}</p>
+                      </div>
+                    </div>
+                    <div className="space-y-2 p-3">
+                      {showAdvancedTrade && <PreviewRow label="Side" value="Sell" />}
+                      {showAdvancedTrade && <PreviewRow label="Outcome" value={selectedOutcomeLabel} />}
+                      {showAdvancedTrade && <PreviewRow label="Amount" value={`${formatWad(ethers.parseEther(shareAmount))} shares`} />}
+                      {showAdvancedTrade && <PreviewRow label="Avg Price" value={`${sellAvgPrice.toFixed(4)} USDC`} />}
+                      {showAdvancedTrade && <PreviewRow label="Price Impact" value={`${sellPriceImpact >= 0 ? '-' : '+'}${Math.abs(sellPriceImpact).toFixed(4)} USDC`} accent={sellPriceImpact > 0.05 ? 'red' : 'green'} />}
+                      {showAdvancedTrade && <PreviewRow label="Est. Proceeds" value={previewLoading ? '...' : `${formatUSDC(previewCost)} USDC`} />}
+                      {showAdvancedTrade && executionSource && <PreviewRow label="Route" value={executionSource} muted />}
+                      {isPreviewPartial && (
+                        <PreviewRow label="Partial Fill" value={allowPartialFill ? 'Allowed' : 'Disabled'} accent={allowPartialFill ? 'green' : 'red'} />
+                      )}
+                      {showAdvancedTrade && <div className="divider" />}
+                      <PreviewRow
+                        label={`Min Receive (${slippage}% slip.)`}
+                        value={`${formatUSDC(applySellSlippage(previewCost, slippage))} USDC`}
+                        muted
+                      />
+                    </div>
                   </div>
                 )}
 
@@ -2421,7 +2437,18 @@ export default function MarketDetail() {
 
                 {buyLiquidityInsufficient && tradeTab === 'buy' && (
                   <div className="mb-4 rounded-xl border border-amber-500/25 bg-amber-500/10 p-3 text-xs text-amber-200">
-                    Buy liquidity is insufficient for the full amount. Reduce size or allow partial fill.
+                    <div className="flex items-start justify-between gap-3">
+                      <span>Buy liquidity is insufficient for the full amount. Reduce size or allow a partial fill.</span>
+                      {!showAdvancedTrade && (
+                        <button
+                          type="button"
+                          onClick={() => setAllowPartialFill(true)}
+                          className="shrink-0 rounded-lg border border-amber-300/25 bg-amber-300/10 px-2 py-1 text-2xs font-bold text-amber-100"
+                        >
+                          Allow
+                        </button>
+                      )}
+                    </div>
                   </div>
                 )}
 
@@ -2430,7 +2457,7 @@ export default function MarketDetail() {
                   <button
                     onClick={tradeTab === 'buy' ? handleBuy : handleSell}
                     disabled={txPending || !shareAmount || parseFloat(shareAmount) <= 0 || previewLoading || previewKey !== currentInputKey || (!allowPartialFill && isPreviewPartial) || (tradeTab === 'buy' ? estimatedShares === null : previewCost === null)}
-                    className={`w-full py-3.5 rounded-xl font-semibold text-sm transition-all active:scale-[0.97] ${
+                    className={`w-full min-h-[3.75rem] rounded-2xl py-4 text-base font-black transition-all active:scale-[0.97] ${
                       tradeTab === 'buy'
                         ? 'bg-gradient-to-r from-emerald-600 to-emerald-500 hover:from-emerald-500 hover:to-emerald-400 text-white shadow-glow-yes disabled:from-emerald-600/20 disabled:to-emerald-500/20 disabled:text-emerald-400/40 disabled:shadow-none'
                         : 'bg-gradient-to-r from-red-600 to-red-500 hover:from-red-500 hover:to-red-400 text-white shadow-glow-no disabled:from-red-600/20 disabled:to-red-500/20 disabled:text-red-400/40 disabled:shadow-none'
@@ -2442,9 +2469,9 @@ export default function MarketDetail() {
                         Processing...
                       </span>
                     ) : tradeTab === 'buy' ? (
-                      `Buy ${shareAmount || '0'} ${detail.outcomeLabels[selectedOutcome]} Shares`
+                      `Review & Buy ${detail.outcomeLabels[selectedOutcome]}`
                     ) : (
-                      `Sell ${detail.outcomeLabels[selectedOutcome]} Shares`
+                      `Review & Sell ${detail.outcomeLabels[selectedOutcome]}`
                     )}
                   </button>
                 )}
@@ -2453,7 +2480,7 @@ export default function MarketDetail() {
                   <button
                     onClick={handlePlaceLimitOrder}
                     disabled={txPending || !shareAmount || !limitPrice || parseFloat(shareAmount) <= 0 || parseFloat(limitPrice) <= 0 || parseFloat(limitPrice) > 1}
-                    className="w-full py-3.5 rounded-xl font-semibold text-sm transition-all active:scale-[0.97] bg-gradient-to-r from-cyan-600 to-blue-500 hover:from-cyan-500 hover:to-blue-400 text-white disabled:from-cyan-600/20 disabled:to-blue-500/20 disabled:text-cyan-400/40 mt-2"
+                    className="w-full min-h-[3.75rem] rounded-2xl py-4 text-base font-black transition-all active:scale-[0.97] bg-gradient-to-r from-cyan-600 to-blue-500 hover:from-cyan-500 hover:to-blue-400 text-white disabled:from-cyan-600/20 disabled:to-blue-500/20 disabled:text-cyan-400/40 mt-2"
                   >
                     {txPending ? 'Processing...' : `Place ${tradeTab === 'buy' ? 'Bid' : 'Ask'} Order`}
                   </button>

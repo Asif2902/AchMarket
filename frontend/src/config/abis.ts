@@ -145,7 +145,6 @@ export const MARKET_V2_ABI = [
   "event SharesBought(address indexed trader, uint256 indexed outcomeIndex, uint256 sharesWad, uint256 costWei)",
   "event SharesSold(address indexed trader, uint256 indexed outcomeIndex, uint256 sharesWad, uint256 proceedsWei)",
   "event SharesMoved(address indexed from, address indexed to, uint256 indexed outcomeIndex, uint256 sharesWad)",
-  "event CompleteSetMinted(address indexed outcomeARecipient, uint256 indexed outcomeA, address indexed outcomeBRecipient, uint256 outcomeB, uint256 sharesWad, uint256 collateralWei)",
   "event MarketInitialized(address indexed owner, address indexed resolutionManager, uint256 outcomeCount, uint8 mode, int256 bWad, uint256 initialLiquidityWei, uint256 marketDeadline, uint256 resolutionTime)",
   "event OwnershipTransferred(address indexed previousOwner, address indexed newOwner)",
 ] as const;
@@ -192,7 +191,6 @@ export const ORDER_BOOK_ABI = [
   "function allowedMarket(address market) view returns (bool)",
   "function orders(uint256 orderId) view returns (uint256 id, address market, uint256 outcome, address owner, uint8 side, uint256 priceWad, uint256 remainingSharesWad, uint256 escrowWei, uint256 expiry, bool active, uint256 originalSharesWad, uint8 status)",
   "function placeLimitOrder(address market, uint256 outcome, uint8 side, uint256 priceWad, uint256 sharesWad, uint256 expiry) payable returns (uint256 orderId)",
-  "function createCompleteSet(address market, uint256 sharesWad) payable returns (bool)",
   "function executeMarketOrder(address market, uint256 outcome, uint8 side, uint256 sharesWad, uint256 limitPriceWad, address trader, uint256 maxMatches) payable returns (uint256 sharesFilledWad, uint256 notionalWei, uint256 feeWei)",
   "function cancelOrder(uint256 orderId)",
   "function pruneExpiredOrder(uint256 orderId)",
@@ -213,7 +211,6 @@ export const ORDER_BOOK_ABI = [
   "event OrderMatched(uint256 indexed orderId, address indexed market, address indexed taker, uint256 outcome, uint8 restingSide, uint256 priceWad, uint256 sharesWad, uint256 notionalWei, uint256 feeWei)",
   "event OrderPartiallyFilled(uint256 indexed orderId, uint256 remainingSharesWad)",
   "event TradeExecuted(address indexed trader, address indexed market, uint256 indexed outcomeId, uint256 priceWad, uint256 amountWad, uint256 timestamp, uint8 executionSource, uint8 side, uint256 notionalWei, uint256 feeWei)",
-  "event CompleteSetCreated(address indexed market, address indexed user, uint256 sharesWad, uint256 collateralWei)",
   "event OrderCancelled(uint256 indexed orderId, address indexed owner, uint256 remainingSharesWad, uint256 refundWei)",
   "event OrderPruned(uint256 indexed orderId, address indexed market, uint256 indexed outcome, uint8 side, uint256 priceWad)",
   "event OrderFilled(uint256 indexed orderId, address indexed market, address indexed taker, uint256 outcome, uint8 side, uint256 sharesWad, uint256 notionalWei, uint256 makerFeeWei)",

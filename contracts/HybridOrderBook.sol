@@ -114,7 +114,6 @@ contract HybridOrderBook is Ownable, ReentrancyGuard {
         uint256 notionalWei,
         uint256 feeWei
     );
-    event CompleteSetCreated(address indexed market, address indexed user, uint256 sharesWad, uint256 collateralWei);
     event OrderFilled(
         uint256 indexed orderId,
         address indexed market,
@@ -298,21 +297,6 @@ contract HybridOrderBook is Ownable, ReentrancyGuard {
         }
 
         emit OrderCancelled(orderId, order.owner, remaining, refundWei);
-    }
-
-    function createCompleteSet(address market, uint256 sharesWad) external payable nonReentrant returns (bool) {
-        require(!paused, "OB: paused");
-        require(allowedMarket[market], "OB: market not allowed");
-        require(IHybridMarket(market).isTradingOpen(), "OB: trading closed");
-        require(IHybridMarket(market).outcomeCount() == 2, "OB: binary only");
-        require(sharesWad > 0, "OB: zero shares");
-        require(msg.value == sharesWad, "OB: bad collateral");
-        require(
-            IHybridMarket(market).mintCompleteSet{value: msg.value}(msg.sender, 0, msg.sender, 1, sharesWad),
-            "OB: complete set failed"
-        );
-        emit CompleteSetCreated(market, msg.sender, sharesWad, msg.value);
-        return true;
     }
 
     function executeMarketOrder(

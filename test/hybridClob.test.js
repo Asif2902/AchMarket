@@ -1,5 +1,7 @@
-const { expect } = require("chai");
-const { ethers } = require("hardhat");
+import { expect } from "chai";
+import { network } from "hardhat";
+
+const { ethers } = await network.create();
 
 const WAD = ethers.parseEther("1");
 const SIDE_BID = 0;

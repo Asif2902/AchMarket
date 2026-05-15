@@ -50,11 +50,4 @@ interface IHybridMarket {
 
     function recordTradePrice(uint256 outcomeIdx, uint256 priceWad) external returns (bool);
 
-    function mintCompleteSet(
-        address outcomeARecipient,
-        uint256 outcomeA,
-        address outcomeBRecipient,
-        uint256 outcomeB,
-        uint256 sharesWad
-    ) external payable returns (bool);
 }

@@ -107,14 +107,6 @@ contract PredictionMarketV2 is ReentrancyGuard {
     event SharesSold(address indexed trader, uint256 indexed outcomeIndex, uint256 sharesWad, uint256 proceedsWei);
     event SharesMoved(address indexed from, address indexed to, uint256 indexed outcomeIndex, uint256 sharesWad);
     event TradePriceRecorded(uint256 indexed outcomeIndex, uint256 priceWad);
-    event CompleteSetMinted(
-        address indexed outcomeARecipient,
-        uint256 indexed outcomeA,
-        address indexed outcomeBRecipient,
-        uint256 outcomeB,
-        uint256 sharesWad,
-        uint256 collateralWei
-    );
     event MarketResolved(uint256 winningOutcome, string proofUri);
     event MarketCancelled(string reason, string proofUri);
     event MarketEdited(string newTitle, string newDescription, string newCategory);
@@ -381,33 +373,6 @@ contract PredictionMarketV2 is ReentrancyGuard {
         require(outcomeIdx < outcomeCount, "M");
         require(priceWad > 0 && priceWad <= WAD, "M");
         _recordTradePrice(outcomeIdx, priceWad);
-        return true;
-    }
-
-    function mintCompleteSet(
-        address outcomeARecipient,
-        uint256 outcomeA,
-        address outcomeBRecipient,
-        uint256 outcomeB,
-        uint256 sharesWad
-    ) external payable nonReentrant onlyOperator returns (bool) {
-        _assertTradingAllowed();
-        require(outcomeCount == 2, "M");
-        require(outcomeARecipient != address(0) && outcomeBRecipient != address(0), "M");
-        require(outcomeA < outcomeCount && outcomeB < outcomeCount && outcomeA != outcomeB, "M");
-        require(sharesWad > 0, "M");
-        require(msg.value == sharesWad, "M");
-
-        totalSharesWad[outcomeA] += int256(sharesWad);
-        totalSharesWad[outcomeB] += int256(sharesWad);
-        sharesOf[outcomeARecipient][outcomeA] += sharesWad;
-        sharesOf[outcomeBRecipient][outcomeB] += sharesWad;
-        marketPoolWei += msg.value;
-        totalVolumeWei += msg.value;
-        _trackParticipant(outcomeARecipient);
-        _trackParticipant(outcomeBRecipient);
-
-        emit CompleteSetMinted(outcomeARecipient, outcomeA, outcomeBRecipient, outcomeB, sharesWad, msg.value);
         return true;
     }
 
