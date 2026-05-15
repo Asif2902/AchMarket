@@ -6,6 +6,7 @@
   "scripts": {
     "compile": "npx hardhat compile",
     "deploy": "npx hardhat run scripts/deploy.js --network arc_testnet",
+    "upgrade:router": "npx hardhat run scripts/upgradeRouter.js --network arc_testnet",
     "deploy:local": "npx hardhat run scripts/deploy.js --network hardhat",
     "clean": "npx hardhat clean",
     "size": "npx hardhat size-contracts"

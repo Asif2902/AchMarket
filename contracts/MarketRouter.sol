@@ -37,6 +37,7 @@ contract MarketRouter is Ownable, ReentrancyGuard {
     uint256 public constant MAX_BPS = 10_000;
     uint256 public constant MAX_FEE_BPS = 100;
     uint256 public constant MAX_HOPS_LIMIT = 128;
+    uint256 public constant PREVIEW_SEARCH_STEPS = 80;
 
     HybridOrderBook public orderBook;
     address public feeRecipient;
@@ -318,6 +319,72 @@ contract MarketRouter is Ownable, ReentrancyGuard {
         return side == TradeSide.Buy
             ? _previewBuy(market, outcome, sharesWad, _hopsLimit(maxHops))
             : _previewSell(market, outcome, sharesWad, _hopsLimit(maxHops));
+    }
+
+    function previewBuyForAmount(
+        address market,
+        uint256 outcome,
+        uint256 maxCostWei,
+        uint256 maxHops
+    ) external view returns (ExecutionResult memory best) {
+        require(allowedMarket[market], "Router: market not allowed");
+        require(maxCostWei > 0, "Router: zero max cost");
+        require(outcome < IHybridMarket(market).outcomeCount(), "Router: invalid outcome");
+
+        uint256 low;
+        uint256 high = maxTradeSharesWad;
+        uint256 hopsLimit = _hopsLimit(maxHops);
+
+        for (uint256 i; i < PREVIEW_SEARCH_STEPS && high > low; ) {
+            uint256 mid = (low + high + 1) / 2;
+            ExecutionResult memory quote = _previewBuy(market, outcome, mid, hopsLimit);
+            if (quote.filledSharesWad == mid && quote.costWei > 0 && quote.costWei <= maxCostWei) {
+                best = quote;
+                low = mid;
+            } else {
+                high = mid - 1;
+            }
+            unchecked { i++; }
+        }
+    }
+
+    function previewSellForAmount(
+        address market,
+        uint256 outcome,
+        uint256 targetProceedsWei,
+        uint256 maxSharesWad,
+        uint256 maxHops
+    ) external view returns (ExecutionResult memory best) {
+        require(allowedMarket[market], "Router: market not allowed");
+        require(targetProceedsWei > 0, "Router: zero target");
+        require(outcome < IHybridMarket(market).outcomeCount(), "Router: invalid outcome");
+
+        uint256 low;
+        uint256 high = _min(maxSharesWad, maxTradeSharesWad);
+        uint256 hopsLimit = _hopsLimit(maxHops);
+
+        for (uint256 i; i < PREVIEW_SEARCH_STEPS && high > low; ) {
+            uint256 mid = (low + high + 1) / 2;
+            ExecutionResult memory quote = _previewSell(market, outcome, mid, hopsLimit);
+            if (quote.filledSharesWad == mid && quote.proceedsWei > 0 && quote.proceedsWei < targetProceedsWei) {
+                best = quote;
+                low = mid;
+            } else {
+                high = mid - 1;
+            }
+            unchecked { i++; }
+        }
+
+        if (low < _min(maxSharesWad, maxTradeSharesWad)) {
+            ExecutionResult memory targetQuote =
+                _previewSell(market, outcome, low + 1, hopsLimit);
+            if (
+                targetQuote.filledSharesWad == low + 1
+                    && targetQuote.proceedsWei >= targetProceedsWei
+            ) {
+                best = targetQuote;
+            }
+        }
     }
 
     function getBestExecution(

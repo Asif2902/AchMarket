@@ -68,7 +68,7 @@ async function deployHybridFixture() {
   await router.setMarketRegistrar(await factory.getAddress());
   await resolver.setMarketRegistrar(await factory.getAddress());
 
-  await owner.sendTransaction({ to: await factory.getAddress(), value: ethers.parseEther("1000") });
+  await owner.sendTransaction({ to: await factory.getAddress(), value: ethers.parseEther("10") });
 
   const duration = 30 * 24 * 60 * 60;
   const block = await ethers.provider.getBlock("latest");
@@ -129,6 +129,63 @@ describe("Hybrid CLOB + LMSR", function () {
     const order = await orderBook.orders(1);
     expect(order.remainingSharesWad).to.equal(0);
     expect(order.active).to.equal(false);
+  });
+
+  it("quotes and executes USDC-sized instant buys beyond the old 8-share cap", async function () {
+    const { alice, router, market } = await deployHybridFixture();
+    const marketAddress = await market.getAddress();
+    await router.setExecutionConfig(ethers.parseEther("50"), ethers.parseEther("10000"), 64);
+
+    const budget = ethers.parseEther("20");
+    const preview = await router.previewBuyForAmount(marketAddress, 0, budget, 0);
+
+    expect(preview.filledSharesWad).to.be.greaterThan(ethers.parseEther("8"));
+    expect(preview.costWei).to.be.greaterThan(0n);
+    expect(preview.costWei).to.be.lessThanOrEqual(budget);
+
+    await router.connect(alice).buy(
+      marketAddress,
+      0,
+      preview.filledSharesWad,
+      preview.filledSharesWad,
+      budget,
+      0,
+      await latestDeadline(),
+      { value: budget }
+    );
+
+    expect(await market.sharesOf(alice.address, 0)).to.equal(preview.filledSharesWad);
+  });
+
+  it("quotes shares needed for a USDC sell target in one router preview", async function () {
+    const { alice, router, market } = await deployHybridFixture();
+    const marketAddress = await market.getAddress();
+    await router.setExecutionConfig(ethers.parseEther("50"), ethers.parseEther("10000"), 64);
+
+    const budget = ethers.parseEther("20");
+    const buyPreview = await router.previewBuyForAmount(marketAddress, 0, budget, 0);
+    await router.connect(alice).buy(
+      marketAddress,
+      0,
+      buyPreview.filledSharesWad,
+      buyPreview.filledSharesWad,
+      budget,
+      0,
+      await latestDeadline(),
+      { value: budget }
+    );
+
+    const target = ethers.parseEther("5");
+    const sellPreview = await router.previewSellForAmount(
+      marketAddress,
+      0,
+      target,
+      await market.sharesOf(alice.address, 0),
+      0
+    );
+
+    expect(sellPreview.filledSharesWad).to.be.greaterThan(0n);
+    expect(sellPreview.proceedsWei).to.be.greaterThanOrEqual(target);
   });
 
   it("fills a taker sell into the best bid when the bid improves LMSR proceeds", async function () {

@@ -135,30 +135,8 @@ export function useOwnerMarkets() {
       }
 
       const allSummaries = (await lens.getMarketSummaries(0, total)) as LensSummary[];
-      const normalizedOwner = address ? ethers.getAddress(address).toLowerCase() : '';
-
       const infoInterface = new ethers.Interface(MARKET_INFO_ABI);
-      const adminCalls = allSummaries.map((s) => ({
-        to: s.market,
-        data: infoInterface.encodeFunctionData('owner', []),
-      }));
-
-      const ownerResults = await Promise.all(
-        adminCalls.map(async (call) => {
-          try {
-            const result = await readProvider.call({ to: call.to, data: call.data });
-            const decoded = infoInterface.decodeFunctionResult('owner', result);
-            const ownerAddr = decoded[0] as string;
-            return ownerAddr.toLowerCase();
-          } catch (err) {
-            throw err;
-          }
-        })
-      );
-
-      const summaries = normalizedOwner
-        ? allSummaries.filter((s, i) => ownerResults[i] === normalizedOwner)
-        : allSummaries;
+      const summaries = allSummaries;
 
       const result: OwnerMarketData[] = summaries.map((s) => ({
         market: s.market,

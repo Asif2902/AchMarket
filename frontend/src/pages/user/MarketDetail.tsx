@@ -183,8 +183,9 @@ async function previewRouterTrade(
   outcome: number,
   side: 0 | 1,
   sharesWad: bigint,
+  maxHops = 0,
 ): Promise<RouterPreview> {
-  return await router.previewTrade(market, outcome, side, sharesWad, 8) as RouterPreview;
+  return await router.previewTrade(market, outcome, side, sharesWad, maxHops) as RouterPreview;
 }
 
 async function findBuySharesForBudget(
@@ -194,6 +195,15 @@ async function findBuySharesForBudget(
   budgetWei: bigint,
 ): Promise<{ sharesWad: bigint; preview: RouterPreview | null }> {
   if (budgetWei <= 0n) return { sharesWad: 0n, preview: null };
+
+  try {
+    const preview = await router.previewBuyForAmount(market, outcome, budgetWei, 0) as RouterPreview;
+    const sharesWad = getPreviewShares(preview);
+    const costWei = getPreviewCost(preview);
+    if (sharesWad > 0n && costWei > 0n) return { sharesWad, preview };
+  } catch {
+    // Fall back for routers deployed before amount-based preview helpers.
+  }
 
   let low = 0n;
   let high = budgetWei;
@@ -248,6 +258,15 @@ async function findSellSharesForTarget(
   maxSharesWad: bigint,
 ): Promise<{ sharesWad: bigint; preview: RouterPreview | null }> {
   if (targetWei <= 0n || maxSharesWad <= 0n) return { sharesWad: 0n, preview: null };
+
+  try {
+    const preview = await router.previewSellForAmount(market, outcome, targetWei, maxSharesWad, 0) as RouterPreview;
+    const sharesWad = getPreviewShares(preview);
+    const proceedsWei = getPreviewProceeds(preview);
+    if (sharesWad > 0n && proceedsWei > 0n) return { sharesWad, preview };
+  } catch {
+    // Fall back for routers deployed before amount-based preview helpers.
+  }
 
   let low = 0n;
   let high = maxSharesWad;
@@ -1093,7 +1112,7 @@ export default function MarketDetail() {
       const maxCost = safeParseAmount(usdcAmount);
       if (maxCost < previewCost) throw new Error('Refresh the quote and try again.');
       const deadline = Math.floor(Date.now() / 1000) + 300;
-      const tx = await router.buy(marketAddress, selectedOutcome, sharesWad, minSharesOut, maxCost, 8, deadline, { value: maxCost });
+      const tx = await router.buy(marketAddress, selectedOutcome, sharesWad, minSharesOut, maxCost, 0, deadline, { value: maxCost });
       showToast({ type: 'pending', title: `Buying ${outcomeName}...`, message: `${formatUSDC(previewCost)} USDC submitted`, txHash: tx.hash });
       setTxMessage({ type: 'success', text: 'Transaction submitted. Waiting for confirmation...' });
       await tx.wait();
@@ -1120,7 +1139,7 @@ export default function MarketDetail() {
       const minReceive = safeParseAmount(usdcAmount);
       if (previewCost < minReceive) throw new Error('That USDC receive target is unavailable right now.');
       const deadline = Math.floor(Date.now() / 1000) + 300;
-      const tx = await router.sell(marketAddress, selectedOutcome, sharesWad, minSharesOut, minReceive, 8, deadline);
+      const tx = await router.sell(marketAddress, selectedOutcome, sharesWad, minSharesOut, minReceive, 0, deadline);
       showToast({ type: 'pending', title: `Selling ${outcomeName}...`, message: `${formatUSDC(previewCost)} USDC target submitted`, txHash: tx.hash });
       setTxMessage({ type: 'success', text: 'Transaction submitted. Waiting for confirmation...' });
       await tx.wait();
