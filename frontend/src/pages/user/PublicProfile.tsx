@@ -12,6 +12,8 @@ import { formatCompactUSDC, makeMarketSlug, withImageVersion } from '../../utils
 import { fetchProfileBySlug } from '../../services/profile';
 import type { PublicProfile as PublicProfileType, PortfolioStats } from '../../types/profile';
 
+const WAD = 1_000_000_000_000_000_000n;
+
 interface PositionItem {
   market: string;
   title: string;
@@ -96,6 +98,7 @@ export default function PublicProfile() {
 
       const marketAddrs = [...new Set(portfolioArr.map((entry) => String(entry.market).toLowerCase()))];
       const addrToId = new Map<string, number>();
+      const addrToSummary = new Map<string, { probabilities: bigint[]; winningOutcome: number }>();
 
       const totalMarkets = Number(await factory.totalMarkets());
       if (signal.aborted) return;
@@ -107,6 +110,10 @@ export default function PublicProfile() {
           const addr = String(summary.market).toLowerCase();
           if (marketAddrs.includes(addr)) {
             addrToId.set(addr, Number(summary.marketId));
+            addrToSummary.set(addr, {
+              probabilities: [...(summary.impliedProbabilitiesWad as bigint[])],
+              winningOutcome: Number(summary.winningOutcome),
+            });
           }
         }
       }
@@ -116,12 +123,18 @@ export default function PublicProfile() {
       const positions: PositionItem[] = portfolioArr
         .map((entry) => {
           const shares = [...(entry.sharesPerOutcome as bigint[])];
+          const marketAddr = String(entry.market).toLowerCase();
+          const stage = Number(entry.stage);
+          const summary = addrToSummary.get(marketAddr);
+          const estimatedValue = stage === STAGE.Resolved && summary
+            ? (shares[summary.winningOutcome] ?? 0n)
+            : shares.reduce((acc, value, i) => acc + (value * (summary?.probabilities[i] ?? 0n)) / WAD, 0n);
           return {
             market: String(entry.market),
             title: String(entry.title),
-            marketId: addrToId.get(String(entry.market).toLowerCase()) ?? 0,
-            stage: Number(entry.stage),
-            netDepositedWei: shares.reduce((acc, value) => acc + value, 0n),
+            marketId: addrToId.get(marketAddr) ?? 0,
+            stage,
+            netDepositedWei: estimatedValue,
           };
         })
         .sort((a, b) => {
@@ -259,8 +272,8 @@ export default function PublicProfile() {
         <ProfileStat label="Markets" value={`${data.stats.totalMarkets}`} />
         <ProfileStat label="Active" value={`${data.stats.activePositions}`} />
         <ProfileStat label="Resolved" value={`${data.stats.resolvedPositions}`} />
-        <ProfileStat label="Total Volume" value={formatCompactUSDC(BigInt(data.stats.totalDepositedWei))} suffix="USDC" />
-        <ProfileStat label="Active Volume" value={formatCompactUSDC(BigInt(data.stats.activeDepositsWei))} suffix="USDC" />
+        <ProfileStat label="Total Value" value={formatCompactUSDC(BigInt(data.stats.totalDepositedWei))} suffix="USDC" />
+        <ProfileStat label="Active Value" value={formatCompactUSDC(BigInt(data.stats.activeDepositsWei))} suffix="USDC" />
       </div>
 
       <div className="card p-4">

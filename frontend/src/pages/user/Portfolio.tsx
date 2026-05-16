@@ -13,6 +13,8 @@ import { getOutcomeColor } from '../../components/ProbabilityBar';
 import { fetchProfileByAddress } from '../../services/profile';
 import type { PublicProfile as PublicProfileType } from '../../types/profile';
 
+const WAD = 1_000_000_000_000_000_000n;
+
 interface Position {
   market: string;
   marketId: number | null;
@@ -89,6 +91,7 @@ export default function Portfolio() {
   const latestAddressRef = useRef(address);
   latestAddressRef.current = address;
   const addrToIdCache = useRef<Map<string, number>>(new Map());
+  const addrToSummaryCache = useRef<Map<string, { probabilities: bigint[]; winningOutcome: number }>>(new Map());
 
   const refreshPortfolio = useCallback(async (expectedAddress: string): Promise<Position[]> => {
     const lens = new ethers.Contract(HYBRID_LENS_ADDRESS, HYBRID_LENS_ABI, readProvider);
@@ -98,21 +101,21 @@ export default function Portfolio() {
       .map((p) => (p.market as string).toLowerCase());
     const uniqueAddrs = [...new Set(portfolioAddrs)];
 
-    const cachedEntries = uniqueAddrs
-      .map((addr) => [addr, addrToIdCache.current.get(addr)] as [string, number | undefined])
-      .filter(([, id]) => id !== undefined) as Array<[string, number]>;
-
-    const missingAddrs = uniqueAddrs.filter((addr) => !addrToIdCache.current.has(addr));
-
-    if (missingAddrs.length > 0) {
+    if (uniqueAddrs.length > 0) {
       const factory = new ethers.Contract(HYBRID_FACTORY_ADDRESS, HYBRID_FACTORY_ABI, readProvider);
       const totalMarkets = Number(await factory.totalMarkets());
       if (totalMarkets > 0) {
         const summaries = await lens.getMarketSummaries(0, totalMarkets);
+        const needed = new Set(uniqueAddrs);
         for (const s of summaries as Array<Record<string, unknown>>) {
           const addr = (s.market as string).toLowerCase();
+          if (!needed.has(addr)) continue;
           const id = Number(s.marketId);
           addrToIdCache.current.set(addr, id);
+          addrToSummaryCache.current.set(addr, {
+            probabilities: [...(s.impliedProbabilitiesWad as bigint[])],
+            winningOutcome: Number(s.winningOutcome),
+          });
         }
       }
     }
@@ -120,10 +123,17 @@ export default function Portfolio() {
     return portfolio.map((p: Record<string, unknown>) => {
       const sharesPerOutcome = [...(p.sharesPerOutcome as bigint[])];
       const stage = Number(p.stage);
-      const estimatedValue = sharesPerOutcome.reduce((acc, value) => acc + value, 0n);
+      const marketAddr = (p.market as string).toLowerCase();
+      const summary = addrToSummaryCache.current.get(marketAddr);
+      const estimatedValue = stage === STAGE.Resolved && summary
+        ? (sharesPerOutcome[summary.winningOutcome] ?? 0n)
+        : sharesPerOutcome.reduce((acc, value, i) => {
+            const probability = summary?.probabilities[i] ?? 0n;
+            return acc + (value * probability) / WAD;
+          }, 0n);
       return {
         market: p.market as string,
-        marketId: addrToIdCache.current.get((p.market as string).toLowerCase()) ?? null,
+        marketId: addrToIdCache.current.get(marketAddr) ?? null,
         title: p.title as string,
         category: p.category as string,
         outcomeLabels: [...(p.outcomeLabels as string[])],
@@ -350,8 +360,8 @@ export default function Portfolio() {
       {/* Summary stats */}
       {positions.length > 0 && (
         <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-3">
-          <SummaryCard label="Total Deposited" value={formatCompactUSDC(totalDeposited)} suffix="USDC" icon={<UsdcIcon size={16} />} accent="neutral" />
-          <SummaryCard label="Active Deposits" value={formatCompactUSDC(activeDeposits)} suffix="USDC" icon={<UsdcIcon size={16} />} accent="primary" />
+          <SummaryCard label="Portfolio Value" value={formatCompactUSDC(totalDeposited)} suffix="USDC" icon={<UsdcIcon size={16} />} accent="neutral" />
+          <SummaryCard label="Active Value" value={formatCompactUSDC(activeDeposits)} suffix="USDC" icon={<UsdcIcon size={16} />} accent="primary" />
           <SummaryCard label="Claimable Principal" value={formatCompactUSDC(claimablePrincipal)} suffix="USDC" icon={<UsdcIcon size={16} />} accent="success" />
           <SummaryCard label="Markets" value={`${totalMarkets}`} icon={<MiniMarketIcon />} accent="neutral" />
           <SummaryCard label="Active" value={`${activePositions}`} icon={<MiniBoltIcon />} accent="info" />
@@ -399,8 +409,8 @@ export default function Portfolio() {
                 className="select-field text-xs sm:text-sm min-h-[40px] sm:min-h-[42px] sm:w-56"
               >
                 <option value="claimable_first">Claimable First</option>
-                <option value="highest_deposit">Highest Deposit</option>
-                <option value="lowest_deposit">Lowest Deposit</option>
+                <option value="highest_deposit">Highest Value</option>
+                <option value="lowest_deposit">Lowest Value</option>
                 <option value="newest">Newest Markets</option>
                 <option value="oldest">Oldest Markets</option>
                 <option value="title_az">Title A-Z</option>
@@ -476,7 +486,7 @@ export default function Portfolio() {
                   </div>
                 </div>
                 <div className="flex items-center sm:items-end gap-1.5 sm:flex-col sm:text-right shrink-0">
-                  <p className="text-2xs text-dark-500 font-medium">Deposited</p>
+                  <p className="text-2xs text-dark-500 font-medium">Est. Value</p>
                   <p className="text-sm font-bold text-white tabular-nums flex items-center gap-1"><UsdcIcon size={13} />{formatUSDC(pos.netDepositedWei)}</p>
                 </div>
               </div>

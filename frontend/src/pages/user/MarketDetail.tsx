@@ -27,6 +27,7 @@ import type { LiveMarketDataResponse } from '../../types/live';
 
 const DEFAULT_META_TITLE = 'AchMarket - Prediction Markets';
 const DEFAULT_META_DESCRIPTION = 'Trade prediction markets on ARC Testnet with USDC.';
+const WAD = 1_000_000_000_000_000_000n;
 
 interface MarketDetailData {
   market: string;
@@ -127,13 +128,13 @@ function safeParseAmount(value: string): bigint {
 
 function calculateSharesFromUsdc(usdcWei: bigint, priceWad: bigint): bigint {
   return usdcWei > 0n && priceWad > 0n
-    ? (usdcWei * 1_000_000_000_000_000_000n) / priceWad
+    ? (usdcWei * WAD) / priceWad
     : 0n;
 }
 
 function calculateUsdcFromShares(sharesWad: bigint, priceWad: bigint): bigint {
   return sharesWad > 0n && priceWad > 0n
-    ? (sharesWad * priceWad) / 1_000_000_000_000_000_000n
+    ? (sharesWad * priceWad) / WAD
     : 0n;
 }
 
@@ -215,10 +216,10 @@ async function findBuySharesForBudget(
     // Older routers may not expose the cap; preview calls will still enforce it.
   }
   try {
-    const unitPreview = await previewRouterTrade(router, market, outcome, 0, 1_000_000_000_000_000_000n);
+    const unitPreview = await previewRouterTrade(router, market, outcome, 0, WAD);
     const unitCost = getPreviewCost(unitPreview);
     if (unitCost > 0n) {
-      high = (budgetWei * 1_000_000_000_000_000_000n) / unitCost;
+      high = (budgetWei * WAD) / unitCost;
       if (high < 1n) high = 1n;
       if (maxTradeSharesWad !== null && maxTradeSharesWad > 0n && high > maxTradeSharesWad) high = maxTradeSharesWad;
     }
@@ -1167,7 +1168,7 @@ export default function MarketDetail() {
       const expiryMinutes = Math.max(0, Math.floor(parseFloat(limitExpiryMinutes || '0')));
       const expiry = expiryMinutes > 0 ? Math.floor(Date.now() / 1000) + expiryMinutes * 60 : 0;
       const side = tradeTab === 'buy' ? 0 : 1;
-      const escrow: bigint = tradeTab === 'buy' ? (sharesWad * priceWad) / 1_000_000_000_000_000_000n : 0n;
+      const escrow: bigint = tradeTab === 'buy' ? (sharesWad * priceWad) / WAD : 0n;
       const value = tradeTab === 'buy' ? applyBuySlippage(escrow, 1) : 0n;
       const tx = await orderBook.placeLimitOrder(marketAddress, selectedOutcome, side, priceWad, sharesWad, expiry, { value });
       showToast({ type: 'pending', title: `Placing ${tradeTab === 'buy' ? 'bid' : 'ask'}...`, message: `${formatUSDC(value || usdcWei)} USDC of ${outcomeName} at ${limitPrice}`, txHash: tx.hash });
@@ -1304,29 +1305,22 @@ export default function MarketDetail() {
   const hasExistingShares = userInfo?.shares[selectedOutcome] && userInfo.shares[selectedOutcome] > 0n;
   if (estimatedShares !== null && usdcAmount && tradeTab === 'buy' && previewCost !== null) {
     const sharesWad = previewFilledSharesWad;
-    const totalWinShares = detail.totalSharesWad[selectedOutcome] + sharesWad;
     const costWei = previewCost;
-    // Use actual contract balance (more accurate than totalVolumeWei if sells occurred)
-    const poolAfterTrade = poolBalance + costWei;
-    // Apply the 0.75% settlement fee. 0.25% is paid to the successful resolver when applicable.
-    const resolvedPool = poolAfterTrade * 9925n / 10000n;
-    if (totalWinShares > 0n) {
-      // Payout for THIS trade's new shares only
-      estimatedPayout = (sharesWad * resolvedPool) / totalWinShares;
+    if (sharesWad > 0n && costWei > 0n) {
+      estimatedPayout = sharesWad;
       multiplier = Number(estimatedPayout) / Number(costWei);
       avgPrice = estimatedShares > 0 ? Number(ethers.formatEther(costWei)) / estimatedShares : 0;
       profit = Number(estimatedPayout - costWei) / 1e18;
-      // Total position payout (existing + new shares) — shown separately if user has existing shares
       if (hasExistingShares) {
-        const userWinShares = userInfo!.shares[selectedOutcome] + sharesWad;
-        totalPositionPayout = (userWinShares * resolvedPool) / totalWinShares;
+        totalPositionPayout = userInfo!.shares[selectedOutcome] + sharesWad;
       }
     }
   }
 
   const parsedAbout = parseDescription(detail?.description ?? '');
   const selectedOutcomeLabel = detail.outcomeLabels[selectedOutcome] ?? `Outcome ${selectedOutcome + 1}`;
-  const selectedOutcomePrice = probToPercent(detail.impliedProbabilitiesWad[selectedOutcome] ?? 0n) / 100;
+  const selectedOutcomePriceWad = detail.impliedProbabilitiesWad[selectedOutcome] ?? 0n;
+  const selectedOutcomePrice = Number(ethers.formatEther(selectedOutcomePriceWad));
   const selectedOwnedShares = userInfo?.shares[selectedOutcome] ?? 0n;
   const selectedLimitPriceValue = limitPrice ? Number(limitPrice) : null;
   const liveConfigured = liveData && liveData.configured ? liveData : null;
@@ -1376,11 +1370,21 @@ export default function MarketDetail() {
     && (previewCost === null || (isPreviewPartial && !allowPartialFill));
   const limitNotionalWei = limitSharesWad > 0n && limitPriceWad > 0n ? tradeUsdcWei : 0n;
   const limitPayoutWei = limitSharesWad;
+  const buyAvgPriceWad = previewCost !== null && previewFilledSharesWad > 0n
+    ? (previewCost * WAD) / previewFilledSharesWad
+    : 0n;
+  const sellAvgPriceWad = previewCost !== null && previewFilledSharesWad > 0n
+    ? (previewCost * WAD) / previewFilledSharesWad
+    : 0n;
   const sellAvgPrice = previewCost !== null && tradeUsdcWei > 0n
     ? Number(ethers.formatEther(previewCost)) / Math.max(Number(ethers.formatEther(previewFilledSharesWad || limitSharesWad)), 0.0000001)
     : 0;
-  const buyPriceImpact = avgPrice > 0 ? avgPrice - selectedOutcomePrice : 0;
-  const sellPriceImpact = sellAvgPrice > 0 ? selectedOutcomePrice - sellAvgPrice : 0;
+  const buyPriceImpactPct = buyAvgPriceWad > 0n && selectedOutcomePriceWad > 0n
+    ? ((Number(ethers.formatEther(buyAvgPriceWad)) / selectedOutcomePrice) - 1) * 100
+    : 0;
+  const sellPriceImpactPct = sellAvgPriceWad > 0n && selectedOutcomePriceWad > 0n
+    ? (1 - (Number(ethers.formatEther(sellAvgPriceWad)) / selectedOutcomePrice)) * 100
+    : 0;
   return (
     <div className="min-h-screen animate-fade-in">
       <div className="relative overflow-hidden">
@@ -1987,7 +1991,8 @@ export default function MarketDetail() {
             {/* Resolved pool info */}
             {isResolved && detail.resolvedPoolWei > 0n && (() => {
               const winningShares = detail.totalSharesWad[detail.winningOutcome] > 0n ? detail.totalSharesWad[detail.winningOutcome] : 0n;
-              const payoutPerShare = winningShares > 0n ? (detail.resolvedPoolWei * 1_000_000_000_000_000_000n) / winningShares : 0n;
+              const poolBackedPayout = winningShares > 0n ? (detail.resolvedPoolWei * WAD) / winningShares : 0n;
+              const payoutPerShare = poolBackedPayout > WAD ? WAD : poolBackedPayout;
               return (
                 <div className="card p-4">
                   <div className="grid grid-cols-2 gap-4">
@@ -2363,12 +2368,12 @@ export default function MarketDetail() {
                             <div className="px-3 py-2 border-b border-white/[0.06] bg-cyan-500/[0.04]">
                               <div className="flex items-center justify-between gap-2 mb-2">
                                 <div>
-                                  <p className="text-2xs uppercase tracking-[0.12em] text-cyan-300/80 font-semibold">MM Quote</p>
+                                  <p className="text-2xs uppercase tracking-[0.12em] text-cyan-300/80 font-semibold">LMSR Quote</p>
                                   <p className="text-2xs text-white/45">
-                                    {formatWad(mmQuote.availableSharesWad)} available, {formatUSDC(mmQuote.reserveWei)} USDC same-outcome buyback reserve
+                                    {formatUSDC(mmQuote.reserveWei)} USDC reserve, winning shares redeem at 1 USDC
                                   </p>
                                 </div>
-                                <span className="text-2xs rounded-md border border-cyan-400/20 bg-cyan-400/10 px-2 py-1 text-cyan-200">Same outcome only</span>
+                                <span className="text-2xs rounded-md border border-cyan-400/20 bg-cyan-400/10 px-2 py-1 text-cyan-200">Normalized odds</span>
                               </div>
                               <div className="grid grid-cols-2 gap-2">
                                 <button
@@ -2475,7 +2480,7 @@ export default function MarketDetail() {
                       <button
                         onClick={() => {
                           const maxSharesWei = userInfo.shares[selectedOutcome] || 0n;
-                          const approxWei = (maxSharesWei * (detail.impliedProbabilitiesWad[selectedOutcome] ?? 0n)) / 1_000_000_000_000_000_000n;
+                          const approxWei = (maxSharesWei * (detail.impliedProbabilitiesWad[selectedOutcome] ?? 0n)) / WAD;
                           setUsdcAmount(formatInputWad(approxWei));
                         }}
                         className="rounded-lg bg-red-500/15 px-2 py-1 text-2xs font-bold text-red-300 transition-all hover:bg-red-500/25"
@@ -2574,7 +2579,7 @@ export default function MarketDetail() {
                       {showAdvancedTrade && <PreviewRow label="USDC Input" value={`${formatUSDC(tradeUsdcWei)} USDC`} />}
                       {showAdvancedTrade && <PreviewRow label="Shares Bought" value={`${formatWad(previewFilledSharesWad)} shares`} />}
                       {showAdvancedTrade && <PreviewRow label="Avg Price" value={previewLoading ? '...' : `${avgPrice.toFixed(4)} USDC`} />}
-                      {showAdvancedTrade && <PreviewRow label="Price Impact" value={`${buyPriceImpact >= 0 ? '+' : ''}${buyPriceImpact.toFixed(4)} USDC`} accent={buyPriceImpact > 0.05 ? 'red' : 'green'} />}
+                      {showAdvancedTrade && <PreviewRow label="Price Impact" value={`${buyPriceImpactPct >= 0 ? '+' : ''}${buyPriceImpactPct.toFixed(2)}%`} accent={buyPriceImpactPct > 5 ? 'red' : 'green'} />}
                       {showAdvancedTrade && previewCost !== null && <PreviewRow label="Router Cost" value={`${formatUSDC(previewCost)} USDC`} />}
                       {showAdvancedTrade && executionSource && <PreviewRow label="Route" value={executionSource} muted />}
                       {isPreviewPartial && (
@@ -2622,7 +2627,7 @@ export default function MarketDetail() {
                       {showAdvancedTrade && <PreviewRow label="USDC Target" value={`${formatUSDC(tradeUsdcWei)} USDC`} />}
                       {showAdvancedTrade && <PreviewRow label="Shares Sold" value={`${formatWad(previewFilledSharesWad)} shares`} />}
                       {showAdvancedTrade && <PreviewRow label="Avg Price" value={`${sellAvgPrice.toFixed(4)} USDC`} />}
-                      {showAdvancedTrade && <PreviewRow label="Price Impact" value={`${sellPriceImpact >= 0 ? '-' : '+'}${Math.abs(sellPriceImpact).toFixed(4)} USDC`} accent={sellPriceImpact > 0.05 ? 'red' : 'green'} />}
+                      {showAdvancedTrade && <PreviewRow label="Price Impact" value={`${sellPriceImpactPct >= 0 ? '-' : '+'}${Math.abs(sellPriceImpactPct).toFixed(2)}%`} accent={sellPriceImpactPct > 5 ? 'red' : 'green'} />}
                       {showAdvancedTrade && <PreviewRow label="Est. Proceeds" value={previewLoading ? '...' : `${formatUSDC(previewCost)} USDC`} />}
                       {showAdvancedTrade && executionSource && <PreviewRow label="Route" value={executionSource} muted />}
                       {showAdvancedTrade && <div className="divider" />}
@@ -3165,7 +3170,7 @@ function UserOpenOrders({
             const status = order.status === 0 && order.remainingSharesWad < order.originalSharesWad
               ? 'Partially Filled'
               : (ORDER_STATUS_LABELS[order.status] ?? 'Open');
-            const remainingCost = (order.remainingSharesWad * order.priceWad) / 1_000_000_000_000_000_000n;
+            const remainingCost = (order.remainingSharesWad * order.priceWad) / WAD;
             const isCancelling = cancellingOrderId === order.id;
             return (
               <div key={order.id.toString()} className="px-3 py-2 border-b border-white/[0.04] last:border-b-0">

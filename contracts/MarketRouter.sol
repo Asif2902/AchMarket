@@ -7,7 +7,7 @@ import {HybridOrderBook} from "./HybridOrderBook.sol";
 import {IHybridMarket} from "./interfaces/IHybridMarket.sol";
 
 /// @title MarketRouter
-/// @notice Single public execution entrypoint that routes same-outcome trades across CLOB and bounded MM liquidity.
+/// @notice Single public execution entrypoint that routes same-outcome trades across CLOB and LMSR liquidity.
 contract MarketRouter is Ownable, ReentrancyGuard {
     enum TradeSide {
         Buy,
@@ -332,7 +332,7 @@ contract MarketRouter is Ownable, ReentrancyGuard {
         require(outcome < IHybridMarket(market).outcomeCount(), "Router: invalid outcome");
 
         uint256 low;
-        uint256 high = maxTradeSharesWad;
+        uint256 high = _amountSearchHigh(market, outcome, TradeSide.Buy, maxCostWei, _buyAmountSearchCap(market));
         uint256 hopsLimit = _hopsLimit(maxHops);
 
         for (uint256 i; i < PREVIEW_SEARCH_STEPS && high > low; ) {
@@ -714,6 +714,36 @@ contract MarketRouter is Ownable, ReentrancyGuard {
 
     function _fee(uint256 amount, uint256 feeBps) internal pure returns (uint256) {
         return (amount * feeBps) / MAX_BPS;
+    }
+
+    function _amountSearchHigh(
+        address market,
+        uint256 outcome,
+        TradeSide side,
+        uint256 targetWei,
+        uint256 capSharesWad
+    ) internal view returns (uint256) {
+        uint256 oneShare = WAD;
+        ExecutionResult memory unitQuote = side == TradeSide.Buy
+            ? _previewBuy(market, outcome, oneShare, _hopsLimit(1))
+            : _previewSell(market, outcome, oneShare, _hopsLimit(1));
+        uint256 unitAmount = side == TradeSide.Buy ? unitQuote.costWei : unitQuote.proceedsWei;
+        if (unitQuote.filledSharesWad != oneShare || unitAmount == 0) {
+            return capSharesWad;
+        }
+        uint256 estimated = (targetWei * WAD) / unitAmount;
+        if (estimated < oneShare) estimated = oneShare;
+        uint256 padded = estimated + (estimated / 2) + oneShare;
+        return padded < capSharesWad ? padded : capSharesWad;
+    }
+
+    function _buyAmountSearchCap(address market) internal view returns (uint256) {
+        uint256 cap = maxTradeSharesWad;
+        if (!_isHybridMMMarket(market)) return cap;
+        int256 liquidity = IHybridMarket(market).b();
+        if (liquidity <= 0) return cap;
+        uint256 mmCap = uint256(liquidity) * 20;
+        return mmCap < cap ? mmCap : cap;
     }
 
     function _min(uint256 a, uint256 b) internal pure returns (uint256) {

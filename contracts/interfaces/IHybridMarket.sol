@@ -5,6 +5,7 @@ interface IHybridMarket {
     function outcomeCount() external view returns (uint256);
     function marketDeadline() external view returns (uint256);
     function marketMode() external view returns (uint8);
+    function b() external view returns (int256);
     function isTradingOpen() external view returns (bool);
     function getImpliedProbability(uint256 outcomeIdx) external view returns (uint256);
     function previewBuy(uint256 outcomeIdx, uint256 sharesWad) external view returns (uint256);
