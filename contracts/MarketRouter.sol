@@ -7,7 +7,7 @@ import {HybridOrderBook} from "./HybridOrderBook.sol";
 import {IHybridMarket} from "./interfaces/IHybridMarket.sol";
 
 /// @title MarketRouter
-/// @notice Single public execution entrypoint that routes same-outcome trades across CLOB and LMSR liquidity.
+/// @notice Single public execution entrypoint that routes same-outcome trades across CLOB and bounded MM liquidity.
 contract MarketRouter is Ownable, ReentrancyGuard {
     enum TradeSide {
         Buy,
@@ -113,10 +113,6 @@ contract MarketRouter is Ownable, ReentrancyGuard {
         _;
     }
 
-    function lmsrTakerFeeBps() external view returns (uint256) {
-        return mmTakerFeeBps;
-    }
-
     function setOrderBook(address _orderBook) external onlyOwner {
         require(_orderBook != address(0), "Router: zero order book");
         orderBook = HybridOrderBook(_orderBook);
@@ -188,10 +184,10 @@ contract MarketRouter is Ownable, ReentrancyGuard {
 
         while (remaining > 0 && hops < hopsLimit) {
             (uint256 askPrice, uint256 askShares, uint256 askOrderId) = _bestAsk(market, outcome);
-            (uint256 mmShares, uint256 mmCost, uint256 mmFee, uint256 mmPrice) =
-                _nextMMBuyQuote(market, outcome, remaining);
-
             bool hasClob = askOrderId != 0 && askShares > 0;
+            (uint256 mmShares, uint256 mmCost, uint256 mmFee, uint256 mmPrice) =
+                _nextMMBuyQuote(market, outcome, remaining, hasClob);
+
             bool hasMM = mmShares > 0 && mmCost > 0;
             if (!hasClob && !hasMM) break;
 
@@ -254,10 +250,10 @@ contract MarketRouter is Ownable, ReentrancyGuard {
 
         while (remaining > 0 && hops < hopsLimit) {
             (uint256 bidPrice, uint256 bidShares, uint256 bidOrderId) = _bestBid(market, outcome);
-            (uint256 mmShares, uint256 mmGross, uint256 mmFee, uint256 mmPrice) =
-                _nextMMSellQuote(market, outcome, remaining);
-
             bool hasClob = bidOrderId != 0 && bidShares > 0;
+            (uint256 mmShares, uint256 mmGross, uint256 mmFee, uint256 mmPrice) =
+                _nextMMSellQuote(market, outcome, remaining, hasClob);
+
             bool hasMM = mmShares > 0 && mmGross > 0;
             if (!hasClob && !hasMM) break;
 
@@ -332,8 +328,8 @@ contract MarketRouter is Ownable, ReentrancyGuard {
         require(outcome < IHybridMarket(market).outcomeCount(), "Router: invalid outcome");
 
         uint256 low;
-        uint256 high = _amountSearchHigh(market, outcome, TradeSide.Buy, maxCostWei, _buyAmountSearchCap(market));
         uint256 hopsLimit = _hopsLimit(maxHops);
+        uint256 high = _amountSearchHigh(market, outcome, TradeSide.Buy, maxCostWei, maxTradeSharesWad, hopsLimit);
 
         for (uint256 i; i < PREVIEW_SEARCH_STEPS && high > low; ) {
             uint256 mid = (low + high + 1) / 2;
@@ -429,14 +425,15 @@ contract MarketRouter is Ownable, ReentrancyGuard {
         );
     }
 
-    function _nextMMBuyQuote(address market, uint256 outcome, uint256 remaining)
+    function _nextMMBuyQuote(address market, uint256 outcome, uint256 remaining, bool hasCompetingClob)
         internal
         view
         returns (uint256 sharesWad, uint256 costWei, uint256 feeWei, uint256 effectivePriceWad)
     {
         if (!_isHybridMMMarket(market)) return (0, 0, 0, 0);
         (, uint256 availableShares,,,,) = IHybridMarket(market).getMMOutcomeState(outcome);
-        sharesWad = _min(_min(remaining, chunkSizeWad), availableShares);
+        uint256 quoteLimit = hasCompetingClob ? _min(remaining, chunkSizeWad) : remaining;
+        sharesWad = _min(quoteLimit, availableShares);
         if (sharesWad == 0) return (0, 0, 0, 0);
         costWei = IHybridMarket(market).previewBuy(outcome, sharesWad);
         if (costWei == 0) return (0, 0, 0, 0);
@@ -444,14 +441,15 @@ contract MarketRouter is Ownable, ReentrancyGuard {
         effectivePriceWad = ((costWei + feeWei) * WAD) / sharesWad;
     }
 
-    function _nextMMSellQuote(address market, uint256 outcome, uint256 remaining)
+    function _nextMMSellQuote(address market, uint256 outcome, uint256 remaining, bool hasCompetingClob)
         internal
         view
         returns (uint256 sharesWad, uint256 grossWei, uint256 feeWei, uint256 effectivePriceWad)
     {
         if (!_isHybridMMMarket(market)) return (0, 0, 0, 0);
         (,, uint256 soldShares,,,) = IHybridMarket(market).getMMOutcomeState(outcome);
-        sharesWad = _min(_min(remaining, chunkSizeWad), soldShares);
+        uint256 quoteLimit = hasCompetingClob ? _min(remaining, chunkSizeWad) : remaining;
+        sharesWad = _min(quoteLimit, soldShares);
         if (sharesWad == 0) return (0, 0, 0, 0);
         grossWei = IHybridMarket(market).previewSell(outcome, sharesWad);
         if (grossWei == 0) return (0, 0, 0, 0);
@@ -484,7 +482,8 @@ contract MarketRouter is Ownable, ReentrancyGuard {
             uint256 mmFee = 0;
             uint256 mmPrice = type(uint256).max;
             if (_isHybridMMMarket(market) && soldShares < initialShares) {
-                mmShares = _min(_min(remaining, chunkSizeWad), initialShares - soldShares);
+                uint256 quoteLimit = hasClob ? _min(remaining, chunkSizeWad) : remaining;
+                mmShares = _min(quoteLimit, initialShares - soldShares);
                 mmCost = IHybridMarket(market).previewMMBuyFromState(outcome, soldShares, mmShares);
                 if (mmCost > 0) {
                     mmFee = _fee(mmCost, mmTakerFeeBps);
@@ -547,7 +546,8 @@ contract MarketRouter is Ownable, ReentrancyGuard {
             uint256 mmFee = 0;
             uint256 mmPrice = 0;
             if (_isHybridMMMarket(market) && soldShares > 0 && reserveWei > 0) {
-                mmShares = _min(_min(remaining, chunkSizeWad), soldShares);
+                uint256 quoteLimit = hasClob ? _min(remaining, chunkSizeWad) : remaining;
+                mmShares = _min(quoteLimit, soldShares);
                 mmGross = IHybridMarket(market).previewMMSellFromState(outcome, soldShares, reserveWei, mmShares);
                 if (mmGross > 0) {
                     mmFee = _fee(mmGross, mmTakerFeeBps);
@@ -721,12 +721,13 @@ contract MarketRouter is Ownable, ReentrancyGuard {
         uint256 outcome,
         TradeSide side,
         uint256 targetWei,
-        uint256 capSharesWad
+        uint256 capSharesWad,
+        uint256 hopsLimit
     ) internal view returns (uint256) {
         uint256 oneShare = WAD;
         ExecutionResult memory unitQuote = side == TradeSide.Buy
-            ? _previewBuy(market, outcome, oneShare, _hopsLimit(1))
-            : _previewSell(market, outcome, oneShare, _hopsLimit(1));
+            ? _previewBuy(market, outcome, oneShare, hopsLimit)
+            : _previewSell(market, outcome, oneShare, hopsLimit);
         uint256 unitAmount = side == TradeSide.Buy ? unitQuote.costWei : unitQuote.proceedsWei;
         if (unitQuote.filledSharesWad != oneShare || unitAmount == 0) {
             return capSharesWad;
@@ -735,15 +736,6 @@ contract MarketRouter is Ownable, ReentrancyGuard {
         if (estimated < oneShare) estimated = oneShare;
         uint256 padded = estimated + (estimated / 2) + oneShare;
         return padded < capSharesWad ? padded : capSharesWad;
-    }
-
-    function _buyAmountSearchCap(address market) internal view returns (uint256) {
-        uint256 cap = maxTradeSharesWad;
-        if (!_isHybridMMMarket(market)) return cap;
-        int256 liquidity = IHybridMarket(market).b();
-        if (liquidity <= 0) return cap;
-        uint256 mmCap = uint256(liquidity) * 20;
-        return mmCap < cap ? mmCap : cap;
     }
 
     function _min(uint256 a, uint256 b) internal pure returns (uint256) {

@@ -154,7 +154,6 @@ export const MARKET_ROUTER_ABI = [
   "function feeRecipient() view returns (address)",
   "function orderBookTakerFeeBps() view returns (uint256)",
   "function mmTakerFeeBps() view returns (uint256)",
-  "function lmsrTakerFeeBps() view returns (uint256)",
   "function MAX_HOPS_LIMIT() view returns (uint256)",
   "function MAX_FEE_BPS() view returns (uint256)",
   "function chunkSizeWad() view returns (uint256)",

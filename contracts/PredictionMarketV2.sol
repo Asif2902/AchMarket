@@ -2,10 +2,9 @@
 pragma solidity ^0.8.20;
 
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
-import {LMSRMath} from "./LMSRMath.sol";
 
 /// @title PredictionMarketV2
-/// @notice Hybrid market with a CLOB and LMSR instant liquidity.
+/// @notice Pool-settled market with a same-outcome CLOB and bounded per-outcome MM inventory.
 contract PredictionMarketV2 is ReentrancyGuard {
     enum Stage {
         Active,
@@ -20,12 +19,17 @@ contract PredictionMarketV2 is ReentrancyGuard {
         HYBRID_CLOB_MM
     }
 
+    struct OutcomeMMState {
+        uint256 initialSharesWad;
+        uint256 soldSharesWad;
+        uint256 reserveWei;
+    }
+
     uint256 public constant WAD = 1e18;
     uint256 public constant MAX_BPS = 10_000;
     uint256 public constant DEFAULT_MM_SPREAD_BPS = 100;
     uint256 public constant MAX_MM_SPREAD_BPS = 2_000;
     uint256 public constant RESOLUTION_GRACE_PERIOD = 3 days;
-    uint256 public constant MAX_LMSR_SHARES_WAD = 1_000_000_000e18;
 
     address private _owner;
     bool private _initialized;
@@ -40,7 +44,7 @@ contract PredictionMarketV2 is ReentrancyGuard {
     uint256 public outcomeCount;
 
     MarketMode public marketMode;
-    /// @dev LMSR liquidity parameter for HYBRID_CLOB_MM markets.
+    /// @dev Kept for backwards-compatible frontend/lens fields. In v2 this stores the per-outcome MM inventory.
     int256 public b;
     int256[] public totalSharesWad;
     uint256[] public lastTradePriceWad;
@@ -76,6 +80,8 @@ contract PredictionMarketV2 is ReentrancyGuard {
     uint256 public payoutPerInvalidShareWad;
     uint256 public totalClaimedWei;
     uint256 public mmSpreadBps;
+
+    OutcomeMMState[] private _outcomeMM;
 
     event ResolutionManagerUpdated(address indexed resolutionManager);
     event OwnershipTransferred(address indexed previousOwner, address indexed newOwner);
@@ -165,10 +171,6 @@ contract PredictionMarketV2 is ReentrancyGuard {
             require(_initialMmSharesWad == 0, "M");
         } else {
             require(_initialMmSharesWad > 0, "M");
-            require(
-                msg.value >= uint256(LMSRMath.initialLiquidity(_outcomeLabels.length, _initialMmSharesWad)),
-                "M"
-            );
         }
         require(_durationSeconds >= 1 hours, "M");
         require(bytes(_resolutionSource).length > 0, "M");
@@ -196,11 +198,17 @@ contract PredictionMarketV2 is ReentrancyGuard {
         mmSpreadBps = DEFAULT_MM_SPREAD_BPS;
 
         outcomeCount = _outcomeLabels.length;
+        uint256 initialMmShares = _initialMmSharesWad > 0 ? uint256(_initialMmSharesWad) : 0;
         uint256 initialPrice = WAD / _outcomeLabels.length;
         for (uint256 i = 0; i < _outcomeLabels.length; ) {
             outcomeLabels.push(_outcomeLabels[i]);
             totalSharesWad.push(0);
             lastTradePriceWad.push(initialPrice);
+            _outcomeMM.push(OutcomeMMState({
+                initialSharesWad: initialMmShares,
+                soldSharesWad: 0,
+                reserveWei: 0
+            }));
             unchecked { i++; }
         }
 
@@ -280,11 +288,16 @@ contract PredictionMarketV2 is ReentrancyGuard {
         require(outcomeIdx < outcomeCount, "M");
         require(sharesWad > 0, "M");
 
-        costWei = _quoteBuy(outcomeIdx, sharesWad);
+        OutcomeMMState storage mm = _outcomeMM[outcomeIdx];
+        require(mm.soldSharesWad + sharesWad <= mm.initialSharesWad, "M");
+
+        costWei = _quoteBuy(outcomeIdx, mm.soldSharesWad, sharesWad);
         require(costWei > 0, "M");
         require(costWei <= maxCostWei, "M");
         require(msg.value >= costWei, "M");
 
+        mm.soldSharesWad += sharesWad;
+        mm.reserveWei += costWei;
         totalSharesWad[outcomeIdx] += int256(sharesWad);
         sharesOf[trader][outcomeIdx] += sharesWad;
         marketPoolWei += costWei;
@@ -318,12 +331,15 @@ contract PredictionMarketV2 is ReentrancyGuard {
         require(sharesWad > 0, "M");
         require(sharesOf[trader][outcomeIdx] >= sharesWad, "M");
 
-        proceedsWei = _quoteSell(outcomeIdx, sharesWad);
+        OutcomeMMState storage mm = _outcomeMM[outcomeIdx];
+        proceedsWei = _quoteSell(outcomeIdx, mm.soldSharesWad, mm.reserveWei, sharesWad);
         require(proceedsWei > 0, "M");
         require(proceedsWei >= minReceiveWei, "M");
         require(address(this).balance >= feePoolWei + proceedsWei, "M");
         require(marketPoolWei >= proceedsWei, "M");
 
+        mm.soldSharesWad -= sharesWad;
+        mm.reserveWei -= proceedsWei;
         sharesOf[trader][outcomeIdx] -= sharesWad;
         totalSharesWad[outcomeIdx] -= int256(sharesWad);
         marketPoolWei -= proceedsWei;
@@ -580,15 +596,6 @@ contract PredictionMarketV2 is ReentrancyGuard {
 
     function getImpliedProbabilities() external view returns (int256[] memory probs) {
         probs = new int256[](outcomeCount);
-        if (marketMode == MarketMode.HYBRID_CLOB_MM) {
-            int256[] memory q = _getSharesArray();
-            for (uint256 i = 0; i < outcomeCount; ) {
-                probs[i] = LMSRMath.impliedProbability(q, i, b);
-                unchecked { i++; }
-            }
-            return probs;
-        }
-
         for (uint256 i = 0; i < outcomeCount; ) {
             probs[i] = int256(lastTradePriceWad[i]);
             unchecked { i++; }
@@ -597,23 +604,22 @@ contract PredictionMarketV2 is ReentrancyGuard {
 
     function getImpliedProbability(uint256 outcomeIdx) public view returns (uint256) {
         require(outcomeIdx < outcomeCount, "M");
-        if (marketMode == MarketMode.HYBRID_CLOB_MM) {
-            int256 prob = LMSRMath.impliedProbability(_getSharesArray(), outcomeIdx, b);
-            return prob > 0 ? uint256(prob) : 0;
-        }
         return lastTradePriceWad[outcomeIdx];
     }
 
     function previewBuy(uint256 outcomeIdx, uint256 sharesWad) public view returns (uint256 costWei) {
         require(outcomeIdx < outcomeCount, "M");
         if (marketMode != MarketMode.HYBRID_CLOB_MM || sharesWad == 0) return 0;
-        return _quoteBuy(outcomeIdx, sharesWad);
+        OutcomeMMState memory mm = _outcomeMM[outcomeIdx];
+        if (mm.soldSharesWad + sharesWad > mm.initialSharesWad) return 0;
+        return _quoteBuy(outcomeIdx, mm.soldSharesWad, sharesWad);
     }
 
     function previewSell(uint256 outcomeIdx, uint256 sharesWad) public view returns (uint256 proceedsWei) {
         require(outcomeIdx < outcomeCount, "M");
         if (marketMode != MarketMode.HYBRID_CLOB_MM || sharesWad == 0) return 0;
-        return _quoteSell(outcomeIdx, sharesWad);
+        OutcomeMMState memory mm = _outcomeMM[outcomeIdx];
+        return _quoteSell(outcomeIdx, mm.soldSharesWad, mm.reserveWei, sharesWad);
     }
 
     function previewMMBuyFromState(uint256 outcomeIdx, uint256 soldSharesWad, uint256 sharesWad)
@@ -622,10 +628,10 @@ contract PredictionMarketV2 is ReentrancyGuard {
         returns (uint256)
     {
         require(outcomeIdx < outcomeCount, "M");
+        OutcomeMMState memory mm = _outcomeMM[outcomeIdx];
         if (marketMode != MarketMode.HYBRID_CLOB_MM || sharesWad == 0) return 0;
-        int256[] memory q = _getSharesArray();
-        q[outcomeIdx] = int256(soldSharesWad);
-        return _quoteBuyFromState(q, outcomeIdx, sharesWad);
+        if (soldSharesWad + sharesWad > mm.initialSharesWad) return 0;
+        return _quoteBuy(outcomeIdx, soldSharesWad, sharesWad);
     }
 
     function previewMMSellFromState(
@@ -636,9 +642,7 @@ contract PredictionMarketV2 is ReentrancyGuard {
     ) external view returns (uint256) {
         require(outcomeIdx < outcomeCount, "M");
         if (marketMode != MarketMode.HYBRID_CLOB_MM || sharesWad == 0) return 0;
-        int256[] memory q = _getSharesArray();
-        q[outcomeIdx] = int256(soldSharesWad);
-        return _quoteSellFromState(q, outcomeIdx, reserveWei, sharesWad);
+        return _quoteSell(outcomeIdx, soldSharesWad, reserveWei, sharesWad);
     }
 
     function getMMOutcomeState(uint256 outcomeIdx)
@@ -654,18 +658,17 @@ contract PredictionMarketV2 is ReentrancyGuard {
         )
     {
         require(outcomeIdx < outcomeCount, "M");
-        if (marketMode != MarketMode.HYBRID_CLOB_MM) return (0, 0, 0, 0, 0, 0);
-        uint256 outstanding = _positiveOutcomeShares(outcomeIdx);
-        initialSharesWad = MAX_LMSR_SHARES_WAD;
-        soldSharesWad = outstanding;
-        reserveWei = _claimablePool();
-        availableSharesWad = MAX_LMSR_SHARES_WAD > outstanding
-            ? MAX_LMSR_SHARES_WAD - outstanding
+        OutcomeMMState memory mm = _outcomeMM[outcomeIdx];
+        initialSharesWad = mm.initialSharesWad;
+        soldSharesWad = mm.soldSharesWad;
+        reserveWei = mm.reserveWei;
+        availableSharesWad = mm.initialSharesWad > mm.soldSharesWad
+            ? mm.initialSharesWad - mm.soldSharesWad
             : 0;
-        askPriceWad = availableSharesWad > 0 ? previewBuy(outcomeIdx, WAD) : 0;
+        askPriceWad = availableSharesWad > 0 ? _applyAskSpread(_midPrice(outcomeIdx, mm.soldSharesWad)) : 0;
         if (soldSharesWad > 0 && reserveWei > 0) {
             uint256 sampleShares = soldSharesWad < WAD ? soldSharesWad : WAD;
-            uint256 proceeds = _quoteSell(outcomeIdx, sampleShares);
+            uint256 proceeds = _quoteSell(outcomeIdx, soldSharesWad, reserveWei, sampleShares);
             bidPriceWad = proceeds > 0 ? (proceeds * WAD) / sampleShares : 0;
         }
     }
@@ -710,11 +713,11 @@ contract PredictionMarketV2 is ReentrancyGuard {
         uint256 claimablePool = _claimablePool();
         uint256 winningShares = uint256(totalSharesWad[_winningOutcome]);
         resolvedPoolWei = claimablePool;
-        totalClaimWei = winningShares <= claimablePool ? winningShares : claimablePool;
+        totalClaimWei = claimablePool;
         totalWinningSharesAtResolution = winningShares;
         totalClaimSharesAtResolution = winningShares;
         remainingClaimSharesWad = winningShares;
-        payoutPerWinningShareWad = winningShares == 0 ? 0 : (totalClaimWei * WAD) / winningShares;
+        payoutPerWinningShareWad = winningShares == 0 ? 0 : (claimablePool * WAD) / winningShares;
     }
 
     function _finalizeInvalid() internal {
@@ -747,71 +750,79 @@ contract PredictionMarketV2 is ReentrancyGuard {
         }
     }
 
-    function _quoteBuy(uint256 outcomeIdx, uint256 sharesWad)
+    function _quoteBuy(uint256 outcomeIdx, uint256 soldSharesWad, uint256 sharesWad)
         internal
         view
         returns (uint256)
     {
-        return _quoteBuyFromState(_getSharesArray(), outcomeIdx, sharesWad);
+        uint256 avgMid = _averageMidForBuy(outcomeIdx, soldSharesWad, sharesWad);
+        uint256 askPrice = _applyAskSpread(avgMid);
+        return (sharesWad * askPrice) / WAD;
     }
 
-    function _quoteSell(uint256 outcomeIdx, uint256 sharesWad)
+    function _quoteSell(uint256 outcomeIdx, uint256 soldSharesWad, uint256 reserveWei, uint256 sharesWad)
         internal
         view
         returns (uint256)
     {
-        return _quoteSellFromState(_getSharesArray(), outcomeIdx, _claimablePool(), sharesWad);
-    }
-
-    function _quoteBuyFromState(int256[] memory q, uint256 outcomeIdx, uint256 sharesWad)
-        internal
-        view
-        returns (uint256)
-    {
-        if (sharesWad == 0) return 0;
-        int256 rawCost = LMSRMath.tradeCost(q, outcomeIdx, int256(sharesWad), b);
-        if (rawCost <= 0) return 0;
-        return _applyAskSpreadToAmount(uint256(rawCost));
-    }
-
-    function _quoteSellFromState(
-        int256[] memory q,
-        uint256 outcomeIdx,
-        uint256 reserveWei,
-        uint256 sharesWad
-    )
-        internal
-        view
-        returns (uint256)
-    {
-        if (sharesWad == 0 || reserveWei == 0) return 0;
-        if (q[outcomeIdx] < int256(sharesWad)) return 0;
-        int256 rawCost = LMSRMath.tradeCost(q, outcomeIdx, -int256(sharesWad), b);
-        if (rawCost >= 0) return 0;
-        uint256 proceedsWei = _applyBidSpreadToAmount(uint256(-rawCost));
+        if (sharesWad == 0 || sharesWad > soldSharesWad || reserveWei == 0) return 0;
+        uint256 avgMid = _averageMidForSell(outcomeIdx, soldSharesWad, sharesWad);
+        uint256 bidPrice = _applyBidSpread(avgMid);
+        uint256 proceedsWei = (sharesWad * bidPrice) / WAD;
         if (proceedsWei == 0 || proceedsWei > reserveWei) return 0;
         return proceedsWei;
     }
 
-    function _applyAskSpreadToAmount(uint256 amountWei) internal view returns (uint256) {
-        return (amountWei * (MAX_BPS + mmSpreadBps)) / MAX_BPS;
+    function _averageMidForBuy(uint256 outcomeIdx, uint256 soldSharesWad, uint256 sharesWad)
+        internal
+        view
+        returns (uint256)
+    {
+        OutcomeMMState memory mm = _outcomeMM[outcomeIdx];
+        uint256 base = _basePrice();
+        if (mm.initialSharesWad == 0 || sharesWad == 0) return base;
+        uint256 headroom = WAD - base;
+        uint256 variable = (headroom * ((soldSharesWad * 2) + sharesWad)) / (2 * mm.initialSharesWad);
+        if (variable > headroom) variable = headroom;
+        return base + variable;
     }
 
-    function _applyBidSpreadToAmount(uint256 amountWei) internal view returns (uint256) {
-        return (amountWei * (MAX_BPS - mmSpreadBps)) / MAX_BPS;
+    function _averageMidForSell(uint256 outcomeIdx, uint256 soldSharesWad, uint256 sharesWad)
+        internal
+        view
+        returns (uint256)
+    {
+        OutcomeMMState memory mm = _outcomeMM[outcomeIdx];
+        uint256 base = _basePrice();
+        if (mm.initialSharesWad == 0 || sharesWad == 0) return base;
+        uint256 headroom = WAD - base;
+        uint256 soldFactor = (soldSharesWad * 2) - sharesWad;
+        uint256 variable = (headroom * soldFactor) / (2 * mm.initialSharesWad);
+        if (variable > headroom) variable = headroom;
+        return base + variable;
     }
 
-    function _positiveOutcomeShares(uint256 outcomeIdx) internal view returns (uint256) {
-        int256 shares = totalSharesWad[outcomeIdx];
-        return shares > 0 ? uint256(shares) : 0;
+    function _midPrice(uint256 outcomeIdx, uint256 soldSharesWad) internal view returns (uint256) {
+        OutcomeMMState memory mm = _outcomeMM[outcomeIdx];
+        uint256 base = _basePrice();
+        if (mm.initialSharesWad == 0) return base;
+        uint256 headroom = WAD - base;
+        uint256 variable = (headroom * soldSharesWad) / mm.initialSharesWad;
+        if (variable > headroom) variable = headroom;
+        return base + variable;
     }
 
-    function _getSharesArray() internal view returns (int256[] memory q) {
-        q = new int256[](outcomeCount);
-        for (uint256 i = 0; i < outcomeCount; ) {
-            q[i] = totalSharesWad[i];
-            unchecked { i++; }
-        }
+    function _basePrice() internal view returns (uint256) {
+        return WAD / outcomeCount;
+    }
+
+    function _applyAskSpread(uint256 midPriceWad) internal view returns (uint256) {
+        uint256 price = (midPriceWad * (MAX_BPS + mmSpreadBps)) / MAX_BPS;
+        return price > WAD ? WAD : price;
+    }
+
+    function _applyBidSpread(uint256 midPriceWad) internal view returns (uint256) {
+        return (midPriceWad * (MAX_BPS - mmSpreadBps)) / MAX_BPS;
     }
 
     function _recordTradePrice(uint256 outcomeIdx, uint256 priceWad) internal {

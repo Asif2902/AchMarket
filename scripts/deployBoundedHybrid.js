@@ -4,7 +4,6 @@ const EXPECTED_CHAIN_ID = Number(process.env.EXPECTED_CHAIN_ID || 5042002);
 const CHUNK_SIZE_WAD = process.env.ROUTER_CHUNK_SIZE_WAD || "50000000000000000000";
 const MAX_TRADE_SHARES_WAD = process.env.ROUTER_MAX_TRADE_SHARES_WAD || "10000000000000000000000";
 const DEFAULT_MAX_HOPS = process.env.ROUTER_DEFAULT_MAX_HOPS || "64";
-const FACTORY_LIQUIDITY_RESERVE_WEI = process.env.FACTORY_LIQUIDITY_RESERVE_WEI || "50000000000000000000";
 
 async function main() {
   const { ethers } = await hre.network.connect();
@@ -34,12 +33,15 @@ async function main() {
   const protocolOwner = process.env.PROTOCOL_OWNER || await oldFactory.owner();
   const feeRecipient = process.env.FEE_RECIPIENT || await oldRouter.feeRecipient();
 
-  console.log("Deploying LMSR hybrid v3 with account:", deployer.address);
+  console.log("Deploying bounded-MM hybrid stack with account:", deployer.address);
   console.log("Protocol owner:", protocolOwner);
   console.log("Fee recipient:", feeRecipient);
   console.log("OrderBook:", oldOrderBookAddress);
   console.log("Resolver:", oldResolverAddress);
-  console.log("Old Factory:", oldFactoryAddress);
+  console.log("Previous Factory:", oldFactoryAddress);
+  console.log("Chunk shares:", ethers.formatEther(CHUNK_SIZE_WAD));
+  console.log("Max trade shares:", ethers.formatEther(MAX_TRADE_SHARES_WAD));
+  console.log("Default max hops:", DEFAULT_MAX_HOPS);
 
   const MarketImplementation = await ethers.getContractFactory("PredictionMarketV2");
   const marketImplementation = await MarketImplementation.deploy();
@@ -79,23 +81,18 @@ async function main() {
   await (await orderBook.setMarketRegistrar(factoryAddr)).wait();
   await (await resolver.setMarketRegistrar(factoryAddr)).wait();
 
-  if (FACTORY_LIQUIDITY_RESERVE_WEI !== "0") {
-    await (await deployer.sendTransaction({ to: factoryAddr, value: FACTORY_LIQUIDITY_RESERVE_WEI })).wait();
-  }
-
   if (protocolOwner.toLowerCase() !== deployer.address.toLowerCase()) {
     await (await router.transferOwnership(protocolOwner)).wait();
     await (await factory.transferOwnership(protocolOwner)).wait();
   }
 
-  console.log("\n=== LMSR Hybrid V3 Deployment Summary ===");
+  console.log("\n=== Bounded-MM Hybrid Deployment Summary ===");
   console.log("HybridMarketFactory    :", factoryAddr);
   console.log("PredictionMarketV2 impl:", marketImplementationAddr);
   console.log("MarketRouter           :", routerAddr);
   console.log("HybridOrderBook        :", oldOrderBookAddress);
   console.log("BondedResolutionManager:", oldResolverAddress);
   console.log("HybridMarketLens       :", lensAddr);
-  console.log("Factory liquidity reserve:", ethers.formatEther(await ethers.provider.getBalance(factoryAddr)));
   console.log("Owner                  :", protocolOwner);
 }
 

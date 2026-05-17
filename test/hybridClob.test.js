@@ -68,7 +68,7 @@ async function deployHybridFixture() {
   await router.setMarketRegistrar(await factory.getAddress());
   await resolver.setMarketRegistrar(await factory.getAddress());
 
-  await owner.sendTransaction({ to: await factory.getAddress(), value: ethers.parseEther("25") });
+  await owner.sendTransaction({ to: await factory.getAddress(), value: ethers.parseEther("10") });
 
   const duration = 30 * 24 * 60 * 60;
   const block = await ethers.provider.getBlock("latest");
@@ -79,7 +79,7 @@ async function deployHybridFixture() {
     "",
     ["Yes", "No"],
     1,
-    ethers.parseEther("25"),
+    ethers.parseEther("1000"),
     duration,
     "https://example.com/source",
     block.timestamp + duration + 60,
@@ -93,66 +93,8 @@ async function deployHybridFixture() {
   return { owner, alice, bob, feeRecipient, factory, orderBook, router, resolver, market, duration };
 }
 
-describe("Hybrid CLOB + LMSR", function () {
-  it("keeps LMSR probabilities normalized and moves opposite outcomes after a buy", async function () {
-    const { alice, router, market } = await deployHybridFixture();
-    const marketAddress = await market.getAddress();
-    const before = await market.getImpliedProbabilities();
-
-    await router.connect(alice).buy(
-      marketAddress,
-      0,
-      ethers.parseEther("5"),
-      ethers.parseEther("5"),
-      ethers.parseEther("10"),
-      8,
-      await latestDeadline(),
-      { value: ethers.parseEther("10") }
-    );
-
-    const after = await market.getImpliedProbabilities();
-    const sum = after.reduce((acc, value) => acc + value, 0n);
-
-    expect(after[0]).to.be.greaterThan(before[0]);
-    expect(after[1]).to.be.lessThan(before[1]);
-    expect(sum >= WAD - 2n && sum <= WAD + 2n).to.equal(true);
-  });
-
-  it("redeems resolved winning shares at one USDC per share when seeded", async function () {
-    const { alice, router, resolver, market, duration } = await deployHybridFixture();
-    const marketAddress = await market.getAddress();
-    const shares = ethers.parseEther("3");
-
-    await router.connect(alice).buy(
-      marketAddress,
-      0,
-      shares,
-      shares,
-      ethers.parseEther("10"),
-      8,
-      await latestDeadline(),
-      { value: ethers.parseEther("10") }
-    );
-
-    await ethers.provider.send("evm_increaseTime", [duration + 61]);
-    await ethers.provider.send("evm_mine", []);
-    await resolver.proposeResolution(marketAddress, 0, "ipfs://evidence", "ipfs://proof", "yes won", {
-      value: await resolver.requiredBond(marketAddress),
-    });
-    await ethers.provider.send("evm_increaseTime", [5 * 60 + 1]);
-    await ethers.provider.send("evm_mine", []);
-    await resolver.finalizeUnchallenged(1);
-
-    expect(await market.payoutPerWinningShareWad()).to.equal(WAD);
-    const beforeBalance = await ethers.provider.getBalance(alice.address);
-    const tx = await market.connect(alice).redeem();
-    const receipt = await tx.wait();
-    const gasPaid = receipt.gasUsed * receipt.gasPrice;
-    const afterBalance = await ethers.provider.getBalance(alice.address);
-    expect(afterBalance - beforeBalance + gasPaid).to.equal(shares);
-  });
-
-  it("fills a taker buy from the best ask before LMSR when the ask improves price", async function () {
+describe("Hybrid CLOB + bounded MM", function () {
+  it("fills a taker buy from the best ask before MM when the ask improves price", async function () {
     const { alice, bob, orderBook, router, market } = await deployHybridFixture();
     const marketAddress = await market.getAddress();
     const shares = ethers.parseEther("1");
@@ -246,7 +188,7 @@ describe("Hybrid CLOB + LMSR", function () {
     expect(sellPreview.proceedsWei).to.be.greaterThanOrEqual(target);
   });
 
-  it("fills a taker sell into the best bid when the bid improves LMSR proceeds", async function () {
+  it("fills a taker sell into the best bid when the bid improves MM proceeds", async function () {
     const { alice, bob, orderBook, router, market } = await deployHybridFixture();
     const marketAddress = await market.getAddress();
     const shares = ethers.parseEther("1");
@@ -309,7 +251,7 @@ describe("Hybrid CLOB + LMSR", function () {
     await expect(orderBook.connect(bob).cancelOrder(1)).to.be.revertedWith("OB: not owner");
   });
 
-  it("falls back to LMSR while the order book is paused", async function () {
+  it("falls back to MM while the order book is paused", async function () {
     const { alice, bob, orderBook, router, market } = await deployHybridFixture();
     const marketAddress = await market.getAddress();
     const shares = ethers.parseEther("1");

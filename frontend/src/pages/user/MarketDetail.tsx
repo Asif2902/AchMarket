@@ -1305,14 +1305,18 @@ export default function MarketDetail() {
   const hasExistingShares = userInfo?.shares[selectedOutcome] && userInfo.shares[selectedOutcome] > 0n;
   if (estimatedShares !== null && usdcAmount && tradeTab === 'buy' && previewCost !== null) {
     const sharesWad = previewFilledSharesWad;
+    const totalWinShares = detail.totalSharesWad[selectedOutcome] + sharesWad;
     const costWei = previewCost;
-    if (sharesWad > 0n && costWei > 0n) {
-      estimatedPayout = sharesWad;
+    const poolAfterTrade = poolBalance + costWei;
+    const resolvedPool = poolAfterTrade * 9925n / 10000n;
+    if (totalWinShares > 0n) {
+      estimatedPayout = (sharesWad * resolvedPool) / totalWinShares;
       multiplier = Number(estimatedPayout) / Number(costWei);
       avgPrice = estimatedShares > 0 ? Number(ethers.formatEther(costWei)) / estimatedShares : 0;
       profit = Number(estimatedPayout - costWei) / 1e18;
       if (hasExistingShares) {
-        totalPositionPayout = userInfo!.shares[selectedOutcome] + sharesWad;
+        const userWinShares = userInfo!.shares[selectedOutcome] + sharesWad;
+        totalPositionPayout = (userWinShares * resolvedPool) / totalWinShares;
       }
     }
   }
@@ -1991,8 +1995,7 @@ export default function MarketDetail() {
             {/* Resolved pool info */}
             {isResolved && detail.resolvedPoolWei > 0n && (() => {
               const winningShares = detail.totalSharesWad[detail.winningOutcome] > 0n ? detail.totalSharesWad[detail.winningOutcome] : 0n;
-              const poolBackedPayout = winningShares > 0n ? (detail.resolvedPoolWei * WAD) / winningShares : 0n;
-              const payoutPerShare = poolBackedPayout > WAD ? WAD : poolBackedPayout;
+              const payoutPerShare = winningShares > 0n ? (detail.resolvedPoolWei * WAD) / winningShares : 0n;
               return (
                 <div className="card p-4">
                   <div className="grid grid-cols-2 gap-4">
@@ -2368,12 +2371,12 @@ export default function MarketDetail() {
                             <div className="px-3 py-2 border-b border-white/[0.06] bg-cyan-500/[0.04]">
                               <div className="flex items-center justify-between gap-2 mb-2">
                                 <div>
-                                  <p className="text-2xs uppercase tracking-[0.12em] text-cyan-300/80 font-semibold">LMSR Quote</p>
+                                  <p className="text-2xs uppercase tracking-[0.12em] text-cyan-300/80 font-semibold">MM Quote</p>
                                   <p className="text-2xs text-white/45">
-                                    {formatUSDC(mmQuote.reserveWei)} USDC reserve, winning shares redeem at 1 USDC
+                                    {formatWad(mmQuote.availableSharesWad)} available, {formatUSDC(mmQuote.reserveWei)} USDC same-outcome buyback reserve
                                   </p>
                                 </div>
-                                <span className="text-2xs rounded-md border border-cyan-400/20 bg-cyan-400/10 px-2 py-1 text-cyan-200">Normalized odds</span>
+                                <span className="text-2xs rounded-md border border-cyan-400/20 bg-cyan-400/10 px-2 py-1 text-cyan-200">Same outcome only</span>
                               </div>
                               <div className="grid grid-cols-2 gap-2">
                                 <button
