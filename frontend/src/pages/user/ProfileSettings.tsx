@@ -304,7 +304,7 @@ export default function ProfileSettings() {
       if (requestIdCaptured === currentRequestIdRef.current && addressRef.current === address && signerRef.current === signer) {
         const message = err instanceof Error ? err.message : 'Failed to save profile';
         const friendly = message === 'Request failed'
-          ? 'Profile API failed. Check Vercel env vars and function logs.'
+          ? 'Profile API failed. Check server env vars and API logs.'
           : message;
         setMsg({ type: 'error', text: friendly });
       }

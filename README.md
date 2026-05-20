@@ -77,6 +77,31 @@ cd frontend
 npm run dev
 ```
 
+### VPS Production Hosting
+
+The frontend can run without Vercel. The production server keeps the same `/api/*`
+paths by loading the handlers from `frontend/api`, serves the Vite build, and
+falls back to `index.html` for client-side routes.
+
+```bash
+cd frontend
+npm install
+npm run build
+PORT=3000 npm run start
+```
+
+Put the environment variables from `.env.example` into your process manager,
+or create `frontend/.env` on the server. For PM2:
+
+```bash
+cd frontend
+pm2 start ecosystem.config.cjs
+pm2 save
+```
+
+Point Nginx/Caddy at the Node process and pass all traffic through it, including
+`/api/*`. The app also exposes `GET /healthz` for uptime checks.
+
 ### Type Checking
 
 ```bash
@@ -243,4 +268,3 @@ We are not building an "order book with a fallback." We are building **an AMM th
 
 GNU General Public License v3.0 - see LICENSE file for details.
 .
-
