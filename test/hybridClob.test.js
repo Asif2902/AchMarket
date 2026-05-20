@@ -157,6 +157,37 @@ describe("Hybrid CLOB + bounded MM", function () {
     expect(await market.sharesOf(alice.address, 0)).to.equal(preview.filledSharesWad);
   });
 
+  it("normalizes MM odds and moves the sell quote after a large instant buy", async function () {
+    const { alice, router, market } = await deployHybridFixture();
+    const marketAddress = await market.getAddress();
+    await router.setExecutionConfig(ethers.parseEther("50"), ethers.parseEther("10000"), 64);
+
+    const before = await market.getImpliedProbabilities();
+    const budget = ethers.parseEther("500");
+    const preview = await router.previewBuyForAmount(marketAddress, 0, budget, 0);
+
+    await router.connect(alice).buy(
+      marketAddress,
+      0,
+      preview.filledSharesWad,
+      preview.filledSharesWad,
+      budget,
+      0,
+      await latestDeadline(),
+      { value: budget }
+    );
+
+    const after = await market.getImpliedProbabilities();
+    const sum = after.reduce((acc, value) => acc + value, 0n);
+    const yesState = await market.getMMOutcomeState(0);
+
+    expect(after[0]).to.be.greaterThan(before[0]);
+    expect(after[1]).to.be.lessThan(before[1]);
+    expect(sum >= WAD - 2n && sum <= WAD + 2n).to.equal(true);
+    expect(yesState.bidPriceWad).to.be.greaterThan(WAD / 2n);
+    expect(yesState.askPriceWad).to.be.greaterThan(yesState.bidPriceWad);
+  });
+
   it("quotes shares needed for a USDC sell target in one router preview", async function () {
     const { alice, router, market } = await deployHybridFixture();
     const marketAddress = await market.getAddress();

@@ -597,13 +597,19 @@ contract PredictionMarketV2 is ReentrancyGuard {
     function getImpliedProbabilities() external view returns (int256[] memory probs) {
         probs = new int256[](outcomeCount);
         for (uint256 i = 0; i < outcomeCount; ) {
-            probs[i] = int256(lastTradePriceWad[i]);
+            uint256 price = marketMode == MarketMode.HYBRID_CLOB_MM
+                ? _normalizedMidPrice(i)
+                : lastTradePriceWad[i];
+            probs[i] = int256(price);
             unchecked { i++; }
         }
     }
 
     function getImpliedProbability(uint256 outcomeIdx) public view returns (uint256) {
         require(outcomeIdx < outcomeCount, "M");
+        if (marketMode == MarketMode.HYBRID_CLOB_MM) {
+            return _normalizedMidPrice(outcomeIdx);
+        }
         return lastTradePriceWad[outcomeIdx];
     }
 
@@ -778,13 +784,7 @@ contract PredictionMarketV2 is ReentrancyGuard {
         view
         returns (uint256)
     {
-        OutcomeMMState memory mm = _outcomeMM[outcomeIdx];
-        uint256 base = _basePrice();
-        if (mm.initialSharesWad == 0 || sharesWad == 0) return base;
-        uint256 headroom = WAD - base;
-        uint256 variable = (headroom * ((soldSharesWad * 2) + sharesWad)) / (2 * mm.initialSharesWad);
-        if (variable > headroom) variable = headroom;
-        return base + variable;
+        return _normalizedMidPriceFromState(outcomeIdx, soldSharesWad + (sharesWad / 2));
     }
 
     function _averageMidForSell(uint256 outcomeIdx, uint256 soldSharesWad, uint256 sharesWad)
@@ -792,24 +792,44 @@ contract PredictionMarketV2 is ReentrancyGuard {
         view
         returns (uint256)
     {
-        OutcomeMMState memory mm = _outcomeMM[outcomeIdx];
-        uint256 base = _basePrice();
-        if (mm.initialSharesWad == 0 || sharesWad == 0) return base;
-        uint256 headroom = WAD - base;
-        uint256 soldFactor = (soldSharesWad * 2) - sharesWad;
-        uint256 variable = (headroom * soldFactor) / (2 * mm.initialSharesWad);
-        if (variable > headroom) variable = headroom;
-        return base + variable;
+        return _normalizedMidPriceFromState(outcomeIdx, soldSharesWad - (sharesWad / 2));
     }
 
     function _midPrice(uint256 outcomeIdx, uint256 soldSharesWad) internal view returns (uint256) {
+        return _normalizedMidPriceFromState(outcomeIdx, soldSharesWad);
+    }
+
+    function _normalizedMidPrice(uint256 outcomeIdx) internal view returns (uint256) {
+        return _normalizedMidPriceFromState(outcomeIdx, _outcomeMM[outcomeIdx].soldSharesWad);
+    }
+
+    function _normalizedMidPriceFromState(uint256 outcomeIdx, uint256 soldSharesWad)
+        internal
+        view
+        returns (uint256)
+    {
         OutcomeMMState memory mm = _outcomeMM[outcomeIdx];
         uint256 base = _basePrice();
         if (mm.initialSharesWad == 0) return base;
-        uint256 headroom = WAD - base;
-        uint256 variable = (headroom * soldSharesWad) / mm.initialSharesWad;
-        if (variable > headroom) variable = headroom;
-        return base + variable;
+        uint256 averageSold = _totalMMSoldWithOverride(outcomeIdx, soldSharesWad) / outcomeCount;
+        if (soldSharesWad >= averageSold) {
+            uint256 delta = ((soldSharesWad - averageSold) * WAD) / mm.initialSharesWad;
+            uint256 price = base + delta;
+            return price > WAD ? WAD : price;
+        }
+        uint256 discount = ((averageSold - soldSharesWad) * WAD) / mm.initialSharesWad;
+        return discount >= base ? 0 : base - discount;
+    }
+
+    function _totalMMSoldWithOverride(uint256 overrideOutcomeIdx, uint256 overrideSoldSharesWad)
+        internal
+        view
+        returns (uint256 total)
+    {
+        for (uint256 i = 0; i < outcomeCount; ) {
+            total += i == overrideOutcomeIdx ? overrideSoldSharesWad : _outcomeMM[i].soldSharesWad;
+            unchecked { i++; }
+        }
     }
 
     function _basePrice() internal view returns (uint256) {
