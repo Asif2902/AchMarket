@@ -103,7 +103,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     let cancelled = false;
     ethersProvider
       .getSigner(account.address)
-      .then((s) => { if (!cancelled) setSigner(s); })
+      .then((s: ethers.Signer) => { if (!cancelled) setSigner(s); })
       .catch(() => { if (!cancelled) setSigner(null); });
 
     return () => { cancelled = true; };

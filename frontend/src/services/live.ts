@@ -9,12 +9,13 @@ import type {
   LiveFeedSuggestionsResponse,
   LiveSportsSearchResponse,
 } from '../types/live';
+import { apiUrl } from './apiBase';
 
-const LIVE_FEED_CONFIG_API_PATH = '/api/live-feed-config';
-const LIVE_MARKET_API_PATH = '/api/live-market';
-const LIVE_FEED_SUGGEST_API_PATH = '/api/live-feed-suggest';
-const LIVE_FEED_SEARCH_API_PATH = '/api/live-feed-search';
-const LIVE_TOKEN_SEARCH_API_PATH = '/api/live-token-search';
+const LIVE_FEED_CONFIG_API_PATH = apiUrl('/api/live-feed-config');
+const LIVE_MARKET_API_PATH = apiUrl('/api/live-market');
+const LIVE_FEED_SUGGEST_API_PATH = apiUrl('/api/live-feed-suggest');
+const LIVE_FEED_SEARCH_API_PATH = apiUrl('/api/live-feed-search');
+const LIVE_TOKEN_SEARCH_API_PATH = apiUrl('/api/live-token-search');
 const LIVE_CONFIG_BATCH_SIZE = 50;
 
 function serializeLiveFeedPayload(payload: LiveFeedConfigInput): string {

@@ -15,7 +15,7 @@ import type {
   LiveSportsData,
   LiveSportsDoc,
   LiveUnconfiguredResponse,
-} from '../src/types/live';
+} from '../types/live.js';
 
 const LIVE_FEEDS_COLLECTION = 'live_feeds';
 const MONGO_URI = process.env.MONGO_URI;

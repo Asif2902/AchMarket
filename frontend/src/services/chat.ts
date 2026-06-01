@@ -1,8 +1,9 @@
 import { ethers } from 'ethers';
 import type { Signer } from 'ethers';
 import type { ChatApiResponse, ChatSendResponse, ChatMessageInput, ChatServiceError, ChatSendErrorCode } from '../types/chat';
+import { apiUrl } from './apiBase';
 
-const CHAT_API_PATH = '/api/chat';
+const CHAT_API_PATH = apiUrl('/api/chat');
 const REQUEST_TIMEOUT_MS = 20000;
 
 interface ChatSigningPayload {

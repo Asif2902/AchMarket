@@ -1,7 +1,6 @@
 import type { ReactNode } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { useEffect } from 'react';
-import { Analytics as VercelAnalytics } from '@vercel/analytics/react';
 import { WalletProvider, useWallet } from './context/WalletContext';
 import Header from './components/Header';
 import Footer from './components/Footer';
@@ -105,7 +104,6 @@ function AppShell({ children }: { children?: ReactNode }) {
       <Footer />
       <MobileBottomNav />
       <ToastContainer />
-      <VercelAnalytics />
     </div>
   );
 }

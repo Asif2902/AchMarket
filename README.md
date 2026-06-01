@@ -24,13 +24,17 @@ AchMarket/
 │   ├── PredictionMarketLens.sol
 │   └── LMSRMath.sol
 ├── frontend/            # React + TypeScript frontend
-│   ├── api/           # Backend API routes (live feeds, market data)
 │   ├── src/
 │   │   ├── components/   # Reusable UI components
 │   │   ├── pages/        # Application pages
 │   │   ├── services/     # API service layers
 │   │   └── types/        # TypeScript type definitions
 │   └── public/
+├── backend/             # Node/Express API for VPS hosting
+│   └── src/
+│       ├── api/          # API route handlers
+│       ├── config/       # Backend runtime config data
+│       └── types/        # Backend API types
 ├── scripts/            # Deployment scripts
 └── whitepaper/         # Protocol documentation
 ```
@@ -50,6 +54,9 @@ npm install
 
 # Frontend dependencies
 cd frontend && npm install
+
+# Backend dependencies
+cd ../backend && npm install
 ```
 
 ### Compile Contracts
@@ -76,6 +83,31 @@ npm run deploy:local
 cd frontend
 npm run dev
 ```
+
+### Backend Development
+
+```bash
+cd backend
+npm run dev
+```
+
+The backend listens on `PORT` or `8080` by default and exposes:
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/health` | GET | Health check for a VPS load balancer or reverse proxy |
+| `/api/profile` | GET/POST | Profile read/write API |
+| `/api/profile-avatar` | POST/DELETE | Profile avatar upload/delete API |
+| `/api/market-media` | POST/DELETE | Market media upload/delete API |
+| `/api/chat` | GET/POST | Market chat API |
+| `/api/live-feed-suggest` | POST | Get feed suggestions based on market data |
+| `/api/live-feed-config` | GET/POST | Manage live feed configuration |
+| `/api/live-feed-search` | GET | Search sports live feed events |
+| `/api/live-token-search` | GET | Search crypto token live feed assets |
+| `/api/live-market` | GET | Get live market data and status |
+| `/api/link-preview` | GET | Fetch safe link preview metadata |
+
+For production on a VPS, run the backend behind Nginx/Caddy and set `CORS_ALLOWED_ORIGINS` to your frontend domain. If the frontend is served from another origin, build it with `VITE_API_BASE_URL=https://your-api-domain`.
 
 ### Type Checking
 
@@ -243,4 +275,3 @@ We are not building an "order book with a fallback." We are building **an AMM th
 
 GNU General Public License v3.0 - see LICENSE file for details.
 .
-

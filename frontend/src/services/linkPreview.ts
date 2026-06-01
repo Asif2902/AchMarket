@@ -1,3 +1,5 @@
+import { apiUrl } from './apiBase';
+
 export interface LinkPreviewData {
   url: string;
   title: string;
@@ -10,7 +12,7 @@ export interface LinkPreviewData {
 
 export async function fetchLinkPreview(url: string): Promise<LinkPreviewData> {
   const origin = window.location.origin;
-  const response = await fetch(`/api/link-preview?url=${encodeURIComponent(url)}&origin=${encodeURIComponent(origin)}`);
+  const response = await fetch(apiUrl(`/api/link-preview?url=${encodeURIComponent(url)}&origin=${encodeURIComponent(origin)}`));
   const body = await response.json().catch(() => ({}));
 
   if (!response.ok) {

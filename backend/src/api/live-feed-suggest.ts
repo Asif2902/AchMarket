@@ -2,7 +2,7 @@ import { sportsDbUrl, teamsMatch } from './_sportsdb.js';
 import { extractSignedHeaders, verifySignedMessage } from './_signature.js';
 import { normalizeSportsStatus } from './_sports-status.js';
 import { searchCoinGeckoAssets, type CoinGeckoSearchCandidate } from './_coingecko.js';
-import { LIVE_CRYPTO_ASSETS } from '../src/config/liveCryptoAssets.js';
+import { LIVE_CRYPTO_ASSETS } from '../config/liveCryptoAssets.js';
 
 const CORS_ALLOWED_ORIGINS = (process.env.CORS_ALLOWED_ORIGINS ?? '')
   .split(',')
@@ -858,6 +858,19 @@ async function detectSports(input: SuggestRequest) {
       selectedEventId: null,
       selectedLeagueName: null,
       candidates,
+    };
+  }
+
+  if (!teamPair) {
+    return {
+      detected: false,
+      confidence: 0,
+      reason: 'No clear team-vs-team pattern detected from title/outcomes.',
+      homeTeam: null,
+      awayTeam: null,
+      selectedEventId: null,
+      selectedLeagueName: null,
+      candidates: [] as SportsCandidate[],
     };
   }
 

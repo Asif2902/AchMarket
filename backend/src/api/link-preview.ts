@@ -2,7 +2,7 @@ import dns from 'dns/promises';
 import { isIP } from 'net';
 import { Agent, buildConnector, fetch as undiciFetch } from 'undici';
 
-const REQUEST_TIMEOUT_MS = 8000; // Vercel serverless function timeout
+const REQUEST_TIMEOUT_MS = 8000;
 const MAX_HTML_BYTES = 300000;
 const MAX_REDIRECTS = 5;
 

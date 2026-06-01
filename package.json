@@ -6,6 +6,10 @@
     "compile": "npx hardhat compile",
     "deploy": "npx hardhat run scripts/deploy.js --network arc_testnet",
     "deploy:local": "npx hardhat run scripts/deploy.js --network hardhat",
+    "backend:dev": "npm --prefix backend run dev",
+    "backend:start": "npm --prefix backend run start",
+    "frontend:dev": "npm --prefix frontend run dev",
+    "frontend:build": "npm --prefix frontend run build",
     "clean": "npx hardhat clean",
     "size": "npx hardhat size-contracts"
   },

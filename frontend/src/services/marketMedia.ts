@@ -5,8 +5,9 @@ import {
   buildMarketMediaDeleteSigningMessage,
   type MarketMediaKind,
 } from '../utils/marketMediaSigning';
+import { apiUrl } from './apiBase';
 
-const MARKET_MEDIA_API_PATH = '/api/market-media';
+const MARKET_MEDIA_API_PATH = apiUrl('/api/market-media');
 
 export interface MarketMediaUploadResponse {
   url: string;

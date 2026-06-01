@@ -10,9 +10,10 @@ import {
   buildAvatarDeleteSigningMessage,
 } from '../utils/avatarSigning';
 import type { PublicProfileResponse, ProfileAvatarUploadResponse } from '../types/profile';
+import { apiUrl } from './apiBase';
 
-const PROFILE_API_PATH = '/api/profile';
-const PROFILE_AVATAR_API_PATH = '/api/profile-avatar';
+const PROFILE_API_PATH = apiUrl('/api/profile');
+const PROFILE_AVATAR_API_PATH = apiUrl('/api/profile-avatar');
 
 function uint8ToHex(bytes: Uint8Array): string {
   return Array.from(bytes).map((b) => b.toString(16).padStart(2, '0')).join('');
