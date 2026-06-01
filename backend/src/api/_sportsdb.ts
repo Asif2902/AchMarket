@@ -6,9 +6,6 @@ const SPORTSDB_API_KEY = (() => {
 const SPORTSDB_BASE_URL = `https://www.thesportsdb.com/api/v1/json/${SPORTSDB_API_KEY}`;
 
 export function sportsDbUrl(path: string): string {
-  if (process.env.NODE_ENV === 'production' && !process.env.THE_SPORTS_DB_API_KEY?.trim()) {
-    throw new Error('THE_SPORTS_DB_API_KEY is required for sports feeds in production.');
-  }
   return `${SPORTSDB_BASE_URL}/${path.replace(/^\/+/, '')}`;
 }
 
