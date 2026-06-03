@@ -10,8 +10,6 @@ import EmptyState from '../../components/EmptyState';
 import UsdcIcon from '../../components/UsdcIcon';
 import { formatUSDC, formatCompactUSDC, formatWad, parseContractError, makeMarketSlug } from '../../utils/format';
 import { getOutcomeColor } from '../../components/ProbabilityBar';
-import { fetchProfileByAddress } from '../../services/profile';
-import type { PublicProfile as PublicProfileType } from '../../types/profile';
 
 interface Position {
   market: string;
@@ -26,6 +24,11 @@ interface Position {
   hasRedeemed: boolean;
   hasRefunded: boolean;
   stage: number;
+  winningOutcome: number | null;
+  totalSharesWad: bigint[];
+  resolvedPoolWei: bigint;
+  totalNetDepositedWei: bigint;
+  contractBalanceWei: bigint;
 }
 
 type TabType = 'all' | 'active' | 'winnings' | 'refunds' | 'claimed';
@@ -42,7 +45,6 @@ export default function Portfolio() {
   const [activeTab, setActiveTab] = useState<TabType>('all');
   const [sortBy, setSortBy] = useState<SortBy>('claimable_first');
   const [categoryFilter, setCategoryFilter] = useState('All');
-  const [profileSummary, setProfileSummary] = useState<PublicProfileType | null>(null);
   const txMsgTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
@@ -56,35 +58,6 @@ export default function Portfolio() {
       if (txMsgTimer.current) clearTimeout(txMsgTimer.current);
     };
   }, [txMsg]);
-
-  useEffect(() => {
-    if (!address) {
-      setProfileSummary(null);
-      return;
-    }
-
-    setProfileSummary(null);
-
-    let cancelled = false;
-    const run = async () => {
-      try {
-        const response = await fetchProfileByAddress(address);
-        if (!cancelled) {
-          setProfileSummary(response.profile);
-        }
-      } catch {
-        if (!cancelled) {
-          setProfileSummary(null);
-        }
-      }
-    };
-
-    run();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [address]);
 
   const latestAddressRef = useRef(address);
   latestAddressRef.current = address;
@@ -117,19 +90,51 @@ export default function Portfolio() {
       }
     }
 
-    return portfolio.map((p: Record<string, unknown>) => ({
-      market: p.market as string,
-      marketId: addrToIdCache.current.get((p.market as string).toLowerCase()) ?? null,
-      title: p.title as string,
-      category: p.category as string,
-      outcomeLabels: [...(p.outcomeLabels as string[])],
-      sharesPerOutcome: [...(p.sharesPerOutcome as bigint[])],
-      netDepositedWei: p.netDepositedWei as bigint,
-      canRedeem: p.canRedeem as boolean,
-      canRefund: p.canRefund as boolean,
-      hasRedeemed: p.hasRedeemed as boolean,
-      hasRefunded: p.hasRefunded as boolean,
-      stage: Number(p.stage),
+    return Promise.all(portfolio.map(async (p: Record<string, unknown>) => {
+      const market = p.market as string;
+      const stage = Number(p.stage);
+      let winningOutcome: number | null = null;
+      let totalSharesWad: bigint[] = [];
+      let resolvedPoolWei = 0n;
+      let totalNetDepositedWei = 0n;
+      let contractBalanceWei = 0n;
+
+      if (stage === STAGE.Resolved || stage === STAGE.Cancelled || stage === STAGE.Expired) {
+        try {
+          const detail = await lens.getMarketDetail(market) as Record<string, unknown>;
+          winningOutcome = Number(detail.winningOutcome);
+          totalSharesWad = [...(detail.totalSharesWad as bigint[])];
+          resolvedPoolWei = detail.resolvedPoolWei as bigint;
+
+          if (stage === STAGE.Cancelled || stage === STAGE.Expired) {
+            const marketContract = new ethers.Contract(market, MARKET_ABI, readProvider);
+            totalNetDepositedWei = await marketContract.totalNetDepositedWei();
+            contractBalanceWei = await readProvider.getBalance(market);
+          }
+        } catch (err) {
+          console.error(`Failed to fetch ROI detail for ${market}:`, err);
+        }
+      }
+
+      return {
+        market,
+        marketId: addrToIdCache.current.get(market.toLowerCase()) ?? null,
+        title: p.title as string,
+        category: p.category as string,
+        outcomeLabels: [...(p.outcomeLabels as string[])],
+        sharesPerOutcome: [...(p.sharesPerOutcome as bigint[])],
+        netDepositedWei: p.netDepositedWei as bigint,
+        canRedeem: p.canRedeem as boolean,
+        canRefund: p.canRefund as boolean,
+        hasRedeemed: p.hasRedeemed as boolean,
+        hasRefunded: p.hasRefunded as boolean,
+        stage,
+        winningOutcome,
+        totalSharesWad,
+        resolvedPoolWei,
+        totalNetDepositedWei,
+        contractBalanceWei,
+      };
     }));
   }, [readProvider]);
 
@@ -203,9 +208,11 @@ export default function Portfolio() {
 
   const totalDeposited = positions.reduce((acc, p) => acc + p.netDepositedWei, 0n);
   const activeDeposits = positions.filter((p) => p.stage === STAGE.Active).reduce((acc, p) => acc + p.netDepositedWei, 0n);
+  const estimatedReturnWei = positions.reduce((acc, p) => acc + (getEstimatedReturnWei(p) ?? 0n), 0n);
+  const estimatedProfitWei = estimatedReturnWei - totalDeposited;
+  const portfolioRoiPct = totalDeposited > 0n ? ((weiToNumber(estimatedReturnWei) - weiToNumber(totalDeposited)) / weiToNumber(totalDeposited)) * 100 : null;
 
   const totalMarkets = new Set(positions.map((p) => p.market)).size;
-  const activePositions = positions.filter((p) => p.stage === STAGE.Active).length;
   const claimableWinnings = positions.filter((p) => p.canRedeem && !p.hasRedeemed).length;
   const claimableRefunds = positions.filter((p) => p.canRefund && !p.hasRefunded && p.netDepositedWei > 0n).length;
 
@@ -278,17 +285,7 @@ export default function Portfolio() {
     claimed: positions.filter(p => p.hasRedeemed || p.hasRefunded).length,
   };
 
-  const claimablePrincipal = positions
-    .filter((p) => (p.canRedeem && !p.hasRedeemed) || (p.canRefund && !p.hasRefunded && p.netDepositedWei > 0n))
-    .reduce((acc, p) => acc + p.netDepositedWei, 0n);
-
-  const resolvedCount = positions.filter((p) => p.stage === STAGE.Resolved).length;
-  const cancelledCount = positions.filter((p) => p.stage === STAGE.Cancelled).length;
-  const expiredCount = positions.filter((p) => p.stage === STAGE.Expired).length;
-  const activeRatio = totalMarkets > 0 ? (activePositions / totalMarkets) * 100 : 0;
-
-  const profileName = (profileSummary?.displayName ?? '').trim();
-  const greetingName = profileName || (address ? `${address.slice(0, 6)}...${address.slice(-4)}` : 'Trader');
+  const walletTitle = address ? `${address.slice(0, 6)}...${address.slice(-4)}` : 'Trader';
 
   if (!isConnected) {
     return (
@@ -309,56 +306,48 @@ export default function Portfolio() {
   if (loading) return <PageLoader />;
 
   return (
-    <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8 space-y-6 animate-fade-in">
-      <div className="card p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 bg-gradient-to-r from-cyan-500/[0.10] via-transparent to-primary-500/[0.08] border-cyan-400/20">
-        <div>
-          <p className="text-lg sm:text-xl font-semibold text-white">Hi {greetingName}, here is your portfolio.</p>
-          <p className="text-xs text-dark-400 mt-1">Track positions, claim outcomes, and keep your momentum rolling.</p>
-          <div className="mt-2 flex items-center gap-2 text-2xs">
-            <span className="px-2 py-1 rounded-md border border-cyan-400/25 bg-cyan-400/10 text-cyan-200">{positions.length} positions</span>
-            <span className="px-2 py-1 rounded-md border border-emerald-500/25 bg-emerald-500/10 text-emerald-200">{claimableWinnings + claimableRefunds} claimable</span>
+    <div className="portfolio-page mx-auto max-w-6xl px-4 sm:px-6 lg:px-8 py-5 sm:py-8 animate-fade-in">
+      <section className="portfolio-hero">
+        <div className="portfolio-hero-copy">
+          <p className="portfolio-eyebrow">Account Console</p>
+          <h1>{walletTitle}</h1>
+          <p>Positions, claimable outcomes, and portfolio performance in one view.</p>
+          <div className="portfolio-hero-badges">
+            <span>{positions.length} positions</span>
+            <span>{claimableWinnings + claimableRefunds} claimable</span>
           </div>
         </div>
-        <div className="flex items-center gap-2">
-          <Link to="/profile" className="btn-secondary text-xs px-3 py-2">
-            Profile Hub
-          </Link>
-        </div>
-      </div>
+        <Link to="/profile" className="portfolio-ghost-button">
+          Profile Hub
+        </Link>
+      </section>
 
-      {/* Header */}
-      <div className="card p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 bg-gradient-to-br from-primary-500/[0.07] via-transparent to-emerald-500/[0.05] border-primary-500/15">
+      <section className="portfolio-section-head">
         <div>
-          <h1 className="text-xl sm:text-2xl font-bold text-white">Portfolio</h1>
-          <p className="text-xs text-dark-400 mt-0.5">{positions.length} position{positions.length !== 1 ? 's' : ''} across {totalMarkets} market{totalMarkets !== 1 ? 's' : ''}</p>
-          <div className="mt-2 flex flex-wrap items-center gap-2 text-2xs">
-            <span className="px-2 py-1 rounded-md bg-emerald-500/15 text-emerald-300 border border-emerald-500/25">{claimableWinnings + claimableRefunds} claimable</span>
-            <span className="px-2 py-1 rounded-md bg-blue-500/12 text-blue-300 border border-blue-500/25">{resolvedCount} resolved</span>
-            <span className="px-2 py-1 rounded-md bg-amber-500/12 text-amber-300 border border-amber-500/25">{activeRatio.toFixed(0)}% active</span>
-          </div>
+          <h2>Positions</h2>
+          <p>{positions.length} position{positions.length !== 1 ? 's' : ''} across {totalMarkets} market{totalMarkets !== 1 ? 's' : ''}</p>
         </div>
-        <Link to="/" className="btn-secondary text-xs px-3 py-2 shrink-0 !min-h-0">
+        <Link to="/" className="portfolio-outline-button">
           Browse Markets
         </Link>
-      </div>
+      </section>
 
       {/* Summary stats */}
       {positions.length > 0 && (
-        <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-3">
+        <div className="portfolio-stats-row">
           <SummaryCard label="Total Deposited" value={formatCompactUSDC(totalDeposited)} suffix="USDC" icon={<UsdcIcon size={16} />} accent="neutral" />
+          <SummaryCard label="Est. Return" value={formatCompactUSDC(estimatedReturnWei)} suffix="USDC" icon={<UsdcIcon size={16} />} accent="success" />
+          <SummaryCard label="Est. P/L" value={formatSignedCompactUSDC(estimatedProfitWei)} suffix="USDC" icon={<MiniTrendIcon positive={estimatedProfitWei >= 0n} />} accent={estimatedProfitWei >= 0n ? 'success' : 'danger'} />
+          <SummaryCard label="ROI" value={portfolioRoiPct === null ? '--' : formatRoi(portfolioRoiPct)} icon={<MiniTrendIcon positive={(portfolioRoiPct ?? 0) >= 0} />} accent={(portfolioRoiPct ?? 0) >= 0 ? 'info' : 'danger'} />
           <SummaryCard label="Active Deposits" value={formatCompactUSDC(activeDeposits)} suffix="USDC" icon={<UsdcIcon size={16} />} accent="primary" />
-          <SummaryCard label="Claimable Principal" value={formatCompactUSDC(claimablePrincipal)} suffix="USDC" icon={<UsdcIcon size={16} />} accent="success" />
-          <SummaryCard label="Markets" value={`${totalMarkets}`} icon={<MiniMarketIcon />} accent="neutral" />
-          <SummaryCard label="Active" value={`${activePositions}`} icon={<MiniBoltIcon />} accent="info" />
-          <SummaryCard label="Cancelled / Expired" value={`${cancelledCount + expiredCount}`} icon={<MiniCloseIcon />} accent="danger" />
+          <SummaryCard label="Claimable" value={`${claimableWinnings + claimableRefunds}`} icon={<MiniBoltIcon />} accent="neutral" />
         </div>
       )}
 
       {/* Tab Chips */}
       {positions.length > 0 && (
-        <div className="card p-3 sm:p-4">
-          <div className="flex flex-col lg:flex-row gap-3 lg:items-center lg:justify-between">
-            <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-hide" role="tablist" aria-label="Portfolio filter tabs">
+        <section className="portfolio-filter-panel">
+          <div className="portfolio-tabs" role="tablist" aria-label="Portfolio filter tabs">
               {(['all', 'active', 'winnings', 'refunds', 'claimed'] as TabType[]).map((tab) => (
                 <button
                   key={tab}
@@ -366,22 +355,21 @@ export default function Portfolio() {
                   aria-selected={activeTab === tab}
                   aria-pressed={activeTab === tab}
                   onClick={() => setActiveTab(tab)}
-                  className={`chip shrink-0 ${activeTab === tab ? 'chip-active' : ''}`}
+                  className={`portfolio-tab ${activeTab === tab ? 'portfolio-tab-active' : ''}`}
                 >
                   {tab === 'winnings' ? 'Est. Winnings' : tab === 'refunds' ? 'Est. Refunds' : tab.charAt(0).toUpperCase() + tab.slice(1)}
-                  <span className="ml-1.5 px-1.5 py-0.5 rounded bg-white/20 text-2xs">
-                    {tabCounts[tab]}
-                  </span>
+                  <span>{tabCounts[tab]}</span>
                 </button>
               ))}
-            </div>
+          </div>
 
-            <div className="flex flex-col sm:flex-row gap-2 sm:items-center sm:justify-end">
+          <div className="portfolio-filter-bottom">
+            <div className="portfolio-segment-group">
               <select
                 value={categoryFilter}
                 onChange={(e) => setCategoryFilter(e.target.value)}
                 aria-label="Filter by category"
-                className="select-field text-xs sm:text-sm min-h-[40px] sm:min-h-[42px] sm:w-44"
+                className="portfolio-segment-select"
               >
                 {categoryCounts.map((category) => (
                   <option key={category} value={category}>{category}</option>
@@ -391,7 +379,7 @@ export default function Portfolio() {
                 value={sortBy}
                 onChange={(e) => setSortBy(e.target.value as SortBy)}
                 aria-label="Sort positions"
-                className="select-field text-xs sm:text-sm min-h-[40px] sm:min-h-[42px] sm:w-56"
+                className="portfolio-segment-select"
               >
                 <option value="claimable_first">Claimable First</option>
                 <option value="highest_deposit">Highest Deposit</option>
@@ -403,7 +391,7 @@ export default function Portfolio() {
               </select>
             </div>
           </div>
-        </div>
+        </section>
       )}
 
       {/* Messages */}
@@ -441,63 +429,91 @@ export default function Portfolio() {
           action={activeTab === 'all' ? <Link to="/" className="btn-primary text-sm">Browse Markets</Link> : undefined}
         />
       ) : (
-         <div className="space-y-3">
-          {filteredPositions.map((pos, idx) => (
-            <div key={pos.market} className="card p-4 sm:p-5 animate-fade-in-up bg-gradient-to-br from-white/[0.015] to-transparent" style={{ animationDelay: `${idx * 50}ms`, animationFillMode: 'both' }}>
-              {/* Title + Badge */}
-              <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2 sm:gap-3 mb-3">
-                <div className="min-w-0 flex-1">
+         <div className="portfolio-position-list">
+          {filteredPositions.map((pos, idx) => {
+            const estimatedReturn = getEstimatedReturnWei(pos);
+            const estimatedProfit = estimatedReturn === null ? null : estimatedReturn - pos.netDepositedWei;
+            const roiPct = estimatedReturn === null || pos.netDepositedWei === 0n
+              ? null
+              : ((weiToNumber(estimatedReturn) - weiToNumber(pos.netDepositedWei)) / weiToNumber(pos.netDepositedWei)) * 100;
+            const heldOutcomes = pos.sharesPerOutcome.filter((shares) => shares > 0n).length;
+            const bestOutcomeIndex = getLargestShareIndex(pos.sharesPerOutcome);
+            const bestOutcomeLabel = bestOutcomeIndex === null ? 'None' : (pos.outcomeLabels[bestOutcomeIndex] ?? `Outcome ${bestOutcomeIndex + 1}`);
+            const statusText = getPositionStatusText(pos);
+            const shownOutcomeIndexes = pos.sharesPerOutcome
+              .map((shares, i) => ({ shares, i }))
+              .filter((item) => item.shares > 0n)
+              .slice(0, 3);
+            const hiddenOutcomeCount = Math.max(0, heldOutcomes - shownOutcomeIndexes.length);
+
+            return (
+            <article key={pos.market} className="portfolio-position-card animate-fade-in-up" style={{ animationDelay: `${idx * 50}ms`, animationFillMode: 'both' }}>
+              <div className="portfolio-position-header">
+                <div className="portfolio-position-title-block">
                   {pos.marketId !== null ? (
                     <Link
                       to={`/market/${makeMarketSlug(pos.marketId, pos.title)}`}
-                      className="font-semibold text-sm text-white hover:text-primary-400 transition-colors line-clamp-2 sm:line-clamp-1"
+                      className="portfolio-position-title"
                     >
                       {pos.title}
                     </Link>
                   ) : (
-                    <span className="font-semibold text-sm text-white line-clamp-2 sm:line-clamp-1" aria-disabled="true">
+                    <span className="portfolio-position-title" aria-disabled="true">
                       {pos.title}
                     </span>
                   )}
-                  <div className="flex items-center gap-2 mt-1.5 flex-wrap">
-                    <span className={`badge text-2xs ${STAGE_COLORS[pos.stage]}`}>{STAGE_LABELS[pos.stage]}</span>
-                    <span className="text-2xs text-dark-500">{pos.category}</span>
+                  <div className="portfolio-position-badges">
+                    <span className={`portfolio-stage-pill ${getStageTone(pos.stage)}`}>{STAGE_LABELS[pos.stage]}</span>
+                    <span className="portfolio-category-pill">{pos.category || 'Other'}</span>
                     {(pos.canRedeem && !pos.hasRedeemed) && (
-                      <span className="badge text-2xs bg-emerald-500/15 text-emerald-300 border-emerald-500/25">Claim Winnings</span>
+                      <span className="portfolio-claim-pill">Claim Winnings</span>
                     )}
                     {(pos.canRefund && !pos.hasRefunded && pos.netDepositedWei > 0n) && (
-                      <span className="badge text-2xs bg-cyan-500/15 text-cyan-300 border-cyan-500/25">Claim Refund</span>
+                      <span className="portfolio-claim-pill">Claim Refund</span>
                     )}
                   </div>
                 </div>
-                <div className="flex items-center sm:items-end gap-1.5 sm:flex-col sm:text-right shrink-0">
-                  <p className="text-2xs text-dark-500 font-medium">Deposited</p>
-                  <p className="text-sm font-bold text-white tabular-nums flex items-center gap-1"><UsdcIcon size={13} />{formatUSDC(pos.netDepositedWei)}</p>
+                <div className="portfolio-deposit">
+                  <span>Deposited</span>
+                  <strong><UsdcIcon size={13} />{formatUSDC(pos.netDepositedWei)}</strong>
                 </div>
               </div>
 
-              {/* Shares */}
-              <div className="flex flex-wrap gap-1.5 mb-3">
-                {pos.outcomeLabels.map((label, i) => {
-                  const shares = pos.sharesPerOutcome[i];
-                  if (shares === 0n) return null;
+              <div className="portfolio-position-metrics">
+                <PositionMetric label="Est. Return" value={estimatedReturn === null ? '--' : `${formatUSDC(estimatedReturn)} USDC`} tone={estimatedProfit === null ? 'neutral' : estimatedProfit >= 0n ? 'positive' : 'negative'} />
+                <PositionMetric label="ROI" value={roiPct === null ? 'Pending' : formatRoi(roiPct)} tone={roiPct === null ? 'neutral' : roiPct >= 0 ? 'positive' : 'negative'} />
+                <PositionMetric label="Best Outcome" value={bestOutcomeLabel} tone="neutral" />
+                <PositionMetric
+                  label="Status"
+                  value={statusText}
+                  tone={pos.canRedeem || pos.canRefund ? 'positive' : pos.hasRedeemed || pos.hasRefunded ? 'neutral' : 'info'}
+                  dot={getStatusDotTone(pos)}
+                />
+              </div>
+
+              <div className="portfolio-outcome-row">
+                {shownOutcomeIndexes.map(({ shares, i }) => {
                   const color = getOutcomeColor(i);
                   return (
-                    <span key={i} className={`inline-flex items-center gap-1 px-2 py-1 rounded-lg text-2xs font-semibold ${color.light} ${color.text}`}>
-                      <span className={`w-1.5 h-1.5 rounded-full ${color.bg}`} />
-                      {label}: {formatWad(shares)}
+                    <span key={i} className="portfolio-outcome-pill">
+                      <span className={`portfolio-outcome-dot ${color.bg}`} />
+                      <strong>{pos.outcomeLabels[i]}</strong>
+                      <em>{formatWad(shares)}</em>
                     </span>
                   );
                 })}
+                {hiddenOutcomeCount > 0 && (
+                  <span className="portfolio-outcome-more">+{hiddenOutcomeCount} more</span>
+                )}
               </div>
 
-              {/* Actions */}
-              <div className="flex flex-wrap items-center gap-2 pt-3 border-t border-white/[0.06]">
+              <div className="portfolio-position-footer">
+                <div className="portfolio-position-actions">
                 {pos.canRedeem && (
                   <button
                     onClick={() => handleAction(pos.market, 'redeem')}
                     disabled={txPending === pos.market}
-                    className="btn-yes text-xs px-3 py-1.5"
+                    className="portfolio-action-button portfolio-action-success"
                   >
                     {txPending === pos.market ? (
                       <span className="flex items-center gap-1.5">
@@ -511,7 +527,7 @@ export default function Portfolio() {
                   <button
                     onClick={() => handleAction(pos.market, 'refund')}
                     disabled={txPending === pos.market}
-                    className="btn-primary text-xs px-3 py-1.5"
+                    className="portfolio-action-button portfolio-action-primary"
                   >
                     {txPending === pos.market ? (
                       <span className="flex items-center gap-1.5">
@@ -522,7 +538,7 @@ export default function Portfolio() {
                   </button>
                 )}
                 {pos.hasRedeemed && (
-                  <span className="text-2xs text-emerald-400 font-medium flex items-center gap-1">
+                  <span className="portfolio-confirmation">
                     <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
                       <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
                     </svg>
@@ -530,36 +546,37 @@ export default function Portfolio() {
                   </span>
                 )}
                 {pos.hasRefunded && (
-                  <span className="text-2xs text-blue-400 font-medium flex items-center gap-1">
+                  <span className="portfolio-confirmation">
                     <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
                       <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
                     </svg>
                     Refund claimed
                   </span>
                 )}
+                </div>
 
-                {/* View market link */}
                 {pos.marketId !== null ? (
                   <Link
                     to={`/market/${makeMarketSlug(pos.marketId, pos.title)}`}
-                    className="ml-auto text-2xs text-dark-500 hover:text-primary-400 font-medium transition-colors flex items-center gap-0.5"
+                    className="portfolio-view-link"
                   >
                     View
-                    <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                       <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
                     </svg>
                   </Link>
                 ) : (
-                  <span className="ml-auto text-2xs text-dark-500/40 flex items-center gap-0.5" aria-disabled="true" tabIndex={-1}>
+                  <span className="portfolio-view-link opacity-40" aria-disabled="true" tabIndex={-1}>
                     View
-                    <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                       <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
                     </svg>
                   </span>
                 )}
               </div>
-            </div>
-          ))}
+            </article>
+            );
+          })}
         </div>
       )}
     </div>
@@ -579,34 +596,114 @@ function SummaryCard({
   icon: ReactNode;
   accent: 'neutral' | 'primary' | 'success' | 'info' | 'danger';
 }) {
-  const accentStyles = {
-    neutral: 'bg-white/[0.02] border-white/[0.08] text-white',
-    primary: 'bg-primary-500/[0.08] border-primary-500/25 text-primary-200',
-    success: 'bg-emerald-500/[0.08] border-emerald-500/25 text-emerald-200',
-    info: 'bg-blue-500/[0.08] border-blue-500/25 text-blue-200',
-    danger: 'bg-red-500/[0.08] border-red-500/25 text-red-200',
-  };
-
   return (
-    <div className={`card p-3.5 border ${accentStyles[accent]}`}>
-      <div className="flex items-center gap-2 text-2xs uppercase tracking-wider text-white/55 mb-1.5">
-        <span className="w-5 h-5 rounded-md bg-black/25 border border-white/[0.08] flex items-center justify-center">
+    <div className={`portfolio-stat-card portfolio-stat-${accent}`}>
+      <div className="portfolio-stat-icon">
           {icon}
-        </span>
-        {label}
       </div>
-      <p className="text-lg font-bold tabular-nums text-white leading-none">
+      <p className="portfolio-stat-value">
         {value}
-        {suffix ? <span className="text-2xs font-medium text-white/45 ml-1.5">{suffix}</span> : null}
+        {suffix ? <span>{suffix}</span> : null}
       </p>
+      <span className="portfolio-stat-label">{label}</span>
     </div>
   );
 }
 
-function MiniMarketIcon() {
+function PositionMetric({
+  label,
+  value,
+  tone,
+  dot,
+}: {
+  label: string;
+  value: string;
+  tone: 'neutral' | 'positive' | 'negative' | 'info';
+  dot?: 'green' | 'gray' | 'red';
+}) {
   return (
-    <svg className="w-3.5 h-3.5 text-white/75" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6A2.25 2.25 0 016 3.75h2.25A2.25 2.25 0 0110.5 6v2.25a2.25 2.25 0 01-2.25 2.25H6a2.25 2.25 0 01-2.25-2.25V6zM13.5 6a2.25 2.25 0 012.25-2.25H18A2.25 2.25 0 0120.25 6v2.25A2.25 2.25 0 0118 10.5h-2.25a2.25 2.25 0 01-2.25-2.25V6zM3.75 15.75A2.25 2.25 0 016 13.5h12A2.25 2.25 0 0120.25 15.75V18A2.25 2.25 0 0118 20.25H6A2.25 2.25 0 013.75 18v-2.25z" />
+    <div className={`portfolio-position-metric portfolio-position-metric-${tone}`}>
+      <p>{label}</p>
+      <strong>
+        {dot ? <span className={`portfolio-status-dot portfolio-status-dot-${dot}`} /> : null}
+        {value}
+      </strong>
+    </div>
+  );
+}
+
+function getStageTone(stage: number): string {
+  if (stage === STAGE.Active) return 'stage-green';
+  if (stage === STAGE.Resolved) return 'stage-gray';
+  if (stage === STAGE.Cancelled || stage === STAGE.Expired) return 'stage-red';
+  return 'stage-blue';
+}
+
+function getStatusDotTone(pos: Position): 'green' | 'gray' | 'red' {
+  if (pos.stage === STAGE.Active || pos.canRedeem || pos.canRefund) return 'green';
+  if (pos.stage === STAGE.Cancelled || pos.stage === STAGE.Expired) return 'red';
+  return 'gray';
+}
+
+function getEstimatedReturnWei(pos: Position): bigint | null {
+  if (pos.stage === STAGE.Resolved && pos.winningOutcome !== null) {
+    const userWinShares = pos.sharesPerOutcome[pos.winningOutcome] ?? 0n;
+    const totalWinShares = pos.totalSharesWad[pos.winningOutcome] ?? 0n;
+    if (userWinShares <= 0n || totalWinShares <= 0n || pos.resolvedPoolWei <= 0n) return 0n;
+    return (userWinShares * pos.resolvedPoolWei) / totalWinShares;
+  }
+
+  if ((pos.stage === STAGE.Cancelled || pos.stage === STAGE.Expired) && pos.netDepositedWei > 0n) {
+    if (pos.totalNetDepositedWei <= 0n || pos.contractBalanceWei <= 0n) return pos.netDepositedWei;
+    return (pos.netDepositedWei * pos.contractBalanceWei) / pos.totalNetDepositedWei;
+  }
+
+  return null;
+}
+
+function getLargestShareIndex(shares: bigint[]): number | null {
+  let bestIndex: number | null = null;
+  let bestShares = 0n;
+  shares.forEach((share, index) => {
+    if (share > bestShares) {
+      bestShares = share;
+      bestIndex = index;
+    }
+  });
+  return bestIndex;
+}
+
+function getPositionStatusText(pos: Position): string {
+  if (pos.canRedeem && !pos.hasRedeemed) return 'Ready to claim';
+  if (pos.canRefund && !pos.hasRefunded) return 'Refund ready';
+  if (pos.hasRedeemed) return 'Winnings claimed';
+  if (pos.hasRefunded) return 'Refund claimed';
+  if (pos.stage === STAGE.Active) return 'Open';
+  if (pos.stage === STAGE.Suspended) return 'Suspended';
+  if (pos.stage === STAGE.Resolved) return 'Resolved';
+  return 'Closed';
+}
+
+function weiToNumber(value: bigint): number {
+  return Number(ethers.formatEther(value));
+}
+
+function formatRoi(value: number): string {
+  if (!Number.isFinite(value)) return '--';
+  return `${value >= 0 ? '+' : ''}${value.toFixed(1)}%`;
+}
+
+function formatSignedCompactUSDC(value: bigint): string {
+  if (value === 0n) return '0';
+  const sign = value > 0n ? '+' : '-';
+  const abs = value > 0n ? value : -value;
+  return `${sign}${formatCompactUSDC(abs)}`;
+}
+
+function MiniTrendIcon({ positive }: { positive: boolean }) {
+  return (
+    <svg className={`w-3.5 h-3.5 ${positive ? 'text-emerald-300' : 'text-red-300'}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+      <path strokeLinecap="round" strokeLinejoin="round" d={positive ? 'M4 16l6-6 4 4 6-8M14 6h6v6' : 'M4 8l6 6 4-4 6 8M14 18h6v-6'} />
     </svg>
   );
 }
@@ -615,14 +712,6 @@ function MiniBoltIcon() {
   return (
     <svg className="w-3.5 h-3.5 text-blue-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
       <path strokeLinecap="round" strokeLinejoin="round" d="M13 3L4 14h6l-1 7 9-11h-6l1-7z" />
-    </svg>
-  );
-}
-
-function MiniCloseIcon() {
-  return (
-    <svg className="w-3.5 h-3.5 text-red-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M6 6l12 12M6 18L18 6" />
     </svg>
   );
 }

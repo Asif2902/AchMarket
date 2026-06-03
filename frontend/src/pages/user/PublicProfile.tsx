@@ -3,7 +3,7 @@ import { Link, useParams } from 'react-router-dom';
 import { ethers } from 'ethers';
 import { useWallet } from '../../context/WalletContext';
 import { FACTORY_ADDRESS, LENS_ADDRESS, STAGE, STAGE_LABELS, STAGE_COLORS } from '../../config/network';
-import { FACTORY_ABI, LENS_ABI } from '../../config/abis';
+import { FACTORY_ABI, LENS_ABI, MARKET_ABI } from '../../config/abis';
 import { PageLoader } from '../../components/LoadingSpinner';
 import EmptyState from '../../components/EmptyState';
 import ImageWithFallback from '../../components/ImageWithFallback';
@@ -18,6 +18,8 @@ interface PositionItem {
   marketId: number;
   stage: number;
   netDepositedWei: bigint;
+  estimatedReturnWei: bigint | null;
+  roiPct: number | null;
 }
 
 interface PublicProfileData {
@@ -113,18 +115,61 @@ export default function PublicProfile() {
 
       if (signal.aborted) return;
 
-      const positions: PositionItem[] = portfolioArr
-        .map((entry) => ({
-          market: String(entry.market),
+      const positions: PositionItem[] = (await Promise.all(portfolioArr.map(async (entry) => {
+        const market = String(entry.market);
+        const stage = Number(entry.stage);
+        const netDepositedWei = entry.netDepositedWei as bigint;
+        let estimatedReturnWei: bigint | null = null;
+
+        if (stage === STAGE.Resolved || stage === STAGE.Cancelled || stage === STAGE.Expired) {
+          try {
+            const detail = await lens.getMarketDetail(market) as Record<string, unknown>;
+            const winningOutcome = Number(detail.winningOutcome);
+            const sharesPerOutcome = [...(entry.sharesPerOutcome as bigint[])];
+            const totalSharesWad = [...(detail.totalSharesWad as bigint[])];
+            const resolvedPoolWei = detail.resolvedPoolWei as bigint;
+
+            if (stage === STAGE.Resolved) {
+              const userWinShares = sharesPerOutcome[winningOutcome] ?? 0n;
+              const totalWinShares = totalSharesWad[winningOutcome] ?? 0n;
+              estimatedReturnWei = userWinShares > 0n && totalWinShares > 0n && resolvedPoolWei > 0n
+                ? (userWinShares * resolvedPoolWei) / totalWinShares
+                : 0n;
+            } else if (netDepositedWei > 0n) {
+              const marketContract = new ethers.Contract(market, MARKET_ABI, readProvider);
+              const totalNetDepositedWei = await marketContract.totalNetDepositedWei();
+              const contractBalanceWei = await readProvider.getBalance(market);
+              estimatedReturnWei = totalNetDepositedWei > 0n && contractBalanceWei > 0n
+                ? (netDepositedWei * contractBalanceWei) / totalNetDepositedWei
+                : netDepositedWei;
+            }
+          } catch (err) {
+            console.error(`Failed to fetch public ROI for ${market}:`, err);
+          }
+        }
+
+        return {
+          market,
           title: String(entry.title),
-          marketId: addrToId.get(String(entry.market).toLowerCase()) ?? 0,
-          stage: Number(entry.stage),
-          netDepositedWei: entry.netDepositedWei as bigint,
-        }))
+          marketId: addrToId.get(market.toLowerCase()) ?? 0,
+          stage,
+          netDepositedWei,
+          estimatedReturnWei,
+          roiPct: estimatedReturnWei === null || netDepositedWei === 0n
+            ? null
+            : ((weiToNumber(estimatedReturnWei) - weiToNumber(netDepositedWei)) / weiToNumber(netDepositedWei)) * 100,
+        };
+      })))
         .sort((a, b) => {
           if (a.netDepositedWei === b.netDepositedWei) return b.marketId - a.marketId;
           return a.netDepositedWei > b.netDepositedWei ? -1 : 1;
         });
+
+      const estimatedReturnWei = positions.reduce((acc, p) => acc + (p.estimatedReturnWei ?? 0n), 0n);
+      const totalDepositedWei = positions.reduce((acc, p) => acc + p.netDepositedWei, 0n);
+      const portfolioRoiPct = totalDepositedWei > 0n
+        ? ((weiToNumber(estimatedReturnWei) - weiToNumber(totalDepositedWei)) / weiToNumber(totalDepositedWei)) * 100
+        : null;
 
       setData({
         profile: profileResponse.profile,
@@ -134,11 +179,12 @@ export default function PublicProfile() {
           totalMarkets: new Set(positions.map((p) => p.market.toLowerCase())).size,
           activePositions: positions.filter((p) => p.stage === STAGE.Active).length,
           resolvedPositions: positions.filter((p) => p.stage === STAGE.Resolved).length,
-          totalDepositedWei: positions.reduce((acc, p) => acc + p.netDepositedWei, 0n).toString(),
+          totalDepositedWei: totalDepositedWei.toString(),
           activeDepositsWei: positions
             .filter((p) => p.stage === STAGE.Active)
             .reduce((acc, p) => acc + p.netDepositedWei, 0n)
             .toString(),
+          roiPct: portfolioRoiPct,
         },
         positions,
       });
@@ -255,7 +301,7 @@ export default function PublicProfile() {
         <ProfileStat label="Positions" value={`${data.stats.totalPositions}`} />
         <ProfileStat label="Markets" value={`${data.stats.totalMarkets}`} />
         <ProfileStat label="Active" value={`${data.stats.activePositions}`} />
-        <ProfileStat label="Resolved" value={`${data.stats.resolvedPositions}`} />
+        <ProfileStat label="ROI" value={formatRoi(data.stats.roiPct)} tone={(data.stats.roiPct ?? 0) >= 0 ? 'positive' : 'negative'} />
         <ProfileStat label="Total Volume" value={formatCompactUSDC(BigInt(data.stats.totalDepositedWei))} suffix="USDC" />
         <ProfileStat label="Active Volume" value={formatCompactUSDC(BigInt(data.stats.activeDepositsWei))} suffix="USDC" />
       </div>
@@ -290,6 +336,9 @@ export default function PublicProfile() {
                     <UsdcIcon size={11} />
                     {formatCompactUSDC(item.netDepositedWei)}
                   </p>
+                  <p className={`text-2xs font-semibold mt-1 ${item.roiPct === null ? 'text-dark-500' : item.roiPct >= 0 ? 'text-primary-300' : 'text-red-300'}`}>
+                    ROI {formatRoi(item.roiPct)}
+                  </p>
                 </div>
               </Link>
             ))}
@@ -300,14 +349,23 @@ export default function PublicProfile() {
   );
 }
 
-function ProfileStat({ label, value, suffix }: { label: string; value: string; suffix?: string }) {
+function ProfileStat({ label, value, suffix, tone = 'neutral' }: { label: string; value: string; suffix?: string; tone?: 'neutral' | 'positive' | 'negative' }) {
   return (
     <div className="card p-3.5 border border-white/[0.09] bg-white/[0.02]">
       <p className="text-2xs uppercase tracking-[0.12em] text-white/45 font-semibold">{label}</p>
-      <p className="text-lg font-bold text-white mt-1 tabular-nums">
+      <p className={`text-lg font-bold mt-1 tabular-nums ${tone === 'positive' ? 'text-primary-300' : tone === 'negative' ? 'text-red-300' : 'text-white'}`}>
         {value}
         {suffix ? <span className="text-2xs font-medium text-white/45 ml-1">{suffix}</span> : null}
       </p>
     </div>
   );
+}
+
+function weiToNumber(value: bigint): number {
+  return Number(ethers.formatEther(value));
+}
+
+function formatRoi(value: number | null | undefined): string {
+  if (value === null || value === undefined || !Number.isFinite(value)) return '--';
+  return `${value >= 0 ? '+' : ''}${value.toFixed(1)}%`;
 }

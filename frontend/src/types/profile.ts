@@ -17,6 +17,7 @@ export interface PortfolioStats {
   resolvedPositions: number;
   totalDepositedWei: string;
   activeDepositsWei: string;
+  roiPct?: number | null;
 }
 
 export interface PublicProfileResponse {

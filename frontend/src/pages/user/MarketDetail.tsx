@@ -920,15 +920,20 @@ export default function MarketDetail() {
   const selectedOutcomePrice = probToPercent(detail.impliedProbabilitiesWad[selectedOutcome] ?? 0n) / 100;
   const selectedOwnedShares = userInfo?.shares[selectedOutcome] ?? 0n;
   const liveConfigured = liveData && liveData.configured ? liveData : null;
+  const leadingOutcomeIndex = detail.impliedProbabilitiesWad.reduce((best, probability, index) => (
+    probability > detail.impliedProbabilitiesWad[best] ? index : best
+  ), 0);
+  const leadingOutcomeLabel = detail.outcomeLabels[leadingOutcomeIndex] ?? `Outcome ${leadingOutcomeIndex + 1}`;
+  const leadingOutcomePct = probToPercent(detail.impliedProbabilitiesWad[leadingOutcomeIndex] ?? 0n);
 
   return (
-    <div className="min-h-screen animate-fade-in">
-      <div className="relative overflow-hidden">
-        <ImageWithFallback src={detail.imageUri} alt={detail.title} className="h-48 sm:h-56 lg:h-64 w-full" />
-        <div className="absolute inset-0 bg-gradient-to-t from-dark-950 via-dark-950/50 to-dark-950/5" />
+    <div className="market-detail-page min-h-screen animate-fade-in">
+      <div className="market-detail-hero">
+        <ImageWithFallback src={detail.imageUri} alt={detail.title} className="market-detail-hero-image" />
+        <div className="absolute inset-0 bg-gradient-to-t from-dark-950 via-dark-950/60 to-dark-950/10" />
 
-        <div className="absolute top-4 left-4 right-4 flex items-center justify-between">
-          <Link to="/" className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-dark-900/70 backdrop-blur-sm border border-white/[0.1] text-sm text-dark-200 hover:text-white transition-colors group">
+        <div className="market-detail-topbar">
+          <Link to="/" className="market-back-link group">
             <svg className="w-3.5 h-3.5 group-hover:-translate-x-0.5 transition-transform" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
             </svg>
@@ -940,20 +945,36 @@ export default function MarketDetail() {
           </div>
         </div>
 
-        <div className="absolute bottom-0 left-0 right-0 p-4 sm:p-6 lg:p-8">
-          <div className="max-w-7xl mx-auto">
-            <h1 className="text-xl sm:text-2xl lg:text-3xl font-bold text-white leading-tight max-w-3xl drop-shadow-lg">{detail.title}</h1>
+        <div className="market-detail-hero-content">
+          <div className="market-detail-shell">
+            <div className="market-title-block">
+              <h1>{detail.title}</h1>
+              <div className="market-hero-metrics">
+                <div>
+                  <span>Top chance</span>
+                  <strong>{leadingOutcomeLabel}</strong>
+                </div>
+                <div>
+                  <span>Probability</span>
+                  <strong>{leadingOutcomePct.toFixed(1)}%</strong>
+                </div>
+                <div>
+                  <span>{isActive ? 'Closes' : 'Closed'}</span>
+                  <strong>{formatDate(detail.marketDeadline)}</strong>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       </div>
 
       {/* Two-column layout */}
-      <div className="max-w-[1600px] mx-auto px-4 pt-5 md:pt-6 pb-8">
-        <div className="mb-5 md:mb-6 card p-4 sm:p-5 bg-gradient-to-br from-primary-500/[0.08] via-transparent to-emerald-500/[0.06] border-primary-500/20">
+      <div className="market-detail-shell px-4 pt-4 md:pt-5 pb-8">
+        <div className="market-status-strip mb-4 md:mb-5">
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
             <div>
               <p className="text-2xs uppercase tracking-[0.14em] text-white/45 font-semibold mb-1">Trade Panel</p>
-              <h2 className="text-lg sm:text-xl font-semibold text-white">Make your position before market close</h2>
+              <h2 className="text-base sm:text-lg font-semibold text-white">Make your position before market close</h2>
               <p className="text-xs text-white/60 mt-1">
                 Pick an outcome, review estimated payout, and trade with slippage protection.
               </p>
@@ -972,9 +993,9 @@ export default function MarketDetail() {
           </div>
         </div>
 
-        <div className="flex flex-col gap-5 lg:grid lg:grid-cols-[1fr_420px] lg:gap-6">
+        <div className="market-detail-grid">
           {/* Left Column — Market Info (scrollable) */}
-          <div className="space-y-4 md:space-y-5">
+          <div className="market-detail-main space-y-4 md:space-y-5">
             {/* Quick stats */}
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
               <MiniStat label="Volume" value={`${formatCompactUSDC(detail.totalVolumeWei)}`} suffix="USDC" icon={<UsdcIcon size={14} />} />
@@ -983,7 +1004,7 @@ export default function MarketDetail() {
               <MiniStat label={isActive ? 'Ends' : 'Ended'} value={formatDate(detail.marketDeadline)} small />
             </div>
 
-            <div className="card p-4 border-primary-500/20 bg-gradient-to-br from-primary-500/[0.08] via-transparent to-emerald-500/[0.05]">
+            <div className="detail-panel p-4">
               <div className="flex items-center justify-between gap-3 mb-3">
                 <div>
                   <p className="text-2xs uppercase tracking-[0.14em] text-white/45 font-semibold">Live Reference</p>
@@ -1155,7 +1176,7 @@ export default function MarketDetail() {
 
             {/* Countdown (active) */}
             {isActive && !tradingEnded && (
-              <div className="card p-4 flex items-center justify-between">
+              <div className="detail-panel p-4 flex items-center justify-between">
                 <span className="text-xs text-dark-400 font-semibold uppercase tracking-wider flex items-center gap-2">
                   <svg className="w-3.5 h-3.5 text-primary-400/60" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
@@ -1529,7 +1550,7 @@ export default function MarketDetail() {
               const grossPool = (detail.resolvedPoolWei * 10000n) / 9975n;
               const fee = grossPool - detail.resolvedPoolWei;
               return (
-                <div className="card p-4">
+                <div className="detail-panel p-4">
                   <div className="grid grid-cols-2 gap-4">
                     <div>
                       <span className="text-2xs text-dark-500 font-medium uppercase tracking-wider">Prize Pool (after fee)</span>
@@ -1555,7 +1576,7 @@ export default function MarketDetail() {
 
             {/* About / Description - collapsible */}
             {detail.description && (
-              <div className="card overflow-hidden">
+              <div className="detail-panel overflow-hidden">
                 <button 
                   onClick={() => setAboutExpanded(!aboutExpanded)}
                   className="w-full p-5 pb-4 flex items-center justify-between hover:bg-dark-800/30 transition-colors"
@@ -1607,9 +1628,9 @@ export default function MarketDetail() {
           </div>
 
           {/* Right Column — Trade Panel (sticky) */}
-          <div className="lg:sticky lg:top-20 lg:self-start space-y-4 lg:space-y-5">
+          <div className="market-trade-sidebar space-y-4 lg:space-y-5">
             {/* Outcome Probabilities Card */}
-            <div className="card p-5 border-primary-500/20 bg-gradient-to-br from-primary-500/[0.06] to-transparent">
+            <div className="market-odds-card">
               <div className="flex items-end justify-between gap-3 mb-4">
                 <div>
                   <h2 className="section-header mb-1">Live Odds</h2>
@@ -1625,13 +1646,13 @@ export default function MarketDetail() {
                 winningOutcome={detail.winningOutcome}
                 isResolved={isResolved}
               />
-              <div className="grid grid-cols-2 gap-3 mt-5">
+              <div className="market-odds-grid">
                 {detail.outcomeLabels.map((label, i) => {
                   const color = getOutcomeColor(i);
                   const pct = probToPercent(detail.impliedProbabilitiesWad[i]);
                   const isWinner = isResolved && detail.winningOutcome === i;
                   return (
-                    <div key={i} className={`p-3.5 rounded-xl text-center transition-all ${isWinner ? 'bg-emerald-500/10 border border-emerald-500/20' : color.light} relative overflow-hidden`}>
+                    <div key={i} className={`market-odds-tile ${isWinner ? 'bg-emerald-500/10 border border-emerald-500/20' : color.light} relative overflow-hidden`}>
                       <p className="text-2xs text-dark-400 font-semibold uppercase tracking-wider mb-1.5">{label}</p>
                       <p className={`text-xl sm:text-2xl font-bold tabular-nums leading-none ${isWinner ? 'text-emerald-400' : color.text}`}>
                         {pct.toFixed(1)}%
@@ -1640,7 +1661,7 @@ export default function MarketDetail() {
                   );
                 })}
               </div>
-              <div className="mt-4 p-3 rounded-xl border border-white/[0.08] bg-dark-900/45">
+              <div className="market-selected-outcome">
                 <p className="text-2xs uppercase tracking-[0.12em] text-white/45 font-semibold mb-1">Selected Outcome</p>
                 <div className="flex items-center justify-between gap-2">
                   <p className="text-sm font-semibold text-white truncate">{selectedOutcomeLabel}</p>
@@ -1651,14 +1672,14 @@ export default function MarketDetail() {
 
             {/* Trade Panel */}
             {isActive && !tradingEnded && isConnected && isCorrectNetwork && (
-              <div className="card p-5 border-white/[0.12] bg-gradient-to-b from-white/[0.025] to-transparent shadow-[0_16px_46px_rgba(0,0,0,0.45)]">
+              <div className="market-order-ticket">
                 <div className="mb-4">
                   <h3 className="section-header mb-1">Trade</h3>
                   <p className="text-2xs text-white/50">Enter amount, review preview, then confirm in wallet</p>
                 </div>
 
                 {/* Buy/Sell tabs */}
-                <div className="flex rounded-xl bg-dark-900/60 p-0.5 mb-5 border border-white/[0.06]">
+                <div className="trade-tab-switch">
                   <button
                     onClick={() => { setTradeTab('buy'); setShareAmount(''); setPreviewCost(null); setEstimatedShares(null); }}
                     className={`flex-1 py-2 rounded-[10px] text-sm font-semibold transition-all ${
@@ -1678,7 +1699,7 @@ export default function MarketDetail() {
                 </div>
 
                 {/* Outcome selector */}
-                <div className="flex flex-col gap-2 mb-4">
+                <div className="trade-outcome-list">
                   {detail.outcomeLabels.map((label, i) => {
                     const userShares = userInfo?.shares[i] || 0n;
                     const pct = probToPercent(detail.impliedProbabilitiesWad[i]);
@@ -1697,7 +1718,7 @@ export default function MarketDetail() {
                       <button
                         key={i}
                         onClick={() => setSelectedOutcome(i)}
-                        className={`w-full p-3 rounded-lg text-sm transition-all border-l-4 relative flex items-center justify-between ${
+                        className={`trade-outcome-button ${
                           isSelected
                             ? ''
                             : 'border-l-white/10 bg-dark-900/40 hover:border-l-white/20'
@@ -2035,28 +2056,37 @@ function ProbabilityChart({
 
   // Compute change from first visible point
   const firstData = filteredHistory.length > 0 ? filteredHistory[0] : null;
+  const leader = displayData
+    ? outcomeLabels.reduce((best, label) => {
+      const value = displayData[label] as number | undefined;
+      const bestValue = displayData[best] as number | undefined;
+      return (value ?? -1) > (bestValue ?? -1) ? label : best;
+    }, outcomeLabels[0])
+    : null;
+  const leaderValue = leader && displayData ? displayData[leader] as number | undefined : undefined;
 
   return (
-    <div className="relative overflow-hidden rounded-xl border border-white/[0.08] bg-[radial-gradient(circle_at_top_right,rgba(59,130,246,0.12),transparent_30%),linear-gradient(180deg,rgba(15,23,42,0.94),rgba(2,6,23,0.97))] shadow-[0_24px_70px_rgba(0,0,0,0.30)]">
-      <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-primary-300/40 to-transparent" />
-      {/* Header */}
-      <div className="p-5 pb-0">
-        <div className="flex items-center justify-between mb-3 gap-2">
+    <div className="price-history-card">
+      <div className="price-history-glow" />
+      <div className="price-history-header">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div>
             <h2 className="section-header">Price History</h2>
             <p className="mt-1 text-2xs text-white/45">Outcome probability movement from recorded trades</p>
+            {leader && leaderValue != null && (
+              <div className="price-history-leader">
+                <span>Leading</span>
+                <strong>{leader}</strong>
+                <em>{leaderValue.toFixed(1)}¢</em>
+              </div>
+            )}
           </div>
-          {/* Time range selector */}
-          <div className="flex items-center rounded-xl bg-black/25 p-0.5 border border-white/[0.08] overflow-x-auto scrollbar-hide shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
+          <div className="price-range-tabs">
             {TIME_RANGES.map(range => (
               <button
                 key={range.key}
                 onClick={() => setTimeRange(range.key)}
-                className={`px-2.5 py-1 rounded-lg text-2xs font-semibold transition-all border ${
-                  timeRange === range.key
-                    ? 'bg-primary-500/22 text-primary-200 border-primary-400/40 shadow-[0_8px_24px_rgba(59,130,246,0.16)]'
-                    : 'border-transparent text-dark-400 hover:text-dark-100 hover:border-white/[0.08] hover:bg-white/[0.03]'
-                }`}
+                className={timeRange === range.key ? 'active' : ''}
               >
                 {range.label}
               </button>
@@ -2064,9 +2094,8 @@ function ProbabilityChart({
           </div>
         </div>
 
-        {/* Outcome legend / price display — Polymarket style */}
         {displayData && (
-          <div className="space-y-2 mb-4">
+          <div className="price-outcome-grid">
             {outcomeLabels.map((label, i) => {
               const value = displayData[label] as number | undefined;
               const firstValue = firstData ? (firstData[label] as number | undefined) : undefined;
@@ -2076,53 +2105,44 @@ function ProbabilityChart({
                 <button
                   key={label}
                   onClick={() => setActiveOutcome(prev => prev === label ? null : label)}
-                  className={`w-full flex items-center justify-between p-2.5 rounded-xl transition-all border ${
-                    isActive
-                      ? 'border-white/[0.10] bg-white/[0.045] shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]'
-                      : 'border-transparent bg-black/15 opacity-45 hover:opacity-70'
-                  }`}
+                  className={`price-outcome-tile ${isActive ? 'active' : 'muted'}`}
                 >
-                  <div className="flex items-center gap-2.5">
+                  <div className="min-w-0 flex items-center gap-2.5">
                     <div
-                      className="w-3 h-3 rounded-full shrink-0 shadow-[0_0_14px_currentColor]"
+                      className="price-outcome-dot"
                       style={{ backgroundColor: CHART_COLORS[i % CHART_COLORS.length], color: CHART_COLORS[i % CHART_COLORS.length] }}
                     />
-                    <span className="text-sm font-medium text-white">{label}</span>
+                    <span className="truncate">{label}</span>
                   </div>
-                  <div className="flex items-center gap-3">
+                  <div className="flex shrink-0 items-center gap-2">
                     {change !== null && change !== 0 && (
-                      <span className={`text-2xs font-semibold tabular-nums ${change > 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                      <span className={`price-change ${change > 0 ? 'positive' : 'negative'}`}>
                         {change > 0 ? '+' : ''}{change.toFixed(1)}%
                       </span>
                     )}
                     <span
-                      className="text-lg font-bold tabular-nums"
+                      className="price-value"
                       style={{ color: CHART_COLORS[i % CHART_COLORS.length] }}
                     >
                       {value != null ? `${value.toFixed(1)}` : '--'}
-                      <span className="text-xs opacity-60">¢</span>
+                      <small>¢</small>
                     </span>
                   </div>
                 </button>
               );
             })}
             {hoveredData && (
-              <div className="text-center">
-                <span className="text-2xs text-dark-600">
-                  {formatDate(hoveredData.time)}
-                </span>
-              </div>
+              <p className="price-hover-time">{formatDate(hoveredData.time)}</p>
             )}
           </div>
         )}
       </div>
 
-      {/* Chart */}
-      <div className="h-64 sm:h-80 px-2 pb-4">
+      <div className="price-chart-surface">
         <ResponsiveContainer width="100%" height="100%">
           <AreaChart
             data={filteredHistory}
-            margin={{ top: 8, right: 12, bottom: 10, left: 0 }}
+            margin={{ top: 10, right: 14, bottom: 10, left: 2 }}
             onMouseMove={(state: { activePayload?: Array<{ payload: ProbHistoryPoint }> }) => {
               if (state?.activePayload?.[0]) {
                 setHoveredData(state.activePayload[0].payload);
@@ -2139,8 +2159,8 @@ function ProbabilityChart({
               ))}
             </defs>
             <CartesianGrid
-              strokeDasharray="3 7"
-              stroke="rgba(148,163,184,0.12)"
+              strokeDasharray="2 10"
+              stroke="rgba(148,163,184,0.11)"
               vertical
             />
             <XAxis
@@ -2156,7 +2176,7 @@ function ProbabilityChart({
                 return d.toLocaleDateString([], { month: 'short', day: 'numeric' });
               }}
               stroke="transparent"
-              tick={{ fontSize: 10, fill: '#94a3b8' }}
+              tick={{ fontSize: 11, fill: '#8fa3ba', fontWeight: 600 }}
               axisLine={false}
               tickLine={false}
               minTickGap={40}
@@ -2165,7 +2185,7 @@ function ProbabilityChart({
               domain={[0, 100]}
               tickFormatter={(v) => `${v}¢`}
               stroke="transparent"
-              tick={{ fontSize: 10, fill: '#94a3b8' }}
+              tick={{ fontSize: 11, fill: '#8fa3ba', fontWeight: 600 }}
               axisLine={false}
               tickLine={false}
               width={34}
@@ -2173,17 +2193,18 @@ function ProbabilityChart({
             />
             <Tooltip
               cursor={{
-                stroke: 'rgba(147,197,253,0.62)',
-                strokeWidth: 1,
+                stroke: 'rgba(110,231,183,0.7)',
+                strokeWidth: 1.2,
+                strokeDasharray: '4 4',
               }}
               contentStyle={{
-                backgroundColor: 'rgba(8, 12, 20, 0.97)',
-                border: '1px solid rgba(147,197,253,0.32)',
-                borderRadius: '12px',
+                backgroundColor: 'rgba(4, 9, 15, 0.96)',
+                border: '1px solid rgba(110,231,183,0.24)',
+                borderRadius: '14px',
                 backdropFilter: 'blur(16px)',
-                padding: '10px 12px',
+                padding: '11px 13px',
                 fontSize: '12px',
-                boxShadow: '0 20px 45px rgba(2, 6, 23, 0.7)',
+                boxShadow: '0 22px 55px rgba(2, 6, 23, 0.78)',
               }}
               labelFormatter={(t) => formatDate(t as number)}
               formatter={(value: number, name: string) => {
@@ -2201,14 +2222,14 @@ function ProbabilityChart({
                   type="monotone"
                   dataKey={label}
                   stroke={isVisible ? CHART_COLORS[i % CHART_COLORS.length] : 'transparent'}
-                  strokeWidth={isVisible ? 2.4 : 0}
+                  strokeWidth={isVisible ? 3 : 0}
                   fill={isVisible ? `url(#prob-gradient-${i})` : 'transparent'}
                   fillOpacity={1}
                   dot={false}
                   activeDot={isVisible ? {
-                    r: 5,
-                    strokeWidth: 2,
-                    stroke: '#07111f',
+                    r: 6,
+                    strokeWidth: 3,
+                    stroke: '#050a10',
                     fill: CHART_COLORS[i % CHART_COLORS.length],
                   } : false}
                   animationDuration={520}
@@ -2219,14 +2240,11 @@ function ProbabilityChart({
         </ResponsiveContainer>
       </div>
 
-      {/* Trade count indicator */}
-      <div className="px-5 pb-3 flex items-center justify-between">
-        <span className="text-2xs text-dark-600">
+      <div className="price-history-footer">
+        <span>
           {history.length - 1} trade{history.length - 1 !== 1 ? 's' : ''} recorded
         </span>
-        <span className="text-2xs text-dark-600">
-          Powered by BlockScout
-        </span>
+        <span>Powered by BlockScout</span>
       </div>
     </div>
   );

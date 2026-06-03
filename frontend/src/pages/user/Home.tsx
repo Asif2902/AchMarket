@@ -360,12 +360,12 @@ export default function Home() {
               </div>
             </div>
 
-            <div className="flex gap-2 overflow-x-auto scrollbar-hide pb-1 -mx-4 px-4 sm:mx-0 sm:px-0 lg:hidden">
+            <div className="mobile-filter-strip category-filter-strip lg:hidden">
               {categoryCounts.map(({ category }) => (
                 <button
                   key={category}
                   onClick={() => { setCategoryFilter(category); setPage(0); }}
-                  className={`chip whitespace-nowrap shrink-0 ${categoryFilter === category ? 'chip-active' : ''}`}
+                  className={`mobile-category-chip ${categoryFilter === category ? 'mobile-category-chip-active' : ''}`}
                 >
                   {category}
                 </button>
@@ -373,10 +373,10 @@ export default function Home() {
             </div>
 
             {categoryFilter !== 'All' && subcategoryCounts.length > 0 && (
-              <div className="flex gap-2 overflow-x-auto scrollbar-hide pb-1 -mx-4 px-4 sm:mx-0 sm:px-0 animate-fade-in">
+              <div className="mobile-filter-strip subcategory-filter-strip animate-fade-in">
                 <button
                   onClick={() => { setSubcategoryFilter('All'); setPage(0); }}
-                  className={`chip-sm whitespace-nowrap shrink-0 ${subcategoryFilter === 'All' ? 'chip-sm-active' : ''}`}
+                  className={`mobile-subcategory-chip ${subcategoryFilter === 'All' ? 'mobile-subcategory-chip-active' : ''}`}
                 >
                   All
                 </button>
@@ -387,11 +387,11 @@ export default function Home() {
                     <button
                       key={key}
                       onClick={() => { setSubcategoryFilter(key); setPage(0); }}
-                      className={`chip-sm whitespace-nowrap shrink-0 ${subcategoryFilter === key ? 'chip-sm-active' : ''}`}
+                      className={`mobile-subcategory-chip ${subcategoryFilter === key ? 'mobile-subcategory-chip-active' : ''}`}
                       title={isUncategorized ? 'No subcategory' : label}
                     >
                       {label}
-                      <span className="ml-1.5 text-[10px] opacity-60">{count}</span>
+                      <span>{count}</span>
                     </button>
                   );
                 })}
