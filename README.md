@@ -128,10 +128,11 @@ heroku config:set R2_SECRET_ACCESS_KEY='your_r2_secret_access_key'
 heroku config:set R2_BUCKET='your_r2_bucket'
 heroku config:set R2_PUBLIC_BASE_URL='https://your-public-r2-domain'
 heroku config:set CORS_ALLOWED_ORIGINS='https://your-heroku-app.herokuapp.com,https://prediction.achswap.app'
-heroku config:set VITE_WALLETCONNECT_PROJECT_ID='your_walletconnect_project_id'
+heroku config:set WALLETCONNECT_PROJECT_ID='your_walletconnect_project_id'
 ```
 
 `THE_SPORTS_DB_API_KEY` is optional; the backend falls back to the free V1 key `123`.
+`WALLETCONNECT_PROJECT_ID` is served through `/config.js` at runtime, so updating it in Heroku config vars does not require rebuilding the frontend.
 
 Deploy:
 

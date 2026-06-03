@@ -2037,21 +2037,25 @@ function ProbabilityChart({
   const firstData = filteredHistory.length > 0 ? filteredHistory[0] : null;
 
   return (
-    <div className="card overflow-hidden border border-white/[0.08] bg-gradient-to-b from-dark-900/95 via-dark-900/80 to-dark-950/95">
+    <div className="relative overflow-hidden rounded-xl border border-white/[0.08] bg-[radial-gradient(circle_at_top_right,rgba(59,130,246,0.12),transparent_30%),linear-gradient(180deg,rgba(15,23,42,0.94),rgba(2,6,23,0.97))] shadow-[0_24px_70px_rgba(0,0,0,0.30)]">
+      <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-primary-300/40 to-transparent" />
       {/* Header */}
       <div className="p-5 pb-0">
         <div className="flex items-center justify-between mb-3 gap-2">
-          <h2 className="section-header">Price History</h2>
+          <div>
+            <h2 className="section-header">Price History</h2>
+            <p className="mt-1 text-2xs text-white/45">Outcome probability movement from recorded trades</p>
+          </div>
           {/* Time range selector */}
-          <div className="flex items-center rounded-xl bg-dark-900/70 p-0.5 border border-white/[0.08] overflow-x-auto scrollbar-hide shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
+          <div className="flex items-center rounded-xl bg-black/25 p-0.5 border border-white/[0.08] overflow-x-auto scrollbar-hide shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
             {TIME_RANGES.map(range => (
               <button
                 key={range.key}
                 onClick={() => setTimeRange(range.key)}
                 className={`px-2.5 py-1 rounded-lg text-2xs font-semibold transition-all border ${
                   timeRange === range.key
-                    ? 'bg-primary-500/20 text-primary-300 border-primary-500/35 shadow-[0_0_0_1px_rgba(59,130,246,0.18)]'
-                    : 'border-transparent text-dark-500 hover:text-dark-200 hover:border-white/[0.08]'
+                    ? 'bg-primary-500/22 text-primary-200 border-primary-400/40 shadow-[0_8px_24px_rgba(59,130,246,0.16)]'
+                    : 'border-transparent text-dark-400 hover:text-dark-100 hover:border-white/[0.08] hover:bg-white/[0.03]'
                 }`}
               >
                 {range.label}
@@ -2074,14 +2078,14 @@ function ProbabilityChart({
                   onClick={() => setActiveOutcome(prev => prev === label ? null : label)}
                   className={`w-full flex items-center justify-between p-2.5 rounded-xl transition-all border ${
                     isActive
-                      ? 'border-white/[0.08] bg-dark-900/40'
-                      : 'border-transparent bg-dark-900/20 opacity-40'
+                      ? 'border-white/[0.10] bg-white/[0.045] shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]'
+                      : 'border-transparent bg-black/15 opacity-45 hover:opacity-70'
                   }`}
                 >
                   <div className="flex items-center gap-2.5">
                     <div
-                      className="w-3 h-3 rounded-full shrink-0"
-                      style={{ backgroundColor: CHART_COLORS[i % CHART_COLORS.length] }}
+                      className="w-3 h-3 rounded-full shrink-0 shadow-[0_0_14px_currentColor]"
+                      style={{ backgroundColor: CHART_COLORS[i % CHART_COLORS.length], color: CHART_COLORS[i % CHART_COLORS.length] }}
                     />
                     <span className="text-sm font-medium text-white">{label}</span>
                   </div>
@@ -2135,8 +2139,8 @@ function ProbabilityChart({
               ))}
             </defs>
             <CartesianGrid
-              strokeDasharray="4 4"
-              stroke="rgba(148,163,184,0.14)"
+              strokeDasharray="3 7"
+              stroke="rgba(148,163,184,0.12)"
               vertical
             />
             <XAxis
@@ -2169,12 +2173,12 @@ function ProbabilityChart({
             />
             <Tooltip
               cursor={{
-                stroke: 'rgba(59,130,246,0.55)',
+                stroke: 'rgba(147,197,253,0.62)',
                 strokeWidth: 1,
               }}
               contentStyle={{
                 backgroundColor: 'rgba(8, 12, 20, 0.97)',
-                border: '1px solid rgba(59,130,246,0.35)',
+                border: '1px solid rgba(147,197,253,0.32)',
                 borderRadius: '12px',
                 backdropFilter: 'blur(16px)',
                 padding: '10px 12px',
@@ -2202,12 +2206,12 @@ function ProbabilityChart({
                   fillOpacity={1}
                   dot={false}
                   activeDot={isVisible ? {
-                    r: 4.5,
+                    r: 5,
                     strokeWidth: 2,
-                    stroke: CHART_COLORS[i % CHART_COLORS.length],
-                    fill: '#0a0f19',
+                    stroke: '#07111f',
+                    fill: CHART_COLORS[i % CHART_COLORS.length],
                   } : false}
-                  animationDuration={300}
+                  animationDuration={520}
                 />
               );
             })}

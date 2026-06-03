@@ -357,15 +357,16 @@ export default function Analytics() {
               <StatCard label="Avg Daily Volume" value={formatCompactUSDC(aggregate.avgDailyVolumeWei)} suffix="USDC" icon={<MiniTrendIcon />} accent="info" />
             </div>
 
-            <div className="card p-4 md:p-6">
+            <div className="relative overflow-hidden rounded-xl border border-white/[0.08] bg-[radial-gradient(circle_at_top_left,rgba(52,211,153,0.10),transparent_34%),linear-gradient(180deg,rgba(15,23,42,0.92),rgba(2,6,23,0.96))] p-4 shadow-[0_24px_70px_rgba(0,0,0,0.28)] md:p-6">
+              <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-emerald-300/35 to-transparent" />
               <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-2 mb-4">
                 <div>
                   <h2 className="section-header mb-1">Volume Trend (7 Days)</h2>
                   <p className="text-2xs text-white/45">Area line for volume with trade bars and day-to-day momentum</p>
                 </div>
-                <div className="flex items-center gap-3 text-2xs text-white/60">
-                  <span className="inline-flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-emerald-400" />Volume</span>
-                  <span className="inline-flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-blue-400" />Trades</span>
+                <div className="flex items-center gap-2 text-2xs text-white/65">
+                  <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-300/20 bg-emerald-400/10 px-2 py-1"><span className="w-2 h-2 rounded-full bg-emerald-300 shadow-[0_0_12px_rgba(52,211,153,0.65)]" />Volume</span>
+                  <span className="inline-flex items-center gap-1.5 rounded-full border border-blue-300/20 bg-blue-400/10 px-2 py-1"><span className="w-2 h-2 rounded-full bg-blue-300 shadow-[0_0_12px_rgba(96,165,250,0.65)]" />Trades</span>
                 </div>
               </div>
 
@@ -374,32 +375,36 @@ export default function Analytics() {
                   <ComposedChart data={aggregate.chartData} margin={{ top: 12, right: 12, left: 0, bottom: 0 }}>
                     <defs>
                       <linearGradient id="volumeFill" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="0%" stopColor="rgba(52,211,153,0.38)" />
-                        <stop offset="100%" stopColor="rgba(52,211,153,0.02)" />
+                        <stop offset="0%" stopColor="rgba(52,211,153,0.46)" />
+                        <stop offset="52%" stopColor="rgba(52,211,153,0.14)" />
+                        <stop offset="100%" stopColor="rgba(52,211,153,0.01)" />
                       </linearGradient>
                     </defs>
-                    <CartesianGrid stroke="rgba(255,255,255,0.06)" vertical={false} />
+                    <CartesianGrid stroke="rgba(148,163,184,0.10)" vertical={false} />
                     <XAxis
                       dataKey="dayLabel"
                       axisLine={false}
                       tickLine={false}
-                      tick={{ fill: '#94a3b8', fontSize: 12 }}
+                      tick={{ fill: '#9ca3af', fontSize: 12 }}
+                      tickMargin={10}
                     />
                     <YAxis
                       yAxisId="volume"
                       axisLine={false}
                       tickLine={false}
-                      tick={{ fill: '#94a3b8', fontSize: 12 }}
+                      tick={{ fill: '#9ca3af', fontSize: 12 }}
                       tickFormatter={(value) => `$${formatCompact(value)}`}
                     />
                     <YAxis yAxisId="trades" hide domain={[0, (max: number) => Math.max(max, 4)]} />
                     <Tooltip
+                      cursor={{ fill: 'rgba(148,163,184,0.055)' }}
                       contentStyle={{
-                        backgroundColor: '#0b1220',
-                        border: '1px solid rgba(148,163,184,0.28)',
-                        borderRadius: '10px',
+                        backgroundColor: 'rgba(8,13,24,0.96)',
+                        border: '1px solid rgba(148,163,184,0.24)',
+                        borderRadius: '12px',
                         color: '#e2e8f0',
-                        boxShadow: '0 10px 40px rgba(0,0,0,0.5)',
+                        backdropFilter: 'blur(16px)',
+                        boxShadow: '0 18px 55px rgba(0,0,0,0.48)',
                       }}
                       formatter={(value: number, name: string) => {
                         if (name === 'volume') return [`$${formatCompact(value)}`, 'Volume'];
@@ -416,7 +421,7 @@ export default function Analytics() {
                     />
                     <Bar yAxisId="trades" dataKey="trades" barSize={16} radius={[4, 4, 0, 0]} name="trades">
                       {aggregate.chartData.map((entry, index) => (
-                        <Cell key={`trade-cell-${index}`} fill={entry.trades > 0 ? 'rgba(96,165,250,0.48)' : 'rgba(71,85,105,0.38)'} />
+                        <Cell key={`trade-cell-${index}`} fill={entry.trades > 0 ? 'rgba(96,165,250,0.58)' : 'rgba(71,85,105,0.32)'} />
                       ))}
                     </Bar>
                     <Area
@@ -427,6 +432,8 @@ export default function Analytics() {
                       strokeWidth={2.4}
                       fill="url(#volumeFill)"
                       name="volume"
+                      activeDot={{ r: 5, strokeWidth: 2, stroke: '#07111f', fill: '#34d399' }}
+                      animationDuration={520}
                     />
                   </ComposedChart>
                 </ResponsiveContainer>

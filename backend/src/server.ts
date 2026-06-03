@@ -1,6 +1,7 @@
 import 'dotenv/config';
 import express, { type Request, type Response, type NextFunction } from 'express';
 import cors, { type CorsOptions } from 'cors';
+import compression from 'compression';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -48,6 +49,7 @@ function asyncHandler(handler: ApiHandler) {
 app.disable('x-powered-by');
 app.set('trust proxy', 1);
 app.use(cors(corsOptions));
+app.use(compression());
 app.use(express.json({ limit: bodyLimit }));
 app.use(express.urlencoded({ extended: true, limit: bodyLimit }));
 
@@ -58,6 +60,16 @@ app.use('/api', (_req, res, next) => {
 
 app.get('/health', (_req, res) => {
   res.status(200).json({ ok: true, service: 'achmarket-backend' });
+});
+
+app.get('/config.js', (_req, res) => {
+  const runtimeConfig = {
+    walletConnectProjectId: process.env.VITE_WALLETCONNECT_PROJECT_ID || process.env.WALLETCONNECT_PROJECT_ID || '',
+  };
+  res
+    .type('application/javascript')
+    .setHeader('Cache-Control', 'no-store');
+  res.send(`window.__ACHMARKET_CONFIG__ = ${JSON.stringify(runtimeConfig)};`);
 });
 
 app.all('/api/chat', asyncHandler(chatHandler));
@@ -76,8 +88,17 @@ app.use('/api', (_req, res) => {
 });
 
 if (fs.existsSync(frontendIndexFile)) {
-  app.use(express.static(frontendDistDir));
+  app.use(express.static(frontendDistDir, {
+    maxAge: '1y',
+    immutable: true,
+    setHeaders(res, filePath) {
+      if (filePath.endsWith('index.html')) {
+        res.setHeader('Cache-Control', 'no-cache');
+      }
+    },
+  }));
   app.get('*', (_req, res) => {
+    res.setHeader('Cache-Control', 'no-cache');
     res.sendFile(frontendIndexFile);
   });
 } else if (process.env.NODE_ENV === 'production') {

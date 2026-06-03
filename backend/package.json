@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1026.0",
+    "compression": "^1.8.1",
     "cors": "^2.8.5",
     "dotenv": "^17.3.1",
     "ethers": "^6.13.4",
@@ -19,6 +20,7 @@
     "undici": "^7.25.0"
   },
   "devDependencies": {
+    "@types/compression": "^1.8.1",
     "@types/cors": "^2.8.17",
     "@types/express": "^4.17.21",
     "@types/node": "^22.10.2",
