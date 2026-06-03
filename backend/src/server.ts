@@ -1,6 +1,9 @@
 import 'dotenv/config';
 import express, { type Request, type Response, type NextFunction } from 'express';
 import cors, { type CorsOptions } from 'cors';
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
 
 import chatHandler from './api/chat.js';
 import liveFeedConfigHandler from './api/live-feed-config.js';
@@ -16,6 +19,9 @@ import profileAvatarHandler from './api/profile-avatar.js';
 const app = express();
 const port = Number(process.env.PORT ?? 8080);
 const bodyLimit = process.env.BODY_LIMIT ?? '15mb';
+const dirname = path.dirname(fileURLToPath(import.meta.url));
+const frontendDistDir = process.env.FRONTEND_DIST_DIR || path.resolve(dirname, '../../frontend/dist');
+const frontendIndexFile = path.join(frontendDistDir, 'index.html');
 
 const allowedOrigins = (process.env.CORS_ALLOWED_ORIGINS ?? '')
   .split(',')
@@ -68,6 +74,15 @@ app.all('/api/profile-avatar', asyncHandler(profileAvatarHandler));
 app.use('/api', (_req, res) => {
   res.status(404).json({ error: 'API route not found' });
 });
+
+if (fs.existsSync(frontendIndexFile)) {
+  app.use(express.static(frontendDistDir));
+  app.get('*', (_req, res) => {
+    res.sendFile(frontendIndexFile);
+  });
+} else if (process.env.NODE_ENV === 'production') {
+  console.warn(`Frontend build not found at ${frontendDistDir}. API routes will still run.`);
+}
 
 app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
   console.error('Unhandled backend error', err);

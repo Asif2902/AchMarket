@@ -109,6 +109,38 @@ The backend listens on `PORT` or `8080` by default and exposes:
 
 For production on a VPS, run the backend behind Nginx/Caddy and set `CORS_ALLOWED_ORIGINS` to your frontend domain. If the frontend is served from another origin, build it with `VITE_API_BASE_URL=https://your-api-domain`.
 
+### Heroku Deployment
+
+The `heroku` branch is configured for a single Heroku web dyno. Heroku builds the backend, builds the frontend, and the backend serves both `/api/*` and the React app from `frontend/dist`.
+
+Required Heroku config vars:
+
+```bash
+heroku config:set NODE_ENV=production
+heroku config:set RPC_URL=https://rpc.testnet.arc.network
+heroku config:set CHAIN_ID=5042002
+heroku config:set FACTORY_ADDRESS=0xd7b122B12caCB299249f89be7F241a47f762f283
+heroku config:set MONGO_URI='your_mongodb_uri'
+heroku config:set MONGO_DB_NAME=achmarket
+heroku config:set R2_ACCOUNT_ID='your_r2_account_id'
+heroku config:set R2_ACCESS_KEY_ID='your_r2_access_key_id'
+heroku config:set R2_SECRET_ACCESS_KEY='your_r2_secret_access_key'
+heroku config:set R2_BUCKET='your_r2_bucket'
+heroku config:set R2_PUBLIC_BASE_URL='https://your-public-r2-domain'
+heroku config:set CORS_ALLOWED_ORIGINS='https://your-heroku-app.herokuapp.com,https://prediction.achswap.app'
+heroku config:set VITE_WALLETCONNECT_PROJECT_ID='your_walletconnect_project_id'
+```
+
+`THE_SPORTS_DB_API_KEY` is optional; the backend falls back to the free V1 key `123`.
+
+Deploy:
+
+```bash
+git push heroku heroku:main
+```
+
+After adding the custom domain in Heroku, point DNS for `prediction.achswap.app` to the DNS target Heroku provides.
+
 ### Type Checking
 
 ```bash

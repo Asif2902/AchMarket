@@ -2,7 +2,13 @@
   "name": "achmarket",
   "version": "1.0.0",
   "private": true,
+  "engines": {
+    "node": "22.x",
+    "npm": "10.x"
+  },
   "scripts": {
+    "start": "npm --prefix backend run start",
+    "heroku-postbuild": "npm --prefix backend ci --include=dev && npm --prefix frontend ci --include=dev && npm --prefix backend run build && npm --prefix frontend run build",
     "compile": "npx hardhat compile",
     "deploy": "npx hardhat run scripts/deploy.js --network arc_testnet",
     "deploy:local": "npx hardhat run scripts/deploy.js --network hardhat",
