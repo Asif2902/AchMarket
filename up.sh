@@ -130,13 +130,43 @@ npm --prefix backend prune --omit=dev
 [ -f backend/dist/server.js ] || die "backend/dist/server.js missing after build"
 
 # --- pm2 ---
-log "PM2 restart achmarket ..."
-if pm2 describe achmarket &>/dev/null; then
-  pm2 restart ecosystem.config.cjs --env production --update-env
-else
-  pm2 start ecosystem.config.cjs --env production
-fi
+mkdir -p "$APP_DIR/logs"
+log "PM2 (re)start achmarket on port ${APP_PORT} ..."
+# Clean restart avoids stale interpreter args / random-port crash loops
+pm2 delete achmarket 2>/dev/null || true
+pm2 start ecosystem.config.cjs --env production --update-env
 pm2 save
+
+# --- wait for health (empty PORT= used to bind random port; we now force 8080) ---
+log "Waiting for http://127.0.0.1:${APP_PORT}/health ..."
+HEALTH_OK=0
+for i in $(seq 1 20); do
+  if curl -fsS "http://127.0.0.1:${APP_PORT}/health" >/dev/null 2>&1; then
+    HEALTH_OK=1
+    log "Health OK (attempt ${i})"
+    break
+  fi
+  # Still booting or crash-looping
+  sleep 1
+done
+
+if [ "$HEALTH_OK" -ne 1 ]; then
+  log "Health FAILED — last PM2 / log output:"
+  pm2 describe achmarket || true
+  pm2 logs achmarket --lines 60 --nostream || true
+  if [ -f "$APP_DIR/logs/achmarket-error.log" ]; then
+    echo "----- logs/achmarket-error.log -----"
+    tail -n 40 "$APP_DIR/logs/achmarket-error.log" || true
+  fi
+  if [ -f "$APP_DIR/logs/achmarket-out.log" ]; then
+    echo "----- logs/achmarket-out.log -----"
+    tail -n 40 "$APP_DIR/logs/achmarket-out.log" || true
+  fi
+  # Direct node run for clearer crash message (does not leave process running)
+  log "Trying direct node start (10s) for diagnostics..."
+  ( cd "$APP_DIR" && timeout 8 node backend/dist/server.js ) || true
+  die "achmarket not listening on ${APP_PORT}. Fix errors above, then: ./up.sh --no-pull"
+fi
 
 # --- nginx site ---
 if [ -f "$APP_DIR/nginx.conf" ]; then
@@ -195,29 +225,20 @@ if [ "$DO_SSL" -eq 1 ]; then
     sudo certbot --nginx -d "$DOMAIN" --redirect
 fi
 
-# --- health ---
-sleep 1
-log "Health checks ..."
-if curl -fsS "http://127.0.0.1:${APP_PORT}/health" >/dev/null; then
-  log "OK  http://127.0.0.1:${APP_PORT}/health"
-else
-  log "WARN local health failed — pm2 logs achmarket"
-fi
-
 if curl -fsS -H "Host: ${DOMAIN}" "http://127.0.0.1/health" >/dev/null 2>&1; then
   log "OK  nginx → app (Host: ${DOMAIN})"
+else
+  log "WARN nginx Host ${DOMAIN} health failed (DNS/SSL may still be pending)"
 fi
 
 echo ""
 echo "=============================================="
-echo "  ✓ AchMarket updated"
+echo "  ✓ AchMarket is running"
 echo "  Public:  https://${DOMAIN}"
-echo "  Local:   http://127.0.0.1:${APP_PORT}"
+echo "  Local:   http://127.0.0.1:${APP_PORT}/health"
 echo "  Logs:    pm2 logs achmarket"
+echo "           tail -f ${APP_DIR}/logs/achmarket-error.log"
 echo ""
-echo "  First time SSL (if not done):"
+echo "  SSL (once DNS points here):"
 echo "    ./up.sh --ssl"
-echo ""
-echo "  DNS required:"
-echo "    A  prediction  →  this VPS IP   (for ${DOMAIN})"
 echo "=============================================="

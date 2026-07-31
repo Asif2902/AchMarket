@@ -30,6 +30,7 @@ typechain-types/
 npm-debug.log*
 server.err
 server.log
+logs/
 **/CONTEXT.md
 
 # TypeScript

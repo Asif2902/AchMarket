@@ -1,4 +1,6 @@
-import 'dotenv/config';
+// Load .env before any API module reads process.env
+import './env-bootstrap.js';
+
 import express, { type Request, type Response, type NextFunction } from 'express';
 import cors, { type CorsOptions } from 'cors';
 import compression from 'compression';
@@ -18,9 +20,18 @@ import profileHandler from './api/profile.js';
 import profileAvatarHandler from './api/profile-avatar.js';
 
 const app = express();
-const port = Number(process.env.PORT ?? 8080);
-const bodyLimit = process.env.BODY_LIMIT ?? '15mb';
 const dirname = path.dirname(fileURLToPath(import.meta.url));
+
+/** Empty PORT= must not become listen(0) (random port) — that breaks nginx + health checks. */
+function resolvePort(): number {
+  const raw = String(process.env.PORT ?? '').trim();
+  const n = Number(raw);
+  if (Number.isFinite(n) && n > 0 && n < 65536) return Math.trunc(n);
+  return 8080;
+}
+
+const port = resolvePort();
+const bodyLimit = process.env.BODY_LIMIT ?? '15mb';
 const frontendDistDir = process.env.FRONTEND_DIST_DIR || path.resolve(dirname, '../../frontend/dist');
 const frontendIndexFile = path.join(frontendDistDir, 'index.html');
 
@@ -111,6 +122,20 @@ app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
   res.status(500).json({ error: 'Internal server error' });
 });
 
-app.listen(port, '0.0.0.0', () => {
-  console.log(`AchMarket backend listening on port ${port}`);
+process.on('uncaughtException', (err) => {
+  console.error('[achmarket] uncaughtException', err);
+  process.exit(1);
+});
+process.on('unhandledRejection', (err) => {
+  console.error('[achmarket] unhandledRejection', err);
+});
+
+const server = app.listen(port, '0.0.0.0', () => {
+  console.log(`AchMarket backend listening on 0.0.0.0:${port}`);
+  console.log(`Frontend dist: ${frontendDistDir} (exists=${fs.existsSync(frontendIndexFile)})`);
+});
+
+server.on('error', (err: NodeJS.ErrnoException) => {
+  console.error(`[achmarket] listen failed on port ${port}:`, err.message);
+  process.exit(1);
 });
