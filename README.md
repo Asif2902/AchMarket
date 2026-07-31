@@ -91,85 +91,64 @@ cd backend
 npm run dev
 ```
 
-## VPS hosting (with AchSwap on the same server)
+## VPS hosting — prediction.achswap.app
 
-AchMarket is configured for a full Node + PM2 + Nginx deploy. On a shared VPS:
+One command installs **and** updates (git pull, build, PM2, nginx).
 
-| App | Port | Example host |
-|-----|------|----------------|
-| AchSwap | `3000` | `https://yourdomain.trade` |
-| **AchMarket** | `8080` | `https://market.yourdomain.trade` |
+| App | Port | Host |
+|-----|------|------|
+| AchSwap | `3000` | your main trade domain |
+| **AchMarket** | `8080` | **`https://prediction.achswap.app`** |
 
-### 1) DNS
+### DNS (once)
 
 | Type | Name | Value |
 |------|------|--------|
-| A | `market` | your VPS IP |
+| **A** | `prediction` | your VPS IP |
 
-### 2) Clone + env
+→ `prediction.achswap.app`
+
+### First install
 
 ```bash
 cd ~
 git clone -b hoster https://github.com/Asif2902/AchMarket.git
 cd AchMarket
 cp .env.example .env
-nano .env
+nano .env   # MONGO_URI, RPC_URL, FACTORY_ADDRESS, WalletConnect, R2 if needed
+
+chmod +x up.sh
+./up.sh          # build + pm2 + nginx
+./up.sh --ssl    # HTTPS via certbot (after DNS works)
 ```
 
-Minimum runtime env:
-
-- `PORT=8080`
-- `NODE_ENV=production`
-- `RPC_URL`, `FACTORY_ADDRESS`
-- `MONGO_URI`, `MONGO_DB_NAME`
-- R2 vars if avatars/media are used
-- `VITE_WALLETCONNECT_PROJECT_ID` (optional but recommended)
-
-Leave `VITE_API_BASE_URL` empty when UI and API share `market.yourdomain.trade`.
-
-### 3) Deploy app
-
-```bash
-chmod +x deploy.sh
-./deploy.sh
-# or: npm run host
-pm2 status
-curl -s http://127.0.0.1:8080/health
-```
-
-### 4) Nginx + SSL
-
-```bash
-sudo cp ~/AchMarket/nginx.conf /etc/nginx/sites-available/achmarket
-sudo nano /etc/nginx/sites-available/achmarket
-# set: server_name market.yourdomain.trade;
-
-# If nginx errors on duplicate limit_req_zone, remove the two limit_req_zone
-# lines from this file (AchSwap config may already define zones).
-
-sudo ln -sf /etc/nginx/sites-available/achmarket /etc/nginx/sites-enabled/achmarket
-sudo nginx -t && sudo systemctl reload nginx
-sudo certbot --nginx -d market.yourdomain.trade
-```
-
-### 5) Updates later
+### Every update later
 
 ```bash
 cd ~/AchMarket
-git pull origin hoster
-./deploy.sh
-# or: npm run build:vps && pm2 restart achmarket
+./up.sh
 ```
 
-### Ops
+That is all: pulls `hoster`, rebuilds backend + frontend, restarts PM2, refreshes nginx for `prediction.achswap.app`.
 
 ```bash
+./up.sh --ssl      # also refresh SSL
+./up.sh --no-pull  # build current files only
+npm run update     # same as ./up.sh
 pm2 logs achmarket
-pm2 restart achmarket
-pm2 stop achmarket
 ```
 
-4GB RAM note: AchMarket is limited to ~400MB via PM2 (`max_memory_restart`). Keep AchSwap as a single process too.
+### Minimum `.env`
+
+- `PORT=8080` / `NODE_ENV=production`
+- `RPC_URL`, `FACTORY_ADDRESS`
+- `MONGO_URI`, `MONGO_DB_NAME`
+- `CORS_ALLOWED_ORIGINS=https://prediction.achswap.app` (auto-filled by `up.sh` if empty)
+- `VITE_WALLETCONNECT_PROJECT_ID` recommended
+- R2 vars if media/avatars are used  
+Leave `VITE_API_BASE_URL` empty (same host API).
+
+4GB RAM: AchMarket PM2 cap ~400MB; keep one instance only.
 
 The backend listens on `PORT` or `8080` by default and exposes:
 
