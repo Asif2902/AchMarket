@@ -91,6 +91,86 @@ cd backend
 npm run dev
 ```
 
+## VPS hosting (with AchSwap on the same server)
+
+AchMarket is configured for a full Node + PM2 + Nginx deploy. On a shared VPS:
+
+| App | Port | Example host |
+|-----|------|----------------|
+| AchSwap | `3000` | `https://yourdomain.trade` |
+| **AchMarket** | `8080` | `https://market.yourdomain.trade` |
+
+### 1) DNS
+
+| Type | Name | Value |
+|------|------|--------|
+| A | `market` | your VPS IP |
+
+### 2) Clone + env
+
+```bash
+cd ~
+git clone -b hoster https://github.com/Asif2902/AchMarket.git
+cd AchMarket
+cp .env.example .env
+nano .env
+```
+
+Minimum runtime env:
+
+- `PORT=8080`
+- `NODE_ENV=production`
+- `RPC_URL`, `FACTORY_ADDRESS`
+- `MONGO_URI`, `MONGO_DB_NAME`
+- R2 vars if avatars/media are used
+- `VITE_WALLETCONNECT_PROJECT_ID` (optional but recommended)
+
+Leave `VITE_API_BASE_URL` empty when UI and API share `market.yourdomain.trade`.
+
+### 3) Deploy app
+
+```bash
+chmod +x deploy.sh
+./deploy.sh
+# or: npm run host
+pm2 status
+curl -s http://127.0.0.1:8080/health
+```
+
+### 4) Nginx + SSL
+
+```bash
+sudo cp ~/AchMarket/nginx.conf /etc/nginx/sites-available/achmarket
+sudo nano /etc/nginx/sites-available/achmarket
+# set: server_name market.yourdomain.trade;
+
+# If nginx errors on duplicate limit_req_zone, remove the two limit_req_zone
+# lines from this file (AchSwap config may already define zones).
+
+sudo ln -sf /etc/nginx/sites-available/achmarket /etc/nginx/sites-enabled/achmarket
+sudo nginx -t && sudo systemctl reload nginx
+sudo certbot --nginx -d market.yourdomain.trade
+```
+
+### 5) Updates later
+
+```bash
+cd ~/AchMarket
+git pull origin hoster
+./deploy.sh
+# or: npm run build:vps && pm2 restart achmarket
+```
+
+### Ops
+
+```bash
+pm2 logs achmarket
+pm2 restart achmarket
+pm2 stop achmarket
+```
+
+4GB RAM note: AchMarket is limited to ~400MB via PM2 (`max_memory_restart`). Keep AchSwap as a single process too.
+
 The backend listens on `PORT` or `8080` by default and exposes:
 
 | Endpoint | Method | Description |

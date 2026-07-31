@@ -3,11 +3,17 @@
   "version": "1.0.0",
   "private": true,
   "engines": {
-    "node": "22.x",
-    "npm": "10.x"
+    "node": ">=20",
+    "npm": ">=10"
   },
   "scripts": {
     "start": "npm --prefix backend run start",
+    "build": "npm --prefix backend run build && npm --prefix frontend run build",
+    "build:vps": "npm --prefix backend ci --include=dev && npm --prefix frontend ci --include=dev && npm run build && npm --prefix backend prune --omit=dev",
+    "serve": "npm run build:vps && npm start",
+    "host": "npm run build:vps && npx pm2 start ecosystem.config.cjs --env production",
+    "stop": "npx pm2 stop achmarket",
+    "logs": "npx pm2 logs achmarket",
     "heroku-postbuild": "npm --prefix backend ci --include=dev && npm --prefix frontend ci --include=dev && npm --prefix backend run build && npm --prefix frontend run build && npm --prefix backend prune --omit=dev && rm -rf frontend/node_modules",
     "compile": "npx hardhat compile",
     "deploy": "npx hardhat run scripts/deploy.js --network arc_testnet",

@@ -28,6 +28,9 @@ typechain-types/
 # Logs
 *.log
 npm-debug.log*
+server.err
+server.log
+**/CONTEXT.md
 
 # TypeScript
 *.tsbuildinfo
