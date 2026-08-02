@@ -32,6 +32,8 @@ server.err
 server.log
 logs/
 **/CONTEXT.md
+# Local-only notes for humans/AI (never commit / never publish)
+PUBLIC-ORG-REPO.md
 
 # TypeScript
 *.tsbuildinfo
