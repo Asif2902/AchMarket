@@ -30,7 +30,8 @@
     "frontend:dev": "npm --prefix frontend run dev",
     "frontend:build": "npm --prefix frontend run build",
     "clean": "npx hardhat clean",
-    "size": "npx hardhat size-contracts"
+    "size": "npx hardhat size-contracts",
+    "ci": "npm run compile && npm --prefix backend run typecheck && npm --prefix backend run build && npm --prefix frontend run typecheck && npm --prefix frontend run build"
   },
   "devDependencies": {
     "@nomicfoundation/hardhat-toolbox": "^4.0.0",
