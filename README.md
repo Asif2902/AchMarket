@@ -93,12 +93,12 @@ npm run dev
 
 ## VPS hosting — prediction.achswap.app
 
-One command installs **and** updates (git pull, build, PM2, nginx).
+Uses the **shared Achswap deploy CLI** (same commands as AchSwap). Full docs: **[DEPLOY.md](./DEPLOY.md)**.
 
 | App | Port | Host |
 |-----|------|------|
-| AchSwap | `3000` | your main trade domain |
-| **AchMarket** | `8080` | **`https://prediction.achswap.app`** |
+| AchSwap | `3000` | `trade.achswap.app` |
+| **AchMarket** | `8080` | **`prediction.achswap.app`** |
 
 ### DNS (once)
 
@@ -106,49 +106,29 @@ One command installs **and** updates (git pull, build, PM2, nginx).
 |------|------|--------|
 | **A** | `prediction` | your VPS IP |
 
-→ `prediction.achswap.app`
-
-### First install
+### First install / updates
 
 ```bash
 cd ~
 git clone -b hoster https://github.com/Asif2902/AchMarket.git
 cd AchMarket
-cp .env.example .env
-nano .env   # MONGO_URI, RPC_URL, FACTORY_ADDRESS, WalletConnect, R2 if needed
+chmod +x deploy.sh up.sh scripts/deploy/*.sh scripts/deploy/lib/*.sh
 
-chmod +x up.sh
-./up.sh          # build + pm2 + nginx
-./up.sh --ssl    # HTTPS via certbot (after DNS works)
+./deploy.sh setup          # tools + .env
+nano .env                  # MONGO_URI, RPC_URL, FACTORY_ADDRESS, …
+./deploy.sh update         # pull + build + PM2 + nginx + health
+./deploy.sh ssl            # after DNS works
+./deploy.sh doctor
 ```
-
-### Every update later
 
 ```bash
-cd ~/AchMarket
-./up.sh
+./deploy.sh update              # everyday
+./deploy.sh update --ssl
+./deploy.sh update --no-pull
+./up.sh                         # same as update (compat)
 ```
 
-That is all: pulls `hoster`, rebuilds backend + frontend, restarts PM2, refreshes nginx for `prediction.achswap.app`.
-
-```bash
-./up.sh --ssl      # also refresh SSL
-./up.sh --no-pull  # build current files only
-npm run update     # same as ./up.sh
-pm2 logs achmarket
-```
-
-### Minimum `.env`
-
-- `PORT=8080` / `NODE_ENV=production`
-- `RPC_URL`, `FACTORY_ADDRESS`
-- `MONGO_URI`, `MONGO_DB_NAME`
-- `CORS_ALLOWED_ORIGINS=https://prediction.achswap.app` (auto-filled by `up.sh` if empty)
-- `VITE_WALLETCONNECT_PROJECT_ID` recommended
-- R2 vars if media/avatars are used  
-Leave `VITE_API_BASE_URL` empty (same host API).
-
-4GB RAM: AchMarket PM2 cap ~400MB; keep one instance only.
+Config: `scripts/deploy/config.sh`. Hardhat contracts: `npm run deploy` (unchanged).
 
 The backend listens on `PORT` or `8080` by default and exposes:
 
