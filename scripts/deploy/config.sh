@@ -7,8 +7,15 @@ APP_NAME="achmarket"
 APP_TITLE="AchMarket"
 DEFAULT_BRANCH="${ACHMARKET_BRANCH:-hoster}"
 DOMAIN="${ACHMARKET_DOMAIN:-prediction.achswap.app}"
-APP_PORT="${PORT:-8080}"
+# Never inherit a sibling's PORT from the calling shell
+APP_PORT="${ACHMARKET_PORT:-8080}"
 NODE_MAJOR="${NODE_MAJOR:-20}"
+# Distinct /health JSON marker used to detect both links serving this app
+HEALTH_MARKER="achmarket-backend"
+# Other apps on this VPS that we must never overwrite (pm2:port:domain:nginx_site)
+ISOLATION_SIBLINGS=(
+  "achswap:3000:trade.achswap.app:achswap"
+)
 
 # PM2
 PM2_NAME="achmarket"

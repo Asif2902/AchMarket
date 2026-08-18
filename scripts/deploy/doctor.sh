@@ -146,6 +146,82 @@ if have_cmd curl; then
   fi
 fi
 
+echo ""
+echo "${C_BOLD}Isolation${C_RESET}"
+if [[ "${ENABLE_NGINX:-true}" == "true" && -f "$NGINX_SITE_AVAILABLE" ]]; then
+  if nginx_assert_site_isolated "$NGINX_SITE_AVAILABLE" "$DOMAIN" "$APP_PORT"; then
+    doc_pass "nginx ${NGINX_SITE_NAME} → ${DOMAIN} :${APP_PORT}"
+  else
+    doc_fail "nginx ${NGINX_SITE_NAME} is cross-wired (domain/port leak)"
+  fi
+  if nginx_has_certs "$DOMAIN"; then
+    if grep -qE "listen[[:space:]]+443" "$NGINX_SITE_AVAILABLE"; then
+      doc_pass "TLS vhost present for ${DOMAIN}"
+    else
+      doc_fail "Certs exist for ${DOMAIN} but site has no listen 443 — update would leak HTTPS to a sibling"
+    fi
+  fi
+else
+  doc_warn "nginx site ${NGINX_SITE_NAME} not installed"
+fi
+
+if have_cmd pm2; then
+  actual="$(pm2_app_port "$PM2_NAME" || true)"
+  if [[ -n "${actual:-}" ]]; then
+    if [[ "$actual" == "$APP_PORT" ]]; then
+      doc_pass "PM2 ${PM2_NAME} PORT=${actual}"
+    else
+      doc_fail "PM2 ${PM2_NAME} PORT=${actual}, expected ${APP_PORT}"
+    fi
+  fi
+  owner="$(pm2_port_owner "$APP_PORT" "$PM2_NAME" || true)"
+  if [[ -n "${owner:-}" ]]; then
+    doc_fail "Port ${APP_PORT} also used by PM2 ${owner}"
+  else
+    doc_pass "Port ${APP_PORT} not shared with another PM2 app"
+  fi
+fi
+
+while IFS= read -r line; do
+  [[ -n "$line" ]] || continue
+  IFS=: read -r sib_name sib_port sib_domain sib_site <<<"$line"
+  sib_file="/etc/nginx/sites-available/${sib_site}"
+  if [[ -f "$sib_file" ]]; then
+    if grep -qE "server_name[[:space:]]+${sib_domain}[[:space:]]*;" "$sib_file"; then
+      doc_pass "Sibling ${sib_site} still owns ${sib_domain}"
+    else
+      doc_fail "Sibling ${sib_site} missing server_name ${sib_domain}"
+    fi
+    if grep -qE "server_name[[:space:]]+${DOMAIN}[[:space:]]*;" "$sib_file"; then
+      doc_fail "Sibling ${sib_site} also claims ${DOMAIN}"
+    fi
+  else
+    doc_warn "Sibling nginx site ${sib_site} not installed"
+  fi
+  if have_cmd pm2 && pm2 describe "$sib_name" >/dev/null 2>&1; then
+    sib_pm2_port="$(pm2_app_port "$sib_name" || true)"
+    if [[ -n "$sib_pm2_port" && "$sib_pm2_port" == "$APP_PORT" ]]; then
+      doc_fail "Sibling PM2 ${sib_name} shares PORT ${APP_PORT}"
+    elif [[ -n "$sib_pm2_port" ]]; then
+      doc_pass "Sibling PM2 ${sib_name} on PORT ${sib_pm2_port}"
+    fi
+  fi
+  if [[ -n "${HEALTH_MARKER:-}" && -n "$sib_domain" ]]; then
+    sib_body="$(nginx_host_body "$sib_domain" "$HEALTH_PATH" https)"
+    if [[ "$sib_body" == *"$HEALTH_MARKER"* ]]; then
+      doc_fail "https://${sib_domain} served this app (${HEALTH_MARKER}) — both links are the same site"
+    else
+      doc_pass "https://${sib_domain} is not ${APP_TITLE}"
+    fi
+  fi
+done < <(isolation_siblings)
+
+if [[ -f /etc/nginx/sites-enabled/00-isolate-default ]]; then
+  doc_pass "Catch-all default_server installed (unknown Host will not hit a sibling)"
+else
+  doc_warn "No isolate default_server — a missing 443 vhost can steal the other link"
+fi
+
 doc_summary || {
   log_err "Doctor found failures. Fix FAIL items, then re-run: ./deploy.sh doctor"
   exit 1

@@ -70,6 +70,26 @@ scripts/deploy/
 npm run deploy            # or npm run deploy:contracts
 ```
 
+## Isolation (AchMarket + AchSwap on one VPS)
+
+Updating **one** site must not change the other public link.
+
+| | AchMarket | AchSwap |
+|--|--|--|
+| Domain | `prediction.achswap.app` | `trade.achswap.app` |
+| Port | `8080` | `3000` |
+| PM2 | `achmarket` | `achswap` |
+| nginx site | `achmarket` | `achswap` |
+
+`./deploy.sh update` now:
+
+- Rewrites **only** this project's nginx file
+- Keeps existing Let's Encrypt certs on this site (no more HTTP-only overwrite)
+- Leaves the sibling vhost + PM2 process untouched
+- Fails if `https://` the other domain starts serving this app
+
+You should **not** need to redeploy both after updating one.
+
 ## Compatibility
 
 ```bash

@@ -39,6 +39,26 @@ if [[ "${ENABLE_NGINX:-true}" == "true" ]] && have_cmd nginx; then
   else
     log_warn "nginx Host ${DOMAIN} health failed (DNS/SSL may still be pending)"
   fi
+
+  if [[ -n "${HEALTH_MARKER:-}" ]]; then
+    own="$(nginx_host_body "$DOMAIN" "$HEALTH_PATH" https)"
+    if [[ "$own" == *"$HEALTH_MARKER"* ]]; then
+      log_ok "HTTPS Host ${DOMAIN} → ${HEALTH_MARKER}"
+    else
+      log_warn "HTTPS Host ${DOMAIN} did not return ${HEALTH_MARKER} (TLS may still be pending)"
+    fi
+
+    while IFS= read -r line; do
+      [[ -n "$line" ]] || continue
+      IFS=: read -r _sib_name _sib_port sib_domain _sib_site <<<"$line"
+      [[ -n "$sib_domain" ]] || continue
+      sib_body="$(nginx_host_body "$sib_domain" "$HEALTH_PATH" https)"
+      if [[ "$sib_body" == *"$HEALTH_MARKER"* ]]; then
+        die "ISOLATION LEAK: https://${sib_domain} served ${APP_TITLE} (${HEALTH_MARKER}). Both links are the same site — fix nginx, do not redeploy the sibling unless you intend to."
+      fi
+      log_ok "Isolation: Host ${sib_domain} is not ${APP_TITLE}"
+    done < <(isolation_siblings)
+  fi
 else
   not_applicable "public nginx health probe"
 fi

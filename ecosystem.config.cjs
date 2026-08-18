@@ -20,6 +20,11 @@ module.exports = {
       error_file: path.join(__dirname, "logs", "achmarket-error.log"),
       out_file: path.join(__dirname, "logs", "achmarket-out.log"),
       merge_logs: true,
+      // Both env and env_production so a start without --env still stays on 8080
+      env: {
+        NODE_ENV: "production",
+        PORT: "8080",
+      },
       env_production: {
         NODE_ENV: "production",
         PORT: "8080",

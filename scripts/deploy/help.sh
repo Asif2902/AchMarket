@@ -25,8 +25,8 @@ Commands:
             Options: --no-pull   skip git pull
                      --ssl       also run certbot after nginx
   health    Check local (and optional public) health endpoints
-  nginx     Install/refresh nginx site for ${DOMAIN}
-  ssl       Issue/renew Let's Encrypt cert for ${DOMAIN}
+  nginx     Install/refresh nginx site for ${DOMAIN} only (keeps sibling TLS)
+  ssl       Issue/renew Let's Encrypt cert for ${DOMAIN} (does not rewrite other vhosts)
   logs      Tail PM2 logs (${PM2_NAME})
   clean     Remove build caches/artifacts
   help      Show this help
